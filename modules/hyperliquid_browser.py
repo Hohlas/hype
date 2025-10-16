@@ -305,44 +305,43 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Используем только рабочий endpoint для futures торговли
+            # Используем только рабочий endpoint для spot торговли
             endpoints_to_try = [
                 f"{self.BASE_URL}/exchange"
             ]
             
-            # Попробуем основные структуры payload для futures торговли
+            # Попробуем разные структуры payload для spot торговли
             payload_variants = [
-                # Вариант 1: Futures структура (a, b, p, s, r, t) - основной
+                # Вариант 1: Прямая структура spot ордера (без nonce)
                 {
-                    "a": order_data.get("coin", "BTC-PERP"),
+                    "coin": order_data.get("coin", "BTC-SPOT"),
+                    "is_buy": order_data.get("is_buy", True),
+                    "sz": float(order_data.get("sz", "0.001")),
+                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "reduce_only": order_data.get("reduce_only", False),
+                    "order_type": {"market": {}}
+                },
+                # Вариант 2: С оберткой type/orders
+                {
+                    "type": "order",
+                    "orders": [{
+                        "coin": order_data.get("coin", "BTC-SPOT"),
+                        "is_buy": order_data.get("is_buy", True),
+                        "sz": float(order_data.get("sz", "0.001")),
+                        "limit_px": float(order_data.get("limit_px", 108000)),
+                        "reduce_only": order_data.get("reduce_only", False),
+                        "order_type": {"market": {}}
+                    }],
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 3: Futures структура для spot (a, b, p, s, r, t)
+                {
+                    "a": order_data.get("coin", "BTC-SPOT"),
                     "b": order_data.get("is_buy", True),
                     "p": str(order_data.get("limit_px", 108000)),
                     "s": str(order_data.get("sz", "0.001")),
                     "r": order_data.get("reduce_only", False),
                     "t": "Market",
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 2: Futures структура с Limit ордером
-                {
-                    "a": order_data.get("coin", "BTC-PERP"),
-                    "b": order_data.get("is_buy", True),
-                    "p": str(order_data.get("limit_px", 108000)),
-                    "s": str(order_data.get("sz", "0.001")),
-                    "r": order_data.get("reduce_only", False),
-                    "t": "Limit",
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 3: С оберткой type/orders
-                {
-                    "type": "order",
-                    "orders": [{
-                        "a": order_data.get("coin", "BTC-PERP"),
-                        "b": order_data.get("is_buy", True),
-                        "p": str(order_data.get("limit_px", 108000)),
-                        "s": str(order_data.get("sz", "0.001")),
-                        "r": order_data.get("reduce_only", False),
-                        "t": "Market"
-                    }],
                     "nonce": int(time.time() * 1000)
                 }
             ]
