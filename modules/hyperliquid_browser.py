@@ -186,11 +186,8 @@ class HyperliquidBrowser:
             # Используем spot API вместо perp API
             spot_info = await self.get_spot_account_info()
             
-            # Логируем все поля для отладки
-            self.log_message(f"🔍 DEBUG: Spot account fields:", level="DEBUG")
-            for key, value in spot_info.items():
-                if key != "balances":  # Пропускаем длинный список балансов
-                    self.log_message(f"🔍 DEBUG: {key}: {value}", level="DEBUG")
+            # Логируем только важные поля
+            # self.log_message(f"🔍 DEBUG: Spot account fields:", level="DEBUG")
             
             # Ищем USDC баланс в spot аккаунте
             balances = spot_info.get("balances", [])
