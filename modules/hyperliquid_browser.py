@@ -577,9 +577,9 @@ class HyperliquidBrowser:
                 f"{self.BASE_URL}/exchange"
             ]
             
-            # Структуры payload для futures торговли (используем action wrapper!)
+            # ПРАВИЛЬНАЯ структура payload для futures торговли согласно Perplexity
             payload_variants = [
-                # Вариант 1: С action wrapper (как для spot)
+                # Вариант 1: Market ордер с правильной структурой
                 {
                     "action": {
                         "type": "order",
@@ -588,37 +588,58 @@ class HyperliquidBrowser:
                             "b": bool(order_data.get("is_buy", True)),  # boolean
                             "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
                             "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
-                            "r": False,  # reduceOnly
-                            "t": {"market": {}}
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"market": {}}  # market ордер
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: Limit ордер с action wrapper
+                # Вариант 2: Limit ордер с правильной структурой
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": order_data.get("coin", "BTC-PERP"),
-                            "b": bool(order_data.get("is_buy", True)),
-                            "s": str(float(order_data.get("sz", "0.001"))),
-                            "p": str(float(order_data.get("limit_px", 108000))),
-                            "r": False,
-                            "t": {"limit": {"tif": "Gtc"}}
+                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
+                            "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Простая структура (старый формат)
+                # Вариант 3: Market ордер без цены (для market ордеров цена не нужна)
                 {
-                    "coin": order_data.get("coin", "BTC-PERP"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": str(float(order_data.get("sz", "0.001"))),
-                    "limit_px": str(float(order_data.get("limit_px", 108000))),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"market": {}},
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"market": {}}  # market ордер без цены
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 4: Limit ордер с IOC (Immediate Or Cancel)
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
+                            "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"limit": {"tif": "Ioc"}}  # IOC ордер
+                        }],
+                        "grouping": "na"
+                    },
                     "nonce": int(time.time() * 1000)
                 }
             ]
