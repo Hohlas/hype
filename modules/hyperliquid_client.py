@@ -80,10 +80,10 @@ class HyperliquidClient:
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
-            # Подготовка данных ордера для Hyperliquid Futures API
-            # Используем futures торговлю вместо spot
+            # Подготовка данных ордера для Hyperliquid API
+            # Используем правильную структуру payload для всех типов ордеров
             order_data = {
-                "coin": f"{token}-PERP",  # Формат для futures: СИМВОЛ-PERP
+                "coin": f"{token}-PERP",  # Используем BTC-PERP для всех типов торговли
                 "is_buy": side == "BUY",  # true для покупки, false для продажи
                 "sz": str(quantity),  # Size как строка
                 "limit_px": str(price) if price else str(token_price),  # Всегда нужен limit_px

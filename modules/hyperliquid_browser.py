@@ -302,18 +302,11 @@ class HyperliquidBrowser:
             
     async def create_order(self, order_data: dict):
         """
-        Создание ордера - используем spot торговлю с числовым asset ID
+        Создание ордера - используем единую структуру payload для всех типов торговли
         """
         try:
-            # Проверяем, это spot или futures торговля
-            coin = order_data.get("coin", "BTC-SPOT")
-            
-            if "-SPOT" in coin:
-                # Spot торговля - используем числовой asset ID
-                return await self._create_spot_order(order_data)
-            else:
-                # Futures торговля - используем обычный placeOrder
-                return await self._create_futures_order(order_data)
+            # Всегда используем futures структуру payload, но с доступными средствами
+            return await self._create_futures_order(order_data)
                 
         except Exception as e:
             self.log_message(f"Failed to create order: {e}", level="ERROR")
@@ -496,79 +489,78 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
-            # Пробуем разные варианты структуры payload для spot ордеров
+            # Используем ту же правильную структуру payload, что и для futures
+            # Форматируем числовые поля с правильной точностью
+            sz_value = float(order_data.get("sz", "0.001"))
+            sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки
+            
+            px_value = float(order_data.get("limit_px", 108000))
+            px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
+            
             payload_variants = [
-                # Вариант 1: Простая структура без action wrapper
+                # Вариант 1: Market ордер с правильной структурой
                 {
-                    "coin": f"{coin.split('-')[0]}-SPOT",  # "BTC-SPOT"
-                    "is_buy": bool(order_data.get("is_buy", True)),
-                    "sz": sz_str,
-                    "limit_px": px_str,
-                    "reduce_only": False,
-                    "order_type": {"limit": {"tif": "Gtc"}},
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": f"{coin.split('-')[0]}-SPOT",  # строка "BTC-SPOT"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"market": {}}  # market ордер
+                        }],
+                        "grouping": "na"
+                    },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: С action wrapper и числовым asset ID
+                # Вариант 2: Limit ордер с правильной структурой
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": f"{coin.split('-')[0]}-SPOT",  # строка "BTC-SPOT"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 3: Market ордер с числовым asset ID
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
                             "a": asset_id,  # ЧИСЛОВОЙ asset ID
-                            "b": bool(order_data.get("is_buy", True)),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": False,
-                            "t": {"limit": {"tif": "Gtc"}}
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"market": {}}  # market ордер
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: С action wrapper и строковым asset ID
+                # Вариант 4: Limit ордер с числовым asset ID
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",  # "BTC-SPOT"
-                            "b": bool(order_data.get("is_buy", True)),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": False,
-                            "t": {"limit": {"tif": "Gtc"}}
+                            "a": asset_id,  # ЧИСЛОВОЙ asset ID
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
+                            "r": bool(order_data.get("reduce_only", False)),  # boolean
+                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
-                },
-                # Вариант 4: Market ордер с числовым asset ID
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,
-                            "b": bool(order_data.get("is_buy", True)),
-                            "s": sz_str,
-                            "r": False,
-                            "t": {"market": {}}
-                        }],
-                        "grouping": "na"
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 5: Без nonce
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,
-                            "b": bool(order_data.get("is_buy", True)),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": False,
-                            "t": {"limit": {"tif": "Gtc"}}
-                        }],
-                        "grouping": "na"
-                    }
                 }
             ]
             
