@@ -309,12 +309,25 @@ class HyperliquidBrowser:
             }
             
             response = await self.send_request("POST", url, data=order_payload, build_signature=True)
-            result = await response.json()
             
+            # Проверяем статус ответа
             if response.status != 200:
-                raise Exception(f'Failed to create order: {result}')
-                
-            return result
+                # Пытаемся получить текст ошибки
+                try:
+                    error_text = await response.text()
+                    raise Exception(f'Failed to create order: {response.status}, message=\'{error_text}\', url=\'{url}\'')
+                except:
+                    raise Exception(f'Failed to create order: {response.status}, url=\'{url}\'')
+            
+            # Пытаемся парсить JSON
+            try:
+                result = await response.json()
+                return result
+            except Exception as json_error:
+                # Если не JSON, возвращаем текст
+                text_result = await response.text()
+                self.log_message(f"🔍 DEBUG: Non-JSON response: {text_result}", level="DEBUG")
+                return {"status": "success", "message": text_result}
             
         except Exception as e:
             logger.error(f"Failed to create order: {e}")
