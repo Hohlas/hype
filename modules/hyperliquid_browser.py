@@ -336,19 +336,83 @@ class HyperliquidBrowser:
             
             data = await response.json()
             
+            # Диагностика: покажем что получили от API
+            self.log_message(f"🔍 DEBUG: spotMeta response: {data}", level="DEBUG")
+            
             # Ищем BTC в списке universe спот пар
             symbol_base = coin.split("-")[0]  # "BTC-SPOT" -> "BTC"
+            target_pair = f"{symbol_base}/USDC"  # Ищем "BTC/USDC"
             
-            for pair in data.get("universe", []):
-                if pair["name"].startswith(symbol_base):
+            self.log_message(f"🔍 DEBUG: Looking for symbol_base: {symbol_base}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Target pair: {target_pair}", level="DEBUG")
+            
+            universe = data.get("universe", [])
+            self.log_message(f"🔍 DEBUG: Universe pairs: {universe}", level="DEBUG")
+            
+            # Сначала ищем точное совпадение "BTC/USDC"
+            for pair in universe:
+                pair_name = pair.get("name", "")
+                self.log_message(f"🔍 DEBUG: Checking pair: {pair_name} (exact match with {target_pair}? {pair_name == target_pair})", level="DEBUG")
+                if pair_name == target_pair:
                     asset_id = 10000 + pair["index"]
-                    self.log_message(f"🔍 Found {coin}: spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    self.log_message(f"🔍 Found exact match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
                     return asset_id
             
-            raise Exception(f"Spot asset not found for {coin}")
+            # Если не нашли точное совпадение, попробуем найти по началу
+            self.log_message(f"🔍 DEBUG: No exact match found, trying starts with...", level="DEBUG")
+            for pair in universe:
+                pair_name = pair.get("name", "")
+                self.log_message(f"🔍 DEBUG: Checking pair: {pair_name} (starts with {symbol_base}? {pair_name.startswith(symbol_base)})", level="DEBUG")
+                if pair_name.startswith(symbol_base):
+                    asset_id = 10000 + pair["index"]
+                    self.log_message(f"🔍 Found starts with match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    return asset_id
+            
+            # Если не нашли, попробуем найти по частичному совпадению
+            self.log_message(f"🔍 DEBUG: No starts with match found, trying partial matches...", level="DEBUG")
+            for pair in universe:
+                pair_name = pair.get("name", "")
+                if symbol_base.lower() in pair_name.lower():
+                    asset_id = 10000 + pair["index"]
+                    self.log_message(f"🔍 Found partial match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    return asset_id
+            
+            raise Exception(f"Spot asset not found for {coin}. Available pairs: {[p.get('name', '') for p in universe]}")
             
         except Exception as e:
             self.log_message(f"Failed to get spot asset ID: {e}", level="ERROR")
+            raise
+
+    async def get_spot_assets_list(self):
+        """
+        Получить полный список доступных spot активов для диагностики
+        """
+        try:
+            url = f"{self.BASE_URL}/info"
+            payload = {"type": "spotMeta"}
+            
+            response = await self.send_request("POST", url, data=payload, build_signature=False)
+            
+            if response.status != 200:
+                raise Exception(f"Failed to get spot meta: {response.status}")
+            
+            data = await response.json()
+            
+            self.log_message(f"🔍 DEBUG: Full spotMeta response: {data}", level="DEBUG")
+            
+            universe = data.get("universe", [])
+            self.log_message(f"📋 Available spot assets:", level="INFO")
+            
+            for i, pair in enumerate(universe):
+                pair_name = pair.get("name", "")
+                pair_index = pair.get("index", i)
+                asset_id = 10000 + pair_index
+                self.log_message(f"  {i+1}. {pair_name} (index: {pair_index}, asset_id: {asset_id})", level="INFO")
+            
+            return universe
+            
+        except Exception as e:
+            self.log_message(f"Failed to get spot assets list: {e}", level="ERROR")
             raise
 
     async def _create_spot_order(self, order_data: dict):
@@ -358,6 +422,10 @@ class HyperliquidBrowser:
         try:
             # Общий endpoint для всех ордеров (spot и futures)
             url = f"{self.BASE_URL}/exchange"
+            
+            # Сначала получим список всех доступных spot активов для диагностики
+            self.log_message(f"🔍 DEBUG: Getting spot assets list for diagnostics...", level="DEBUG")
+            await self.get_spot_assets_list()
             
             # Получаем числовой asset ID для spot актива
             coin = order_data.get("coin", "BTC-SPOT")
