@@ -86,9 +86,12 @@ class HyperliquidClient:
                 "coin": token,  # Asset (токен) - используем coin для spot
                 "is_buy": side == "BUY",  # Is buy order (boolean)
                 "sz": float(quantity),  # Size (количество) (number) - используем sz для spot
-                "limit_px": float(price) if price else float(token_price),  # Price (number) - используем limit_px для spot
-                "order_type": {"limit": {"tif": "Ioc"}} if order_type == "LIMIT" else {"market": {}}  # Order type
+                "order_type": "Limit" if order_type == "LIMIT" else "Market"  # Order type
             }
+            
+            # Добавляем limit_px только для limit ордеров
+            if order_type == "LIMIT":
+                order_data["limit_px"] = float(price) if price else float(token_price)
             
             # Создание ордера
             result = await self.browser.create_order(order_data)
