@@ -305,7 +305,7 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Попробуем разные endpoints для spot торговли
+            # Попробуем разные endpoints для торговли
             endpoints_to_try = [
                 f"{self.BASE_URL}/exchange",
                 f"{self.BASE_URL}/spot-exchange",
@@ -356,6 +356,16 @@ class HyperliquidBrowser:
                     "r": order_data.get("reduce_only", False),
                     "t": "Market",
                     "nonce": int(time.time() * 1000)
+                },
+                # Вариант 5: Futures торговля (BTC-PERP вместо BTC-SPOT)
+                {
+                    "a": "BTC-PERP",
+                    "b": order_data.get("is_buy", True),
+                    "p": str(order_data.get("limit_px", 108000)),
+                    "s": str(order_data.get("sz", "0.001")),
+                    "r": order_data.get("reduce_only", False),
+                    "t": "Market",
+                    "nonce": int(time.time() * 1000)
                 }
             ]
             
@@ -369,7 +379,37 @@ class HyperliquidBrowser:
                 spot_balance = account_info.get("spotBalances", [])
                 self.log_message(f"🔍 DEBUG: Spot balances: {spot_balance}", level="DEBUG")
                 
-                # Проверим, есть ли USDC баланс
+                # Попробуем получить spot данные через другой endpoint
+                try:
+                    spot_url = f"{self.BASE_URL}/info"
+                    spot_data = {"type": "spotClearinghouseState", "user": self.wallet_address}
+                    spot_response = await self.send_request("POST", spot_url, data=spot_data, build_signature=False)
+                    if spot_response.status == 200:
+                        spot_info = await spot_response.json()
+                        self.log_message(f"🔍 DEBUG: Spot clearinghouse info: {spot_info}", level="DEBUG")
+                        
+                        # Проверим балансы в spot данных
+                        if "balances" in spot_info:
+                            spot_balances = spot_info["balances"]
+                            self.log_message(f"🔍 DEBUG: Spot balances from clearinghouse: {spot_balances}", level="DEBUG")
+                            
+                            # Проверим, есть ли USDC баланс
+                            usdc_balance = None
+                            for balance in spot_balances:
+                                if balance.get("coin") == "USDC":
+                                    usdc_balance = float(balance.get("total", "0"))
+                                    break
+                            
+                            if usdc_balance is None:
+                                self.log_message("⚠️ WARNING: No USDC balance found in spot account", level="WARNING")
+                            else:
+                                self.log_message(f"🔍 DEBUG: USDC balance: {usdc_balance}", level="DEBUG")
+                    else:
+                        self.log_message(f"⚠️ WARNING: Failed to get spot clearinghouse info: {spot_response.status}", level="WARNING")
+                except Exception as spot_error:
+                    self.log_message(f"⚠️ WARNING: Failed to get spot clearinghouse info: {spot_error}", level="WARNING")
+                
+                # Проверим, есть ли USDC баланс в основном аккаунте
                 usdc_balance = None
                 for balance in spot_balance:
                     if balance.get("coin") == "USDC":
