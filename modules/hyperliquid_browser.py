@@ -134,7 +134,7 @@ class HyperliquidBrowser:
             
     async def get_account_info(self):
         """
-        Получение информации об аккаунте
+        Получение информации об аккаунте (perp торговля)
         """
         try:
             url = f"{self.BASE_URL}/info"
@@ -155,41 +155,63 @@ class HyperliquidBrowser:
             logger.error(f"Failed to get account info: {e}")
             raise
             
-    async def get_balance(self):
+    async def get_spot_account_info(self):
         """
-        Получение баланса аккаунта
+        Получение информации о spot аккаунте
         """
         try:
-            account_info = await self.get_account_info()
+            url = f"{self.BASE_URL}/info"
+            data = {
+                "type": "spotClearinghouseState",
+                "user": self.wallet_address
+            }
+            
+            response = await self.send_request("POST", url, data=data)
+            result = await response.json()
+            
+            if response.status != 200:
+                raise Exception(f'Failed to get spot account info: {result}')
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get spot account info: {e}")
+            raise
+            
+    async def get_balance(self):
+        """
+        Получение баланса spot аккаунта
+        """
+        try:
+            # Используем spot API вместо perp API
+            spot_info = await self.get_spot_account_info()
             
             # Логируем все поля для отладки
-            self.log_message(f"🔍 DEBUG: All account fields:", level="DEBUG")
-            for key, value in account_info.items():
-                if key != "assetPositions":  # Пропускаем длинный список позиций
+            self.log_message(f"🔍 DEBUG: Spot account fields:", level="DEBUG")
+            for key, value in spot_info.items():
+                if key != "balances":  # Пропускаем длинный список балансов
                     self.log_message(f"🔍 DEBUG: {key}: {value}", level="DEBUG")
             
-            # Пробуем разные поля для баланса
-            possible_balance_fields = [
-                "withdrawable",
-                "totalWalletBalance", 
-                "totalMarginBalance",
-                "availableBalance",
-                "crossWalletBalance"
-            ]
+            # Ищем USDC баланс в spot аккаунте
+            balances = spot_info.get("balances", [])
+            self.log_message(f"🔍 DEBUG: Spot balances count: {len(balances)}", level="DEBUG")
             
-            for field in possible_balance_fields:
-                if field in account_info:
-                    balance = float(account_info[field])
-                    self.log_message(f"🔍 DEBUG: {field}: ${balance:.2f}", level="DEBUG")
-                    if balance > 0:
-                        return balance
+            for balance in balances:
+                coin = balance.get("coin", "")
+                total = float(balance.get("total", 0))
+                self.log_message(f"🔍 DEBUG: Spot {coin}: {total}", level="DEBUG")
+                
+                if coin == "USDC":
+                    return total
             
-            # Если ничего не найдено, возвращаем 0
-            self.log_message(f"🔍 DEBUG: No positive balance found in any field", level="DEBUG")
+            # Если USDC не найден, показываем все доступные монеты
+            available_coins = [b.get("coin", "") for b in balances]
+            self.log_message(f"🔍 DEBUG: Available spot coins: {available_coins}", level="DEBUG")
+            
             return 0.0
             
         except Exception as e:
-            self.log_message(f"Failed to get balance: {e}", level="ERROR")
+            self.log_message(f"Failed to get spot balance: {e}", level="ERROR")
             return 0.0
             
     async def get_token_price(self, token_name: str):
