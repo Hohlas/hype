@@ -319,7 +319,7 @@ class HyperliquidBrowser:
             self.log_message(f"🔍 DEBUG: Order payload: {order_payload}", level="DEBUG")
             
             # Логируем подпись для отладки
-            signature = self._sign_message(order_payload)
+            signature = await self._sign_message(order_payload)
             self.log_message(f"🔍 DEBUG: Signature: {signature}", level="DEBUG")
             
             response = await self.send_request("POST", url, data=order_payload, build_signature=True)
