@@ -180,7 +180,7 @@ class HyperliquidClient:
             if mode == 0:
                 # Averaging Market для spot торговли
                 from modules.averaging_market import trade_averaging_market
-                return await trade_averaging_market(self, "ETH", "BUY")
+                return await trade_averaging_market(self, "BTC", "BUY")
             elif mode == 1:
                 # Futures Market (не поддерживается для spot)
                 self.browser.log_message("Futures trading not supported in spot mode", level="WARNING")
