@@ -305,12 +305,10 @@ class HyperliquidBrowser:
             url = f"{self.BASE_URL}/exchange"
             
             # Подготовка данных ордера для Hyperliquid API
-            # Попробуем другую структуру
+            # Попробуем структуру без action
             order_payload = {
-                "action": {
-                    "type": "order",
-                    "orders": [order_data]
-                },
+                "type": "order",
+                "orders": [order_data],
                 "nonce": int(time.time() * 1000)
             }
             
