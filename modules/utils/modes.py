@@ -23,9 +23,6 @@ def choose_mode() -> Mode:
     """
     modes = [
         Mode("module", 0, "Averaging Market", "Spot торговля с усреднением позиций"),
-        Mode("module", 1, "Futures Market", "Фьючерсная торговля (не поддерживается)"),
-        Mode("module", 2, "Futures Limit", "Фьючерсные лимитные ордера (не поддерживается)"),
-        Mode("module", 3, "Pair Futures Limits", "Парная торговля (не поддерживается)"),
         Mode("module", 4, "Cancel Orders", "Отмена всех ордеров"),
         Mode("module", 5, "Parse", "Парсинг данных"),
         Mode("database", 0, "Create Database", "Создание базы данных"),
@@ -77,24 +74,6 @@ def get_mode_info(mode_id: int) -> Dict[str, Any]:
             "description": "Spot торговля с усреднением позиций",
             "supported": True,
             "features": ["Усреднение позиций", "Пирамидинг", "Take Profit", "Telegram уведомления"]
-        },
-        1: {
-            "name": "Futures Market",
-            "description": "Фьючерсная торговля",
-            "supported": False,
-            "features": []
-        },
-        2: {
-            "name": "Futures Limit",
-            "description": "Фьючерсные лимитные ордера",
-            "supported": False,
-            "features": []
-        },
-        3: {
-            "name": "Pair Futures Limits",
-            "description": "Парная торговля",
-            "supported": False,
-            "features": []
         },
         4: {
             "name": "Cancel Orders",
