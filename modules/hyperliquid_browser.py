@@ -305,8 +305,13 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Используем стандартный endpoint для всех типов торговли
-            url = f"{self.BASE_URL}/exchange"
+            # Попробуем разные endpoints для spot торговли
+            endpoints_to_try = [
+                f"{self.BASE_URL}/exchange",
+                f"{self.BASE_URL}/spot-exchange", 
+                f"{self.BASE_URL}/spot/exchange",
+                f"{self.BASE_URL}/api/exchange"
+            ]
             
             # Подготовка данных ордера для Hyperliquid Spot API
             # Используем прямую структуру для spot торговли
@@ -318,28 +323,27 @@ class HyperliquidBrowser:
             # Логируем данные ордера для отладки
             self.log_message(f"🔍 DEBUG: Order payload: {order_payload}", level="DEBUG")
             
-            # Логируем подпись для отладки
-            signature = await self._sign_message(order_payload)
-            self.log_message(f"🔍 DEBUG: Signature: {signature}", level="DEBUG")
+            success = False
+            response = None
             
-            # Проверяем длину подписи (должна быть 132 символа для Ethereum)
-            if len(signature) != 132:
-                self.log_message(f"⚠️ WARNING: Signature length is {len(signature)}, expected 132", level="WARNING")
+            for url in endpoints_to_try:
+                try:
+                    self.log_message(f"🔍 DEBUG: Trying endpoint: {url}", level="DEBUG")
+                    response = await self.send_request("POST", url, data=order_payload, build_signature=True)
+                    if response.status == 200:
+                        success = True
+                        self.log_message(f"✅ SUCCESS: Endpoint {url} worked!", level="INFO")
+                        break
+                    else:
+                        self.log_message(f"❌ Endpoint {url} failed: {response.status}", level="DEBUG")
+                except Exception as e:
+                    self.log_message(f"❌ Endpoint {url} error: {e}", level="DEBUG")
             
-            # Сначала попробуем простой тест - проверим, работает ли API
-            try:
-                test_url = f"{self.BASE_URL}/info"
-                test_data = {"type": "clearinghouseState", "user": self.wallet_address}
-                test_response = await self.send_request("POST", test_url, data=test_data, build_signature=False)
-                self.log_message(f"🔍 DEBUG: Test API call status: {test_response.status}", level="DEBUG")
-            except Exception as test_error:
-                self.log_message(f"⚠️ WARNING: Test API call failed: {test_error}", level="WARNING")
-            
-            # Используем правильную структуру для spot торговли
-            response = await self.send_request("POST", url, data=order_payload, build_signature=True)
+            if not success:
+                self.log_message("❌ All endpoints failed", level="WARNING")
             
             # Проверяем статус ответа
-            if response.status != 200:
+            if response and response.status != 200:
                 # Пытаемся получить текст ошибки
                 try:
                     error_text = await response.text()
