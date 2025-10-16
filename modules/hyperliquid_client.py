@@ -80,29 +80,19 @@ class HyperliquidClient:
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
-            # Подготовка данных ордера для Hyperliquid API
-            # Используем правильную структуру согласно L1 data schemas
+            # Подготовка данных ордера для Hyperliquid Spot API
+            # Используем правильную структуру для spot торговли
             order_data = {
-                "coin": token,  # Asset (токен)
-                "side": "B" if side == "BUY" else "A",  # "B" для покупки, "A" для продажи
-                "sz": str(quantity),  # Size (количество) как строка
-                "orderType": "Limit" if order_type == "LIMIT" else "Market",  # Order type
-                "reduceOnly": False,  # Reduce only
-                "isTrigger": False,  # Not a trigger order
-                "triggerPx": "0.0",  # Trigger price
-                "triggerCondition": "N/A",  # Trigger condition
-                "tif": "Alo",  # Time in force
-                "cloid": None,  # Client order ID
-                "children": [],  # Children orders
-                "isPositionTpsl": False,  # Not position TP/SL
-                "origSz": str(quantity),  # Original size
-                "timestamp": int(time.time() * 1000),  # Timestamp
-                "oid": int(time.time() * 1000)  # Order ID
+                "coin": f"{token}-SPOT",  # Формат для spot: СИМВОЛ-SPOT
+                "is_buy": side == "BUY",  # true для покупки, false для продажи
+                "sz": str(quantity),  # Size как строка
+                "order_type": {"limit": {"tif": "Gtc"}} if order_type == "LIMIT" else {"market": {}},  # Тип ордера
+                "reduce_only": False  # Reduce only
             }
             
-            # Добавляем limitPx только для limit ордеров
+            # Добавляем limit_px только для limit ордеров
             if order_type == "LIMIT":
-                order_data["limitPx"] = str(price) if price else str(token_price)
+                order_data["limit_px"] = str(price) if price else str(token_price)
             
             # Создание ордера
             result = await self.browser.create_order(order_data)
