@@ -13,7 +13,7 @@ HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестов�
 
 # Trading Configuration
 TRADE_AMOUNTS = {
-    "percent": [15, 15],  # Процент от баланса для первого и последующих ордеров
+    "percent": [20, 20],  # Увеличено с 5% до 20% для Bitcoin
     "fixed": [100, 50],   # Фиксированные суммы в USDC
 }
 

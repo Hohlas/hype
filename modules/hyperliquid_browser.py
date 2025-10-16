@@ -194,19 +194,13 @@ class HyperliquidBrowser:
             
             # Ищем USDC баланс в spot аккаунте
             balances = spot_info.get("balances", [])
-            self.log_message(f"🔍 DEBUG: Spot balances count: {len(balances)}", level="DEBUG")
             
             for balance in balances:
                 coin = balance.get("coin", "")
                 total = float(balance.get("total", 0))
-                self.log_message(f"🔍 DEBUG: Spot {coin}: {total}", level="DEBUG")
                 
                 if coin == "USDC":
                     return total
-            
-            # Если USDC не найден, показываем все доступные монеты
-            available_coins = [b.get("coin", "") for b in balances]
-            self.log_message(f"🔍 DEBUG: Available spot coins: {available_coins}", level="DEBUG")
             
             return 0.0
             
