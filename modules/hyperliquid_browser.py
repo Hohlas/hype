@@ -162,15 +162,29 @@ class HyperliquidBrowser:
         try:
             account_info = await self.get_account_info()
             
+            # Логируем структуру для отладки
+            self.log_message(f"🔍 DEBUG: Account info structure: {list(account_info.keys())}", level="DEBUG")
+            
             # Поиск USDC баланса (основная валюта на Hyperliquid)
-            for asset in account_info.get("assetPositions", []):
-                if asset["position"]["coin"] == "USDC":
-                    return float(asset["position"]["szi"])
+            asset_positions = account_info.get("assetPositions", [])
+            self.log_message(f"🔍 DEBUG: Asset positions count: {len(asset_positions)}", level="DEBUG")
+            
+            for asset in asset_positions:
+                coin = asset["position"]["coin"]
+                szi = float(asset["position"]["szi"])
+                self.log_message(f"🔍 DEBUG: Asset {coin}: {szi}", level="DEBUG")
+                
+                if coin == "USDC":
+                    return szi
+            
+            # Если USDC не найден, показываем все доступные активы
+            available_coins = [asset["position"]["coin"] for asset in asset_positions]
+            self.log_message(f"🔍 DEBUG: Available coins: {available_coins}", level="DEBUG")
                     
             return 0.0
             
         except Exception as e:
-            logger.error(f"Failed to get balance: {e}")
+            self.log_message(f"Failed to get balance: {e}", level="ERROR")
             return 0.0
             
     async def get_token_price(self, token_name: str):
