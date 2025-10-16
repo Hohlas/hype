@@ -416,10 +416,11 @@ class HyperliquidBrowser:
                         usdc_balance = float(balance.get("total", "0"))
                         break
                 
+                # Если не нашли в основном аккаунте, используем данные из clearinghouse
                 if usdc_balance is None:
-                    self.log_message("⚠️ WARNING: No USDC balance found in spot account", level="WARNING")
+                    self.log_message("⚠️ WARNING: No USDC balance found in main account, checking clearinghouse...", level="WARNING")
                 else:
-                    self.log_message(f"🔍 DEBUG: USDC balance: {usdc_balance}", level="DEBUG")
+                    self.log_message(f"🔍 DEBUG: USDC balance from main account: {usdc_balance}", level="DEBUG")
                     
             except Exception as e:
                 self.log_message(f"⚠️ WARNING: Failed to check account info: {e}", level="WARNING")
@@ -450,11 +451,14 @@ class HyperliquidBrowser:
             if not success:
                 self.log_message("❌ All payload variants failed", level="WARNING")
                 
-                # Проверяем, есть ли USDC баланс
+                # Проверяем, есть ли USDC баланс (используем данные из clearinghouse)
                 if usdc_balance is None or usdc_balance == 0:
                     self.log_message("❌ CRITICAL: No USDC balance in spot account! You need to deposit USDC first.", level="ERROR")
                     self.log_message("💡 SOLUTION: Transfer USDC to your spot account before trading.", level="INFO")
                     raise Exception("No USDC balance in spot account")
+                else:
+                    self.log_message(f"✅ USDC balance found: {usdc_balance}, but trading still failed", level="WARNING")
+                    self.log_message("💡 This suggests the issue is with the order structure, not balance", level="INFO")
             
             # Проверяем статус ответа
             if response and response.status != 200:
