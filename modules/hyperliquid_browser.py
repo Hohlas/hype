@@ -302,18 +302,14 @@ class HyperliquidBrowser:
             
     async def create_order(self, order_data: dict):
         """
-        Создание ордера - используем общий endpoint /exchange
+        Создание ордера - временно используем только futures торговлю
         """
         try:
             # Проверяем, это spot или futures торговля
-            coin = order_data.get("coin", "BTC-SPOT")
+            coin = order_data.get("coin", "BTC-PERP")
             
-            if "-SPOT" in coin:
-                # Spot торговля - используем правильную структуру action
-                return await self._create_spot_order(order_data)
-            else:
-                # Futures торговля - используем обычный placeOrder
-                return await self._create_futures_order(order_data)
+            # Временно используем только futures торговлю (spot не работает)
+            return await self._create_futures_order(order_data)
                 
         except Exception as e:
             self.log_message(f"Failed to create order: {e}", level="ERROR")
