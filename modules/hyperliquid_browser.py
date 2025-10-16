@@ -304,8 +304,8 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/exchange"
             
-            # Подготовка данных ордера для Hyperliquid Spot API
-            # Для spot торговли используется другая структура
+            # Подготовка данных ордера для Hyperliquid API
+            # Используем структуру с action для spot торговли
             order_payload = {
                 "action": {
                     "type": "order",
