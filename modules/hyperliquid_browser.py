@@ -308,11 +308,10 @@ class HyperliquidBrowser:
             # Используем стандартный endpoint для всех типов торговли
             url = f"{self.BASE_URL}/exchange"
             
-            # Подготовка данных ордера для Hyperliquid API
-            # Используем стандартную структуру для всех типов торговли
+            # Подготовка данных ордера для Hyperliquid Spot API
+            # Используем прямую структуру для spot торговли
             order_payload = {
-                "type": "order",
-                "orders": [order_data],
+                **order_data,  # Распаковываем данные ордера напрямую
                 "nonce": int(time.time() * 1000)
             }
             
