@@ -336,7 +336,92 @@ class HyperliquidBrowser:
             except Exception as test_error:
                 self.log_message(f"⚠️ WARNING: Test API call failed: {test_error}", level="WARNING")
             
-            response = await self.send_request("POST", url, data=order_payload, build_signature=True)
+            # Попробуем три варианта структуры ордера последовательно
+            success = False
+            response = None
+            
+            # Вариант 1: Числа как строки
+            if not success:
+                try:
+                    order_payload_v1 = {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data["a"],
+                            "b": order_data["b"],
+                            "p": str(order_data["p"]),  # Строка
+                            "s": str(order_data["s"]),  # Строка
+                            "r": order_data["r"],
+                            "t": order_data["t"]
+                        }],
+                        "nonce": int(time.time() * 1000)
+                    }
+                    self.log_message(f"🔍 DEBUG: Trying Variant 1 (strings): {order_payload_v1}", level="DEBUG")
+                    response = await self.send_request("POST", url, data=order_payload_v1, build_signature=True)
+                    if response.status == 200:
+                        success = True
+                        self.log_message("✅ SUCCESS: Variant 1 (strings) worked!", level="INFO")
+                    else:
+                        self.log_message(f"❌ Variant 1 failed: {response.status}", level="DEBUG")
+                except Exception as e:
+                    self.log_message(f"❌ Variant 1 error: {e}", level="DEBUG")
+            
+            # Вариант 2: Без поля p для Market ордеров
+            if not success:
+                try:
+                    order_payload_v2 = {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data["a"],
+                            "b": order_data["b"],
+                            "s": order_data["s"],
+                            "r": order_data["r"],
+                            "t": order_data["t"]
+                        }],
+                        "nonce": int(time.time() * 1000)
+                    }
+                    # Добавляем p только для Limit ордеров
+                    if order_data["t"] == "Limit":
+                        order_payload_v2["orders"][0]["p"] = order_data["p"]
+                    
+                    self.log_message(f"🔍 DEBUG: Trying Variant 2 (no p for Market): {order_payload_v2}", level="DEBUG")
+                    response = await self.send_request("POST", url, data=order_payload_v2, build_signature=True)
+                    if response.status == 200:
+                        success = True
+                        self.log_message("✅ SUCCESS: Variant 2 (no p for Market) worked!", level="INFO")
+                    else:
+                        self.log_message(f"❌ Variant 2 failed: {response.status}", level="DEBUG")
+                except Exception as e:
+                    self.log_message(f"❌ Variant 2 error: {e}", level="DEBUG")
+            
+            # Вариант 3: Строчные буквы для t
+            if not success:
+                try:
+                    order_payload_v3 = {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data["a"],
+                            "b": order_data["b"],
+                            "p": order_data["p"],
+                            "s": order_data["s"],
+                            "r": order_data["r"],
+                            "t": order_data["t"].lower()  # Строчные буквы
+                        }],
+                        "nonce": int(time.time() * 1000)
+                    }
+                    self.log_message(f"🔍 DEBUG: Trying Variant 3 (lowercase t): {order_payload_v3}", level="DEBUG")
+                    response = await self.send_request("POST", url, data=order_payload_v3, build_signature=True)
+                    if response.status == 200:
+                        success = True
+                        self.log_message("✅ SUCCESS: Variant 3 (lowercase t) worked!", level="INFO")
+                    else:
+                        self.log_message(f"❌ Variant 3 failed: {response.status}", level="DEBUG")
+                except Exception as e:
+                    self.log_message(f"❌ Variant 3 error: {e}", level="DEBUG")
+            
+            # Если все варианты не сработали, используем оригинальный
+            if not success:
+                self.log_message("❌ All variants failed, using original payload", level="WARNING")
+                response = await self.send_request("POST", url, data=order_payload, build_signature=True)
             
             # Проверяем статус ответа
             if response.status != 200:
