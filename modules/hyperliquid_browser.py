@@ -336,47 +336,64 @@ class HyperliquidBrowser:
             
             data = await response.json()
             
-            # Диагностика: покажем что получили от API
-            self.log_message(f"🔍 DEBUG: spotMeta response: {data}", level="DEBUG")
-            
             # Ищем BTC в списке universe спот пар
             symbol_base = coin.split("-")[0]  # "BTC-SPOT" -> "BTC"
             target_pair = f"{symbol_base}/USDC"  # Ищем "BTC/USDC"
             
-            self.log_message(f"🔍 DEBUG: Looking for symbol_base: {symbol_base}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Target pair: {target_pair}", level="DEBUG")
+            self.log_message(f"🔍 Looking for {coin} -> {target_pair}", level="INFO")
             
             universe = data.get("universe", [])
-            self.log_message(f"🔍 DEBUG: Universe pairs: {universe}", level="DEBUG")
             
             # Сначала ищем точное совпадение "BTC/USDC"
             for pair in universe:
                 pair_name = pair.get("name", "")
-                self.log_message(f"🔍 DEBUG: Checking pair: {pair_name} (exact match with {target_pair}? {pair_name == target_pair})", level="DEBUG")
                 if pair_name == target_pair:
                     asset_id = 10000 + pair["index"]
-                    self.log_message(f"🔍 Found exact match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    self.log_message(f"✅ Found exact match: {pair_name} (asset_id: {asset_id})", level="INFO")
                     return asset_id
             
             # Если не нашли точное совпадение, попробуем найти по началу
-            self.log_message(f"🔍 DEBUG: No exact match found, trying starts with...", level="DEBUG")
+            self.log_message(f"⚠️ No exact match for {target_pair}, trying starts with {symbol_base}...", level="INFO")
             for pair in universe:
                 pair_name = pair.get("name", "")
-                self.log_message(f"🔍 DEBUG: Checking pair: {pair_name} (starts with {symbol_base}? {pair_name.startswith(symbol_base)})", level="DEBUG")
                 if pair_name.startswith(symbol_base):
                     asset_id = 10000 + pair["index"]
-                    self.log_message(f"🔍 Found starts with match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    self.log_message(f"✅ Found starts with match: {pair_name} (asset_id: {asset_id})", level="INFO")
                     return asset_id
             
             # Если не нашли, попробуем найти по частичному совпадению
-            self.log_message(f"🔍 DEBUG: No starts with match found, trying partial matches...", level="DEBUG")
+            self.log_message(f"⚠️ No starts with match, trying partial matches...", level="INFO")
             for pair in universe:
                 pair_name = pair.get("name", "")
                 if symbol_base.lower() in pair_name.lower():
                     asset_id = 10000 + pair["index"]
-                    self.log_message(f"🔍 Found partial match {coin}: pair={pair_name}, spot index={pair['index']}, asset_id={asset_id}", level="DEBUG")
+                    self.log_message(f"✅ Found partial match: {pair_name} (asset_id: {asset_id})", level="INFO")
                     return asset_id
             
+            # Записываем доступные пары в файл для диагностики
+            import json
+            import os
+            from datetime import datetime
+            
+            log_dir = "logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            error_file = os.path.join(log_dir, f"spot_error_{timestamp}.json")
+            
+            error_data = {
+                "coin": coin,
+                "symbol_base": symbol_base,
+                "target_pair": target_pair,
+                "available_pairs": [p.get("name", "") for p in universe],
+                "full_universe": universe
+            }
+            
+            with open(error_file, 'w', encoding='utf-8') as f:
+                json.dump(error_data, f, indent=2, ensure_ascii=False)
+            
+            self.log_message(f"❌ Spot asset not found for {coin}. Details saved to: {error_file}", level="ERROR")
             raise Exception(f"Spot asset not found for {coin}. Available pairs: {[p.get('name', '') for p in universe]}")
             
         except Exception as e:
@@ -398,16 +415,38 @@ class HyperliquidBrowser:
             
             data = await response.json()
             
-            self.log_message(f"🔍 DEBUG: Full spotMeta response: {data}", level="DEBUG")
+            # Записываем подробную диагностику в файл
+            import json
+            import os
+            from datetime import datetime
+            
+            # Создаем папку для логов если её нет
+            log_dir = "logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            
+            # Имя файла с временной меткой
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(log_dir, f"spot_assets_{timestamp}.json")
+            
+            # Записываем полный ответ API в файл
+            with open(log_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            self.log_message(f"📋 Spot assets data saved to: {log_file}", level="INFO")
             
             universe = data.get("universe", [])
-            self.log_message(f"📋 Available spot assets:", level="INFO")
+            self.log_message(f"📋 Found {len(universe)} spot assets", level="INFO")
             
-            for i, pair in enumerate(universe):
+            # Показываем только первые 5 активов в консоли
+            for i, pair in enumerate(universe[:5]):
                 pair_name = pair.get("name", "")
                 pair_index = pair.get("index", i)
                 asset_id = 10000 + pair_index
                 self.log_message(f"  {i+1}. {pair_name} (index: {pair_index}, asset_id: {asset_id})", level="INFO")
+            
+            if len(universe) > 5:
+                self.log_message(f"  ... and {len(universe) - 5} more (see {log_file})", level="INFO")
             
             return universe
             
@@ -442,7 +481,7 @@ class HyperliquidBrowser:
             # ПРАВИЛЬНАЯ структура для spot ордера с числовым asset ID
             spot_payload = {
                 "action": {
-                    "type": "order",
+                "type": "order",
                     "orders": [{
                         "a": asset_id,  # ЧИСЛОВОЙ asset ID (например, 10002)
                         "b": bool(order_data.get("is_buy", True)),  # boolean
