@@ -302,7 +302,8 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            url = f"{self.BASE_URL}/exchange"
+            # Для spot торговли используем специальный endpoint
+            url = f"{self.BASE_URL}/spot-exchange"
             
             # Подготовка данных ордера для Hyperliquid API
             # Используем структуру с action для spot торговли
@@ -353,7 +354,8 @@ class HyperliquidBrowser:
         Отмена ордера
         """
         try:
-            url = f"{self.BASE_URL}/exchange"
+            # Для spot торговли используем специальный endpoint
+            url = f"{self.BASE_URL}/spot-exchange"
             
             cancel_payload = {
                 "action": {

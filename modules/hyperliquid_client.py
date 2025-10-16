@@ -56,7 +56,7 @@ class HyperliquidClient:
             min_qty = 0.001  # Минимум 0.001 токена
             
             # Минимальная номинальная стоимость в USDC
-            min_notional = 5.0  # Минимум $5 USDC
+            min_notional = 10.0  # Минимум $10 USDC для spot торговли
             
             return min_qty, min_notional
             
