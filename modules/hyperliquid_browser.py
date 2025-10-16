@@ -442,6 +442,40 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to get spot assets list: {e}", level="ERROR")
             raise
 
+    async def transfer_between_spot_and_perp(self, amount: float, to_perp: bool = True):
+        """
+        Перевод средств между spot и futures аккаунтами
+        """
+        try:
+            url = f"{self.BASE_URL}/exchange"
+            
+            # Структура для перевода средств
+            transfer_payload = {
+                "action": {
+                    "type": "transferBetweenSpotAndPerp",
+                    "amount": str(amount),
+                    "toPerp": to_perp
+                },
+                "nonce": int(time.time() * 1000)
+            }
+            
+            self.log_message(f"🔄 Transferring ${amount} {'to futures' if to_perp else 'to spot'}...", level="INFO")
+            self.log_message(f"🔍 DEBUG: Transfer payload: {transfer_payload}", level="DEBUG")
+            
+            response = await self.send_request("POST", url, data=transfer_payload, build_signature=True)
+            
+            if response.status != 200:
+                error_text = await response.text()
+                raise Exception(f"Transfer failed: {response.status}, {error_text}")
+            
+            result = await response.json()
+            self.log_message(f"✅ Transfer successful: {result}", level="INFO")
+            return result
+            
+        except Exception as e:
+            self.log_message(f"Failed to transfer between spot and perp: {e}", level="ERROR")
+            raise
+
     async def _create_spot_order(self, order_data: dict):
         """
         Создание spot ордера через общий endpoint /exchange с числовым asset ID.
@@ -578,6 +612,13 @@ class HyperliquidBrowser:
             ]
             
             # ПРАВИЛЬНАЯ структура payload для futures торговли согласно Perplexity
+            # Форматируем числовые поля с правильной точностью
+            sz_value = float(order_data.get("sz", "0.001"))
+            sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки для BTC-PERP
+            
+            px_value = float(order_data.get("limit_px", 108000))
+            px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
+            
             payload_variants = [
                 # Вариант 1: Market ордер с правильной структурой
                 {
@@ -586,8 +627,8 @@ class HyperliquidBrowser:
                         "orders": [{
                             "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
                             "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
-                            "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
                             "r": bool(order_data.get("reduce_only", False)),  # boolean
                             "t": {"market": {}}  # market ордер
                         }],
@@ -602,8 +643,8 @@ class HyperliquidBrowser:
                         "orders": [{
                             "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
                             "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
-                            "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
                             "r": bool(order_data.get("reduce_only", False)),  # boolean
                             "t": {"limit": {"tif": "Gtc"}}  # limit ордер
                         }],
@@ -611,16 +652,17 @@ class HyperliquidBrowser:
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Market ордер без цены (для market ордеров цена не нужна)
+                # Вариант 3: Market ордер с ценой (для market ордеров цена тоже нужна!)
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
                             "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
                             "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью (нужна даже для market!)
                             "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"market": {}}  # market ордер без цены
+                            "t": {"market": {}}  # market ордер с ценой
                         }],
                         "grouping": "na"
                     },
@@ -633,8 +675,8 @@ class HyperliquidBrowser:
                         "orders": [{
                             "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
                             "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": str(float(order_data.get("sz", "0.001"))),  # строка размера
-                            "p": str(float(order_data.get("limit_px", 108000))),  # строка цены
+                            "s": sz_str,  # строка размера с правильной точностью
+                            "p": px_str,  # строка цены с правильной точностью
                             "r": bool(order_data.get("reduce_only", False)),  # boolean
                             "t": {"limit": {"tif": "Ioc"}}  # IOC ордер
                         }],
@@ -648,6 +690,22 @@ class HyperliquidBrowser:
             usdc_balance = None  # Инициализируем переменную
             try:
                 self.log_message("🔍 DEBUG: Checking account balance and permissions...", level="DEBUG")
+                
+                # Проверим, есть ли средства на futures аккаунте
+                account_info = await self.get_account_info()
+                account_value = float(account_info.get('marginSummary', {}).get('accountValue', '0.0'))
+                
+                if account_value == 0.0:
+                    self.log_message("⚠️ WARNING: No funds on futures account. Trying to transfer USDC from spot...", level="WARNING")
+                    
+                    # Попробуем перевести USDC с spot на futures
+                    try:
+                        transfer_result = await self.transfer_between_spot_and_perp(50.0, True)  # Переводим $50 на futures
+                        self.log_message(f"✅ Transfer result: {transfer_result}", level="INFO")
+                    except Exception as e:
+                        self.log_message(f"❌ Transfer failed: {e}", level="ERROR")
+                        self.log_message("💡 SOLUTION: You need to deposit USDC to your futures account or transfer from spot", level="INFO")
+                        raise Exception("No funds on futures account and transfer failed")
                 account_info = await self.get_account_info()
                 self.log_message(f"🔍 DEBUG: Account info: {account_info}", level="DEBUG")
                 
