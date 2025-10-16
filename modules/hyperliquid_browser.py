@@ -423,27 +423,37 @@ class HyperliquidBrowser:
                 f"{self.BASE_URL}/exchange"
             ]
             
-            # Структуры payload для futures торговли (на основе SDK)
+            # Структуры payload для futures торговли (ВСЕ числовые поля как СТРОКИ!)
             payload_variants = [
-                # Вариант 1: Официальный SDK формат
+                # Вариант 1: Официальный SDK формат (строки)
                 {
                     "coin": order_data.get("coin", "BTC-PERP"),
                     "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "sz": str(float(order_data.get("sz", "0.001"))),  # СТРОКА
+                    "limit_px": str(float(order_data.get("limit_px", 108000))),  # СТРОКА
                     "reduce_only": order_data.get("reduce_only", False),
                     "order_type": {"market": {}},
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: С cloid
+                # Вариант 2: С cloid (строки)
                 {
                     "coin": order_data.get("coin", "BTC-PERP"),
                     "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "sz": str(float(order_data.get("sz", "0.001"))),  # СТРОКА
+                    "limit_px": str(float(order_data.get("limit_px", 108000))),  # СТРОКА
                     "reduce_only": order_data.get("reduce_only", False),
                     "order_type": {"market": {}},
                     "cloid": f"0x{int(time.time() * 1000):x}",
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 3: Limit ордер (строки)
+                {
+                    "coin": order_data.get("coin", "BTC-PERP"),
+                    "is_buy": order_data.get("is_buy", True),
+                    "sz": str(float(order_data.get("sz", "0.001"))),  # СТРОКА
+                    "limit_px": str(float(order_data.get("limit_px", 108000))),  # СТРОКА
+                    "reduce_only": order_data.get("reduce_only", False),
+                    "order_type": {"limit": {"tif": "Gtc"}},
                 "nonce": int(time.time() * 1000)
             }
             ]
