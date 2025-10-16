@@ -322,11 +322,11 @@ class HyperliquidBrowser:
 
     async def _create_spot_order(self, order_data: dict):
         """
-        Создание spot ордера через /spot/placeOrder endpoint.
+        Создание spot ордера через /exchange/spot/placeOrder endpoint.
         """
         try:
-            # Правильный endpoint для spot-ордера
-            url = f"{self.BASE_URL}/spot/placeOrder"
+            # Правильный endpoint для spot ордеров (из Perplexity)
+            url = f"{self.BASE_URL}/exchange/spot/placeOrder"
             
             # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
