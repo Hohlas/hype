@@ -100,10 +100,10 @@ class HyperliquidBrowser:
             if method == "GET":
                 response = await self.session.get(url, params=params, headers=headers)
             elif method == "POST":
-                # Для Hyperliquid API используем data вместо json
+                # Для Hyperliquid API используем json вместо data
                 if build_signature:
                     headers["Content-Type"] = "application/json"
-                    response = await self.session.post(url, data=json.dumps(data), params=params, headers=headers)
+                    response = await self.session.post(url, json=data, params=params, headers=headers)
                 else:
                     response = await self.session.post(url, json=data, params=params, headers=headers)
             elif method == "PUT":
@@ -305,14 +305,13 @@ class HyperliquidBrowser:
             url = f"{self.BASE_URL}/exchange"
             
             # Подготовка данных ордера для Hyperliquid API
-            # Правильная структура согласно документации
+            # Попробуем другую структуру
             order_payload = {
                 "action": {
                     "type": "order",
                     "orders": [order_data]
                 },
-                "nonce": int(time.time() * 1000),
-                "vaultAddress": None
+                "nonce": int(time.time() * 1000)
             }
             
             # Логируем данные ордера для отладки
