@@ -188,16 +188,33 @@ class HyperliquidBrowser:
             
             if response.status != 200:
                 raise Exception(f'Failed to get token price: {result}')
-                
-            # Поиск цены токена
-            price_key = f"{token_name}USD"
-            if price_key in result:
-                return Decimal(str(result[price_key]))
-            else:
-                raise Exception(f'Token {token_name} not found in price data')
+            
+            # Логируем структуру ответа для отладки
+            self.log_message(f"🔍 DEBUG: Price data keys: {list(result.keys())}", level="DEBUG")
+            
+            # Пробуем разные варианты названий токенов
+            possible_keys = [
+                f"{token_name}USD",
+                f"{token_name}USDT", 
+                f"{token_name}",
+                token_name.upper(),
+                token_name.lower()
+            ]
+            
+            for key in possible_keys:
+                if key in result:
+                    price = Decimal(str(result[key]))
+                    self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
+                    return price
+            
+            # Если не нашли, показываем доступные токены
+            available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key]
+            self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens}", level="DEBUG")
+            
+            raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens}')
                 
         except Exception as e:
-            logger.error(f"Failed to get token price: {e}")
+            self.log_message(f"Failed to get token price: {e}", level="ERROR")
             raise
             
     async def get_account_positions(self):
