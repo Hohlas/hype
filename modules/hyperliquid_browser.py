@@ -92,9 +92,12 @@ class HyperliquidBrowser:
             headers = {
                 'Authorization': f'Bearer {signature}',
                 'X-Wallet-Address': self.wallet_address,
+                'Content-Type': 'application/json',
             }
         else:
-            headers = {}
+            headers = {
+                'Content-Type': 'application/json',
+            }
             
         try:
             if method == "GET":
@@ -319,6 +322,19 @@ class HyperliquidBrowser:
             # Логируем подпись для отладки
             signature = await self._sign_message(order_payload)
             self.log_message(f"🔍 DEBUG: Signature: {signature}", level="DEBUG")
+            
+            # Проверяем длину подписи (должна быть 132 символа для Ethereum)
+            if len(signature) != 132:
+                self.log_message(f"⚠️ WARNING: Signature length is {len(signature)}, expected 132", level="WARNING")
+            
+            # Сначала попробуем простой тест - проверим, работает ли API
+            try:
+                test_url = f"{self.BASE_URL}/info"
+                test_data = {"type": "clearinghouseState", "user": self.wallet_address}
+                test_response = await self.send_request("POST", test_url, data=test_data, build_signature=False)
+                self.log_message(f"🔍 DEBUG: Test API call status: {test_response.status}", level="DEBUG")
+            except Exception as test_error:
+                self.log_message(f"⚠️ WARNING: Test API call failed: {test_error}", level="WARNING")
             
             response = await self.send_request("POST", url, data=order_payload, build_signature=True)
             
