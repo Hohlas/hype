@@ -319,88 +319,42 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to create order: {e}", level="ERROR")
             raise
     
-    async def _get_spot_asset_index(self, coin_symbol: str) -> int:
-        """
-        Получить индекс спот актива из метаданных.
-        BTC-SPOT -> находим BTC в spotMeta и возвращаем его index.
-        """
-        try:
-            url = f"{self.BASE_URL}/info"
-            payload = {"type": "spotMeta"}
-            
-            response = await self.send_request("POST", url, data=payload, build_signature=False)
-            
-            if response.status != 200:
-                raise Exception(f"Failed to get spot meta: {response.status}")
-            
-            data = await response.json()
-            
-            # Ищем BTC в списке universe спот пар
-            # coin_symbol будет "BTC-SPOT", нужно найти пару вида "BTC/USDC"
-            symbol_base = coin_symbol.replace("-SPOT", "")
-            
-            for pair in data.get("universe", []):
-                # pair["name"] может быть "BTC/USDC", "@2" и т.д.
-                if pair["name"].startswith(symbol_base):
-                    spot_index = pair["index"]
-                    self.log_message(f"🔍 Found {coin_symbol}: spot index={spot_index}, asset={10000 + spot_index}", level="DEBUG")
-                    return spot_index
-            
-            raise Exception(f"Spot pair for {coin_symbol} not found in metadata")
-            
-        except Exception as e:
-            self.log_message(f"Failed to get spot asset index: {e}", level="ERROR")
-            raise
 
     async def _create_spot_order(self, order_data: dict):
         """
-        Создание spot ордера через правильный формат с asset index.
-        BTC-SPOT требует asset = 10000 + index из spotMeta.
+        Создание spot ордера через /spot/placeOrder endpoint.
         """
         try:
-            url = f"{self.BASE_URL}/exchange"
+            # Правильный endpoint для spot-ордера
+            url = f"{self.BASE_URL}/spot/placeOrder"
             
-            # Получаем индекс спот актива
-            coin = order_data.get("coin", "BTC-SPOT")
-            spot_index = await self._get_spot_asset_index(coin)
-            asset_id = 10000 + spot_index  # Формула для спот активов
-            
-            # Форматируем размер до нужной точности
+            # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = f"{sz_value:.5f}"  # BTC требует 5 знаков
+            sz_str = f"{sz_value:.5f}"  # строка, напр. "0.00116"
             
-            # Форматируем цену
+            # Форматируем цену до 2 знаков после запятой
             px_value = float(order_data.get("limit_px", 108000))
-            px_str = f"{px_value:.1f}"  # Цена с 1 знаком после запятой
+            px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
-            # ПРАВИЛЬНАЯ структура для Hyperliquid API
-            payload = {
-                "action": {
-                    "type": "order",
-                    "orders": [{
-                        "a": asset_id,              # ЧИСЛОВОЙ индекс: 10000 + spot_index
-                        "b": bool(order_data.get("is_buy", True)),  # boolean
-                        "p": px_str,                # строка с ценой
-                        "s": sz_str,                # строка с размером
-                        "r": False,                 # reduceOnly
-                        "t": {
-                            "limit": {
-                                "tif": "Gtc"
-                            }
-                        }
-                    }],
-                    "grouping": "na"
+            # Правильная структура для spot ордера
+            spot_payload = {
+                "coin": order_data.get("coin", "BTC-SPOT"),
+                "is_buy": bool(order_data.get("is_buy", True)),
+                "sz": sz_str,
+                "limit_px": px_str,
+                "order_type": {
+                    "limit": {"tif": "Gtc"}
                 },
-                "nonce": int(time.time() * 1000)
+                "reduce_only": False
             }
             
-            self.log_message(f"🔍 DEBUG: Spot order payload: {payload}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Spot payload: {spot_payload}", level="DEBUG")
             
             # Отправка запроса с подписью
             response = await self.send_request(
                 method="POST",
                 url=url,
-                data=payload,
+                data=spot_payload,
                 build_signature=True
             )
             
