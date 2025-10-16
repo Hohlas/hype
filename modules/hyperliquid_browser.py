@@ -305,43 +305,83 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Используем только рабочий endpoint для spot торговли
+            # Проверяем, это spot или futures торговля
+            coin = order_data.get("coin", "BTC-SPOT")
+            
+            if "-SPOT" in coin:
+                # Spot торговля - используем spotTransfer
+                return await self._create_spot_order(order_data)
+            else:
+                # Futures торговля - используем обычный placeOrder
+                return await self._create_futures_order(order_data)
+                
+        except Exception as e:
+            self.log_message(f"Failed to create order: {e}", level="ERROR")
+            raise
+    
+    async def _create_spot_order(self, order_data: dict):
+        """
+        Создание spot ордера через spotTransfer
+        """
+        try:
+            # Используем spotTransfer для spot торговли
+            url = f"{self.BASE_URL}/exchange"
+            
+            # Структура для spotTransfer (на основе примера из SDK)
+            spot_payload = {
+                "destination": "",  # Пустая строка для собственного аккаунта
+                "token": order_data.get("coin", "BTC-SPOT"),
+                "amount": str(order_data.get("sz", "0.001")),
+                "nonce": int(time.time() * 1000)
+            }
+            
+            self.log_message(f"🔍 DEBUG: Spot transfer payload: {spot_payload}", level="DEBUG")
+            
+            # Отправляем spot transfer
+            response = await self.send_request("POST", url, data=spot_payload, build_signature=True)
+            
+            if response.status != 200:
+                error_text = await response.text()
+                raise Exception(f'Failed to create spot order: {response.status}, message=\'{error_text}\'')
+            
+            result = await response.json()
+            return result
+            
+        except Exception as e:
+            self.log_message(f"Failed to create spot order: {e}", level="ERROR")
+            raise
+    
+    async def _create_futures_order(self, order_data: dict):
+        """
+        Создание futures ордера через placeOrder
+        """
+        try:
+            # Используем только рабочий endpoint для futures торговли
             endpoints_to_try = [
                 f"{self.BASE_URL}/exchange"
             ]
             
-            # Попробуем разные структуры payload для spot торговли
+            # Структуры payload для futures торговли (на основе SDK)
             payload_variants = [
-                # Вариант 1: Прямая структура spot ордера (без nonce)
+                # Вариант 1: Официальный SDK формат
                 {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
+                    "coin": order_data.get("coin", "BTC-PERP"),
                     "is_buy": order_data.get("is_buy", True),
                     "sz": float(order_data.get("sz", "0.001")),
                     "limit_px": float(order_data.get("limit_px", 108000)),
                     "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"market": {}}
-                },
-                # Вариант 2: С оберткой type/orders
-                {
-                    "type": "order",
-                    "orders": [{
-                        "coin": order_data.get("coin", "BTC-SPOT"),
-                        "is_buy": order_data.get("is_buy", True),
-                        "sz": float(order_data.get("sz", "0.001")),
-                        "limit_px": float(order_data.get("limit_px", 108000)),
-                        "reduce_only": order_data.get("reduce_only", False),
-                        "order_type": {"market": {}}
-                    }],
+                    "order_type": {"market": {}},
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Futures структура для spot (a, b, p, s, r, t)
+                # Вариант 2: С cloid
                 {
-                    "a": order_data.get("coin", "BTC-SPOT"),
-                    "b": order_data.get("is_buy", True),
-                    "p": str(order_data.get("limit_px", 108000)),
-                    "s": str(order_data.get("sz", "0.001")),
-                    "r": order_data.get("reduce_only", False),
-                    "t": "Market",
+                    "coin": order_data.get("coin", "BTC-PERP"),
+                    "is_buy": order_data.get("is_buy", True),
+                    "sz": float(order_data.get("sz", "0.001")),
+                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "reduce_only": order_data.get("reduce_only", False),
+                    "order_type": {"market": {}},
+                    "cloid": f"0x{int(time.time() * 1000):x}",
                     "nonce": int(time.time() * 1000)
                 }
             ]
