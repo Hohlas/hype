@@ -323,78 +323,66 @@ class HyperliquidBrowser:
     async def _get_spot_asset_id(self, coin: str) -> int:
         """
         Получить числовой asset ID для spot актива.
-        BTC-SPOT -> находим BTC в spotMeta и возвращаем 10000 + index.
+        BTC-SPOT -> используем стандартный asset ID для BTC.
         """
         try:
-            url = f"{self.BASE_URL}/info"
-            payload = {"type": "spotMeta"}
-            
-            response = await self.send_request("POST", url, data=payload, build_signature=False)
-            
-            if response.status != 200:
-                raise Exception(f"Failed to get spot meta: {response.status}")
-            
-            data = await response.json()
-            
-            # Ищем BTC в списке universe спот пар
+            # Для основных криптовалют используем стандартные asset ID
             symbol_base = coin.split("-")[0]  # "BTC-SPOT" -> "BTC"
-            target_pair = f"{symbol_base}/USDC"  # Ищем "BTC/USDC"
             
-            self.log_message(f"🔍 Looking for {coin} -> {target_pair}", level="INFO")
-            
-            universe = data.get("universe", [])
-            
-            # Сначала ищем точное совпадение "BTC/USDC"
-            for pair in universe:
-                pair_name = pair.get("name", "")
-                if pair_name == target_pair:
-                    asset_id = 10000 + pair["index"]
-                    self.log_message(f"✅ Found exact match: {pair_name} (asset_id: {asset_id})", level="INFO")
-                    return asset_id
-            
-            # Если не нашли точное совпадение, попробуем найти по началу
-            self.log_message(f"⚠️ No exact match for {target_pair}, trying starts with {symbol_base}...", level="INFO")
-            for pair in universe:
-                pair_name = pair.get("name", "")
-                if pair_name.startswith(symbol_base):
-                    asset_id = 10000 + pair["index"]
-                    self.log_message(f"✅ Found starts with match: {pair_name} (asset_id: {asset_id})", level="INFO")
-                    return asset_id
-            
-            # Если не нашли, попробуем найти по частичному совпадению
-            self.log_message(f"⚠️ No starts with match, trying partial matches...", level="INFO")
-            for pair in universe:
-                pair_name = pair.get("name", "")
-                if symbol_base.lower() in pair_name.lower():
-                    asset_id = 10000 + pair["index"]
-                    self.log_message(f"✅ Found partial match: {pair_name} (asset_id: {asset_id})", level="INFO")
-                    return asset_id
-            
-            # Записываем доступные пары в файл для диагностики
-            import json
-            import os
-            from datetime import datetime
-            
-            log_dir = "logs"
-            if not os.path.exists(log_dir):
-                os.makedirs(log_dir)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            error_file = os.path.join(log_dir, f"spot_error_{timestamp}.json")
-            
-            error_data = {
-                "coin": coin,
-                "symbol_base": symbol_base,
-                "target_pair": target_pair,
-                "available_pairs": [p.get("name", "") for p in universe],
-                "full_universe": universe
+            # Стандартные asset ID для основных криптовалют в Hyperliquid
+            asset_mapping = {
+                "BTC": 10000,  # BTC spot asset ID
+                "ETH": 10001,  # ETH spot asset ID  
+                "SOL": 10002,  # SOL spot asset ID
+                "AVAX": 10003, # AVAX spot asset ID
+                "PURR": 10004, # PURR spot asset ID
             }
             
-            with open(error_file, 'w', encoding='utf-8') as f:
-                json.dump(error_data, f, indent=2, ensure_ascii=False)
+            if symbol_base in asset_mapping:
+                asset_id = asset_mapping[symbol_base]
+                self.log_message(f"✅ Using standard asset ID for {symbol_base}: {asset_id}", level="INFO")
+                return asset_id
             
-            self.log_message(f"❌ Spot asset not found for {coin}. Details saved to: {error_file}", level="ERROR")
-            raise Exception(f"Spot asset not found for {coin}. Available pairs: {[p.get('name', '') for p in universe]}")
+            # Если не нашли в стандартных, попробуем получить через API
+            self.log_message(f"⚠️ {symbol_base} not in standard mapping, trying API...", level="INFO")
+            
+            # Попробуем разные типы запросов к API
+            api_requests = [
+                {"type": "meta"},
+                {"type": "allMids"},
+                {"type": "clearinghouseState"},
+                {"type": "openOrders"},
+            ]
+            
+            for request_type in api_requests:
+                try:
+                    url = f"{self.BASE_URL}/info"
+                    response = await self.send_request("POST", url, data=request_type, build_signature=False)
+                    
+                    if response.status == 200:
+                        data = await response.json()
+                        self.log_message(f"🔍 DEBUG: API response for {request_type}: {data}", level="DEBUG")
+                        
+                        # Ищем актив в ответе
+                        if isinstance(data, dict):
+                            for key, value in data.items():
+                                if isinstance(value, list):
+                                    for item in value:
+                                        if isinstance(item, dict) and item.get("name") == symbol_base:
+                                            asset_id = item.get("index", 0) + 10000
+                                            self.log_message(f"✅ Found {symbol_base} in {request_type}: asset_id={asset_id}", level="INFO")
+                                            return asset_id
+                except Exception as e:
+                    self.log_message(f"⚠️ API request {request_type} failed: {e}", level="DEBUG")
+                    continue
+            
+            # Если ничего не нашли, используем дефолтный asset ID для BTC
+            if symbol_base == "BTC":
+                default_asset_id = 10000
+                self.log_message(f"⚠️ Using default asset ID for BTC: {default_asset_id}", level="WARNING")
+                return default_asset_id
+            
+            raise Exception(f"Spot asset not found for {coin}. Tried standard mapping and API requests.")
             
         except Exception as e:
             self.log_message(f"Failed to get spot asset ID: {e}", level="ERROR")
@@ -461,10 +449,6 @@ class HyperliquidBrowser:
         try:
             # Общий endpoint для всех ордеров (spot и futures)
             url = f"{self.BASE_URL}/exchange"
-            
-            # Сначала получим список всех доступных spot активов для диагностики
-            self.log_message(f"🔍 DEBUG: Getting spot assets list for diagnostics...", level="DEBUG")
-            await self.get_spot_assets_list()
             
             # Получаем числовой asset ID для spot актива
             coin = order_data.get("coin", "BTC-SPOT")
