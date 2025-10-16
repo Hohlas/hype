@@ -5,7 +5,8 @@ from time import sleep
 import asyncio
 
 from modules.retry import DataBaseError
-from modules.utils import choose_mode, async_sleep, send_warning_notification
+from modules.utils import async_sleep, send_warning_notification
+from modules.utils.modes import choose_mode
 from modules import *
 import settings
 
