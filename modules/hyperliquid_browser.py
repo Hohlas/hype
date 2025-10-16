@@ -321,90 +321,53 @@ class HyperliquidBrowser:
     
     async def _create_spot_order(self, order_data: dict):
         """
-        Создание spot ордера через placeOrder (на основе официального примера)
-        BTC-SPOT требует ровно 5 знаков после запятой для sz
+        Создание spot ордера через placeOrder.
+        BTC-SPOT требует ровно 5 знаков после запятой для sz.
         """
         try:
-            url = f"{self.BASE_URL}/exchange"
+            # Правильный endpoint для spot-ордера
+            url = f"{self.BASE_URL}/v1/exchange/placeOrder"
             
-            # Форматируем размер до 5 знаков после запятой (требование BTC-SPOT)
+            # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_formatted = f"{sz_value:.5f}"  # СТРОКА с 5 знаками
+            sz_str = f"{sz_value:.5f}"  # строка, напр. "0.00116"
             
-            # Правильная структура для spot ордера (ВСЕ числовые поля как СТРОКИ!)
+            # Форматируем цену до 2 знаков после запятой
+            px_value = float(order_data.get("limit_px", 108000))
+            px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
+            
+            # Пейлоад без поле nonce
             spot_payload = {
                 "coin": order_data.get("coin", "BTC-SPOT"),
-                "is_buy": order_data.get("is_buy", True),
-                "sz": sz_formatted,  # СТРОКА: "0.00116"
-                "limit_px": f"{float(order_data.get('limit_px', 108000)):.2f}",  # СТРОКА: "107833.50"
+                "is_buy": bool(order_data.get("is_buy", True)),
+                "sz": sz_str,
+                "limit_px": px_str,
                 "order_type": {
-                    "limit": {
-                        "tif": "Gtc"  # Good Till Canceled
-                    }
+                    "limit": {"tif": "Gtc"}
                 },
-                "reduce_only": False,
-                "nonce": int(time.time() * 1000)  # Добавляем nonce обратно
+                "reduce_only": False
             }
             
-            # Попробуем несколько вариантов spot ордера (ВСЕ числовые поля как СТРОКИ!)
-            payload_variants = [
-                # Вариант 1: С nonce (строки)
-                spot_payload,
-                # Вариант 2: Без nonce (строки)
-                {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": sz_formatted,  # СТРОКА: "0.00116"
-                    "limit_px": f"{float(order_data.get('limit_px', 108000)):.2f}",  # СТРОКА: "107833.50"
-                    "order_type": {
-                        "limit": {
-                            "tif": "Gtc"
-                        }
-                    },
-                    "reduce_only": False
-                },
-                # Вариант 3: Market ордер с IOC (строки)
-                {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": sz_formatted,  # СТРОКА: "0.00116"
-                    "limit_px": f"{float(order_data.get('limit_px', 108000)) * 1.01:.2f}",  # СТРОКА: "+1%"
-                    "order_type": {
-                        "limit": {
-                            "tif": "Ioc"  # Immediate Or Cancel
-                        }
-                    },
-                    "reduce_only": False,
-                    "nonce": int(time.time() * 1000)
-                }
-            ]
+            self.log_message(f"🔍 DEBUG: Spot payload: {spot_payload}", level="DEBUG")
             
-            success = False
-            response = None
+            # Отправка запроса с подписью
+            response = await self.send_request(
+                method="POST",
+                url=url,
+                data=spot_payload,
+                build_signature=True
+            )
             
-            # Пробуем каждый вариант
-            for i, payload in enumerate(payload_variants, 1):
-                try:
-                    self.log_message(f"🔍 DEBUG: Trying spot variant {i} (strings): {payload}", level="DEBUG")
-                    response = await self.send_request("POST", url, data=payload, build_signature=True)
-                    if response.status == 200:
-                        success = True
-                        self.log_message(f"✅ SUCCESS: Spot variant {i} worked!", level="INFO")
-                        break
-                    else:
-                        self.log_message(f"❌ Spot variant {i} failed: {response.status}", level="DEBUG")
-                except Exception as e:
-                    self.log_message(f"❌ Spot variant {i} error: {e}", level="DEBUG")
-            
-            if not success:
-                error_text = await response.text() if response else "No response"
-                self.log_message(f"❌ All spot variants failed: {response.status if response else 'No response'}, error: {error_text}", level="ERROR")
-                raise Exception(f'Failed to create spot order: {response.status if response else "No response"}, message=\'{error_text}\'')
+            # Проверяем статус
+            if response.status != 200:
+                text = await response.text()
+                self.log_message(f"❌ Spot order failed: {response.status}, {text}", level="ERROR")
+                raise Exception(f"Failed to create spot order: {response.status}, message={text!r}")
             
             result = await response.json()
-            self.log_message(f"✅ Spot order created successfully!", level="INFO")
+            self.log_message("✅ Spot order created successfully!", level="INFO")
             return result
-            
+
         except Exception as e:
             self.log_message(f"Failed to create spot order: {e}", level="ERROR")
             raise
