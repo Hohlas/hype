@@ -305,17 +305,22 @@ class HyperliquidBrowser:
             url = f"{self.BASE_URL}/exchange"
             
             # Подготовка данных ордера для Hyperliquid API
-            # Упрощенная структура без лишних полей
+            # Правильная структура согласно документации
             order_payload = {
                 "action": {
                     "type": "order",
                     "orders": [order_data]
                 },
-                "nonce": int(time.time() * 1000)
+                "nonce": int(time.time() * 1000),
+                "vaultAddress": None
             }
             
             # Логируем данные ордера для отладки
             self.log_message(f"🔍 DEBUG: Order payload: {order_payload}", level="DEBUG")
+            
+            # Логируем подпись для отладки
+            signature = self._sign_message(order_payload)
+            self.log_message(f"🔍 DEBUG: Signature: {signature}", level="DEBUG")
             
             response = await self.send_request("POST", url, data=order_payload, build_signature=True)
             

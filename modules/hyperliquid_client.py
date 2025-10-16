@@ -81,14 +81,15 @@ class HyperliquidClient:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
             # Подготовка данных ордера для Hyperliquid API
-            # Упрощенная структура
+            # Правильная структура согласно документации
             order_data = {
                 "a": token,  # Asset (токен)
                 "b": side == "BUY",  # Is buy order
                 "p": str(price) if price else str(token_price),  # Price
                 "s": str(quantity),  # Size (количество)
                 "r": False,  # Reduce only
-                "t": "Limit" if order_type == "LIMIT" else "Market"  # Order type
+                "t": "Limit" if order_type == "LIMIT" else "Market",  # Order type
+                "i": int(time.time() * 1000)  # Client order ID
             }
             
             # Создание ордера
