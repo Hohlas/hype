@@ -302,16 +302,14 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Для spot торговли используем специальный endpoint
-            url = f"{self.BASE_URL}/spot-exchange"
+            # Используем стандартный endpoint для всех типов торговли
+            url = f"{self.BASE_URL}/exchange"
             
             # Подготовка данных ордера для Hyperliquid API
-            # Используем структуру с action для spot торговли
+            # Используем стандартную структуру для всех типов торговли
             order_payload = {
-                "action": {
-                    "type": "order",
-                    "orders": [order_data]
-                },
+                "type": "order",
+                "orders": [order_data],
                 "nonce": int(time.time() * 1000)
             }
             
@@ -354,15 +352,15 @@ class HyperliquidBrowser:
         Отмена ордера
         """
         try:
-            # Для spot торговли используем специальный endpoint
-            url = f"{self.BASE_URL}/spot-exchange"
+            # Используем стандартный endpoint для всех типов торговли
+            url = f"{self.BASE_URL}/exchange"
             
             cancel_payload = {
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "coin": token_name,
-                        "oid": order_id
+                        "a": token_name,
+                        "o": order_id
                     }]
                 },
                 "nonce": int(time.time() * 1000),
