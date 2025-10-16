@@ -162,13 +162,31 @@ class HyperliquidBrowser:
         try:
             account_info = await self.get_account_info()
             
-            # Используем withdrawable - доступный баланс для торговли
-            withdrawable = account_info.get("withdrawable", 0)
-            balance = float(withdrawable)
+            # Логируем все поля для отладки
+            self.log_message(f"🔍 DEBUG: All account fields:", level="DEBUG")
+            for key, value in account_info.items():
+                if key != "assetPositions":  # Пропускаем длинный список позиций
+                    self.log_message(f"🔍 DEBUG: {key}: {value}", level="DEBUG")
             
-            self.log_message(f"🔍 DEBUG: Withdrawable balance: ${balance:.2f}", level="DEBUG")
+            # Пробуем разные поля для баланса
+            possible_balance_fields = [
+                "withdrawable",
+                "totalWalletBalance", 
+                "totalMarginBalance",
+                "availableBalance",
+                "crossWalletBalance"
+            ]
             
-            return balance
+            for field in possible_balance_fields:
+                if field in account_info:
+                    balance = float(account_info[field])
+                    self.log_message(f"🔍 DEBUG: {field}: ${balance:.2f}", level="DEBUG")
+                    if balance > 0:
+                        return balance
+            
+            # Если ничего не найдено, возвращаем 0
+            self.log_message(f"🔍 DEBUG: No positive balance found in any field", level="DEBUG")
+            return 0.0
             
         except Exception as e:
             self.log_message(f"Failed to get balance: {e}", level="ERROR")
