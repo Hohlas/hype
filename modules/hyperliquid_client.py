@@ -80,16 +80,16 @@ class HyperliquidClient:
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
-               # Подготовка данных ордера для Hyperliquid Futures API
-               # Используем futures торговлю вместо spot
-               order_data = {
-                   "coin": f"{token}-PERP",  # Формат для futures: СИМВОЛ-PERP
-                   "is_buy": side == "BUY",  # true для покупки, false для продажи
-                   "sz": str(quantity),  # Size как строка
-                   "limit_px": str(price) if price else str(token_price),  # Всегда нужен limit_px
-                   "order_type": {"limit": {"tif": "Gtc"}} if order_type == "LIMIT" else {"market": {}},  # Тип ордера
-                   "reduce_only": False  # Reduce only
-               }
+            # Подготовка данных ордера для Hyperliquid Futures API
+            # Используем futures торговлю вместо spot
+            order_data = {
+                "coin": f"{token}-PERP",  # Формат для futures: СИМВОЛ-PERP
+                "is_buy": side == "BUY",  # true для покупки, false для продажи
+                "sz": str(quantity),  # Size как строка
+                "limit_px": str(price) if price else str(token_price),  # Всегда нужен limit_px
+                "order_type": {"limit": {"tif": "Gtc"}} if order_type == "LIMIT" else {"market": {}},  # Тип ордера
+                "reduce_only": False  # Reduce only
+            }
             
             # Создание ордера
             result = await self.browser.create_order(order_data)
