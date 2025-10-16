@@ -305,8 +305,14 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Используем правильный endpoint
-            url = f"{self.BASE_URL}/exchange"
+            # Попробуем разные endpoints для spot торговли
+            endpoints_to_try = [
+                f"{self.BASE_URL}/exchange",
+                f"{self.BASE_URL}/spot-exchange",
+                f"{self.BASE_URL}/spot/exchange",
+                f"{self.BASE_URL}/api/exchange",
+                f"{self.BASE_URL}/exchange/spot"
+            ]
             
             # Попробуем разные структуры payload на основе официального SDK
             payload_variants = [
@@ -353,21 +359,53 @@ class HyperliquidBrowser:
                 }
             ]
             
+            # Диагностика: проверим баланс и права доступа
+            try:
+                self.log_message("🔍 DEBUG: Checking account balance and permissions...", level="DEBUG")
+                account_info = await self.get_account_info()
+                self.log_message(f"🔍 DEBUG: Account info: {account_info}", level="DEBUG")
+                
+                # Проверим, есть ли spot баланс
+                spot_balance = account_info.get("spotBalances", [])
+                self.log_message(f"🔍 DEBUG: Spot balances: {spot_balance}", level="DEBUG")
+                
+                # Проверим, есть ли USDC баланс
+                usdc_balance = None
+                for balance in spot_balance:
+                    if balance.get("coin") == "USDC":
+                        usdc_balance = float(balance.get("total", "0"))
+                        break
+                
+                if usdc_balance is None:
+                    self.log_message("⚠️ WARNING: No USDC balance found in spot account", level="WARNING")
+                else:
+                    self.log_message(f"🔍 DEBUG: USDC balance: {usdc_balance}", level="DEBUG")
+                    
+            except Exception as e:
+                self.log_message(f"⚠️ WARNING: Failed to check account info: {e}", level="WARNING")
+            
             success = False
             response = None
             
-            for i, order_payload in enumerate(payload_variants, 1):
-                try:
-                    self.log_message(f"🔍 DEBUG: Trying payload variant {i}: {order_payload}", level="DEBUG")
-                    response = await self.send_request("POST", url, data=order_payload, build_signature=True)
-                    if response.status == 200:
-                        success = True
-                        self.log_message(f"✅ SUCCESS: Payload variant {i} worked!", level="INFO")
-                        break
-                    else:
-                        self.log_message(f"❌ Payload variant {i} failed: {response.status}", level="DEBUG")
-                except Exception as e:
-                    self.log_message(f"❌ Payload variant {i} error: {e}", level="DEBUG")
+            # Попробуем каждый endpoint с каждым payload
+            for endpoint_url in endpoints_to_try:
+                self.log_message(f"🔍 DEBUG: Trying endpoint: {endpoint_url}", level="DEBUG")
+                
+                for i, order_payload in enumerate(payload_variants, 1):
+                    try:
+                        self.log_message(f"🔍 DEBUG: Trying payload variant {i}: {order_payload}", level="DEBUG")
+                        response = await self.send_request("POST", endpoint_url, data=order_payload, build_signature=True)
+                        if response.status == 200:
+                            success = True
+                            self.log_message(f"✅ SUCCESS: Endpoint {endpoint_url} with payload variant {i} worked!", level="INFO")
+                            break
+                        else:
+                            self.log_message(f"❌ Endpoint {endpoint_url} payload variant {i} failed: {response.status}", level="DEBUG")
+                    except Exception as e:
+                        self.log_message(f"❌ Endpoint {endpoint_url} payload variant {i} error: {e}", level="DEBUG")
+                
+                if success:
+                    break
             
             if not success:
                 self.log_message("❌ All payload variants failed", level="WARNING")
