@@ -321,69 +321,42 @@ class HyperliquidBrowser:
     
     async def _create_spot_order(self, order_data: dict):
         """
-        Создание spot ордера через placeOrder (как futures, но с -SPOT)
+        Создание spot ордера через placeOrder (на основе официального примера)
+        BTC-SPOT требует ровно 5 знаков после запятой для sz
         """
         try:
-            # Используем placeOrder для spot торговли (как futures)
             url = f"{self.BASE_URL}/exchange"
             
-            # Структуры payload для spot торговли (на основе SDK)
-            payload_variants = [
-                # Вариант 1: Официальный SDK формат для spot
-                {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"market": {}},
-                    "nonce": int(time.time() * 1000)
+            # Форматируем размер до 5 знаков после запятой (требование BTC-SPOT)
+            sz_value = float(order_data.get("sz", "0.001"))
+            sz_formatted = float(f"{sz_value:.5f}")
+            
+            # Правильная структура для spot ордера (БЕЗ nonce!)
+            spot_payload = {
+                "coin": order_data.get("coin", "BTC-SPOT"),
+                "is_buy": order_data.get("is_buy", True),
+                "sz": sz_formatted,  # Размер с точностью 5 знаков
+                "limit_px": float(order_data.get("limit_px", 108000)),
+                "order_type": {
+                    "limit": {
+                        "tif": "Gtc"  # Good Till Canceled
+                    }
                 },
-                # Вариант 2: С cloid
-                {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"market": {}},
-                    "cloid": f"0x{int(time.time() * 1000):x}",
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 3: Limit ордер
-                {
-                    "coin": order_data.get("coin", "BTC-SPOT"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"limit": {"tif": "Gtc"}},
-                    "nonce": int(time.time() * 1000)
-                }
-            ]
+                "reduce_only": False
+            }
             
-            success = False
-            response = None
+            self.log_message(f"🔍 DEBUG: Spot order payload (no nonce): {spot_payload}", level="DEBUG")
             
-            # Пробуем каждый вариант payload
-            for i, order_payload in enumerate(payload_variants, 1):
-                try:
-                    self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {order_payload}", level="DEBUG")
-                    response = await self.send_request("POST", url, data=order_payload, build_signature=True)
-                    if response.status == 200:
-                        success = True
-                        self.log_message(f"✅ SUCCESS: Spot payload variant {i} worked!", level="INFO")
-                        break
-                    else:
-                        self.log_message(f"❌ Spot payload variant {i} failed: {response.status}", level="DEBUG")
-                except Exception as e:
-                    self.log_message(f"❌ Spot payload variant {i} error: {e}", level="DEBUG")
+            # Отправляем spot ордер
+            response = await self.send_request("POST", url, data=spot_payload, build_signature=True)
             
-            if not success:
-                error_text = await response.text() if response else "No response"
-                raise Exception(f'Failed to create spot order: {response.status if response else "No response"}, message=\'{error_text}\'')
+            if response.status != 200:
+                error_text = await response.text()
+                self.log_message(f"❌ Spot order failed: {response.status}, error: {error_text}", level="ERROR")
+                raise Exception(f'Failed to create spot order: {response.status}, message=\'{error_text}\'')
             
             result = await response.json()
+            self.log_message(f"✅ Spot order created successfully!", level="INFO")
             return result
             
         except Exception as e:
