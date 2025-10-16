@@ -98,8 +98,14 @@ class DataBase:
         """
         Получение всех модулей для обработки.
         """
-        # Заглушка - в реальной реализации здесь будет работа с базой данных
-        return "No more accounts left"
+        from .wallet_loader import get_wallet_modules
+        
+        modules = get_wallet_modules()
+        
+        if not modules:
+            return "No more accounts left"
+        
+        return modules
         
     def get_all_groups(self):
         """
