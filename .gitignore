@@ -53,3 +53,18 @@ logs/
 apikeys.txt
 proxies.txt
 wallets.txt
+
+# Hyperliquid specific
+private_keys.txt
+wallet_config.txt
+*.wallet
+keystore/
+
+# Database
+postgres_data/
+*.dump
+
+# Temporary files
+temp/
+tmp/
+*.tmp
