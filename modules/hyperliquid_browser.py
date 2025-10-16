@@ -326,7 +326,7 @@ class HyperliquidBrowser:
         """
         try:
             # Правильный endpoint для spot-ордера
-            url = f"{self.BASE_URL}/v1/exchange/placeOrder"
+            url = f"{self.BASE_URL}/exchange/placeOrder"
             
             # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
