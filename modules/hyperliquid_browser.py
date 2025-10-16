@@ -308,6 +308,9 @@ class HyperliquidBrowser:
                 "nonce": int(time.time() * 1000),
             }
             
+            # Логируем данные ордера для отладки
+            self.log_message(f"🔍 DEBUG: Order payload: {order_payload}", level="DEBUG")
+            
             response = await self.send_request("POST", url, data=order_payload, build_signature=True)
             
             # Проверяем статус ответа
@@ -315,8 +318,10 @@ class HyperliquidBrowser:
                 # Пытаемся получить текст ошибки
                 try:
                     error_text = await response.text()
+                    self.log_message(f"🔍 DEBUG: Error response text: {error_text}", level="DEBUG")
                     raise Exception(f'Failed to create order: {response.status}, message=\'{error_text}\', url=\'{url}\'')
-                except:
+                except Exception as text_error:
+                    self.log_message(f"🔍 DEBUG: Failed to get error text: {text_error}", level="DEBUG")
                     raise Exception(f'Failed to create order: {response.status}, url=\'{url}\'')
             
             # Пытаемся парсить JSON
