@@ -305,42 +305,60 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Попробуем разные endpoints для spot торговли
-            endpoints_to_try = [
-                f"{self.BASE_URL}/exchange",
-                f"{self.BASE_URL}/spot-exchange", 
-                f"{self.BASE_URL}/spot/exchange",
-                f"{self.BASE_URL}/api/exchange"
+            # Используем правильный endpoint
+            url = f"{self.BASE_URL}/exchange"
+            
+            # Попробуем разные структуры payload для spot торговли
+            payload_variants = [
+                # Вариант 1: Прямая структура (текущий)
+                {
+                    **order_data,
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 2: С оберткой type/orders
+                {
+                    "type": "order",
+                    "orders": [order_data],
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 3: С оберткой action
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [order_data]
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 4: Futures структура
+                {
+                    "a": order_data.get("coin", "BTC-SPOT"),
+                    "b": order_data.get("is_buy", True),
+                    "p": str(order_data.get("limit_px", 108000)),
+                    "s": str(order_data.get("sz", "0.001")),
+                    "r": order_data.get("reduce_only", False),
+                    "t": "Market",
+                    "nonce": int(time.time() * 1000)
+                }
             ]
-            
-            # Подготовка данных ордера для Hyperliquid Spot API
-            # Используем прямую структуру для spot торговли
-            order_payload = {
-                **order_data,  # Распаковываем данные ордера напрямую
-                "nonce": int(time.time() * 1000)
-            }
-            
-            # Логируем данные ордера для отладки
-            self.log_message(f"🔍 DEBUG: Order payload: {order_payload}", level="DEBUG")
             
             success = False
             response = None
             
-            for url in endpoints_to_try:
+            for i, order_payload in enumerate(payload_variants, 1):
                 try:
-                    self.log_message(f"🔍 DEBUG: Trying endpoint: {url}", level="DEBUG")
+                    self.log_message(f"🔍 DEBUG: Trying payload variant {i}: {order_payload}", level="DEBUG")
                     response = await self.send_request("POST", url, data=order_payload, build_signature=True)
                     if response.status == 200:
                         success = True
-                        self.log_message(f"✅ SUCCESS: Endpoint {url} worked!", level="INFO")
+                        self.log_message(f"✅ SUCCESS: Payload variant {i} worked!", level="INFO")
                         break
                     else:
-                        self.log_message(f"❌ Endpoint {url} failed: {response.status}", level="DEBUG")
+                        self.log_message(f"❌ Payload variant {i} failed: {response.status}", level="DEBUG")
                 except Exception as e:
-                    self.log_message(f"❌ Endpoint {url} error: {e}", level="DEBUG")
+                    self.log_message(f"❌ Payload variant {i} error: {e}", level="DEBUG")
             
             if not success:
-                self.log_message("❌ All endpoints failed", level="WARNING")
+                self.log_message("❌ All payload variants failed", level="WARNING")
             
             # Проверяем статус ответа
             if response and response.status != 200:
