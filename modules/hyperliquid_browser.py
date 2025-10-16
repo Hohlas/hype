@@ -336,38 +336,78 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
-            # ПРАВИЛЬНАЯ структура для spot ордера через /exchange
-            spot_payload = {
-                "action": {
+            # Попробуем несколько вариантов структуры для spot ордеров
+            payload_variants = [
+                # Вариант 1: С action wrapper (текущий)
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": order_data.get("coin", "BTC-SPOT"),  # строка "BTC-SPOT"
+                            "b": bool(order_data.get("is_buy", True)),  # boolean
+                            "s": sz_str,  # строка размера
+                            "p": px_str,  # строка цены
+                            "r": False,  # reduceOnly
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 2: Без action wrapper
+                {
                 "type": "order",
                     "orders": [{
-                        "a": order_data.get("coin", "BTC-SPOT"),  # строка "BTC-SPOT"
-                        "b": bool(order_data.get("is_buy", True)),  # boolean
-                        "s": sz_str,  # строка размера
-                        "p": px_str,  # строка цены
-                        "r": False,  # reduceOnly
+                        "a": order_data.get("coin", "BTC-SPOT"),
+                        "b": bool(order_data.get("is_buy", True)),
+                        "s": sz_str,
+                        "p": px_str,
+                        "r": False,
                         "t": {"limit": {"tif": "Gtc"}}
                     }],
-                    "grouping": "na"
+                    "grouping": "na",
+                    "nonce": int(time.time() * 1000)
                 },
-                "nonce": int(time.time() * 1000)
-            }
+                # Вариант 3: Простая структура как в примере Perplexity
+                {
+                    "coin": order_data.get("coin", "BTC-SPOT"),
+                    "is_buy": bool(order_data.get("is_buy", True)),
+                    "sz": sz_str,
+                    "limit_px": px_str,
+                    "order_type": {"limit": {"tif": "Gtc"}},
+                    "reduce_only": False,
+                    "nonce": int(time.time() * 1000)
+                }
+            ]
             
-            self.log_message(f"🔍 DEBUG: Spot payload: {spot_payload}", level="DEBUG")
+            success = False
+            response = None
             
-            # Отправка запроса с подписью
-            response = await self.send_request(
-                method="POST",
-                url=url,
-                data=spot_payload,
-                build_signature=True
-            )
+            # Пробуем каждый вариант
+            for i, payload in enumerate(payload_variants, 1):
+                try:
+                    self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {payload}", level="DEBUG")
+                    response = await self.send_request(
+                        method="POST",
+                        url=url,
+                        data=payload,
+                        build_signature=True
+                    )
+                    
+                    if response.status == 200:
+                        success = True
+                        self.log_message(f"✅ SUCCESS: Spot payload variant {i} worked!", level="INFO")
+                        break
+                    else:
+                        self.log_message(f"❌ Spot payload variant {i} failed: {response.status}", level="DEBUG")
+                        
+                except Exception as e:
+                    self.log_message(f"❌ Spot payload variant {i} error: {e}", level="DEBUG")
             
-            # Проверяем статус
-            if response.status != 200:
-                text = await response.text()
-                self.log_message(f"❌ Spot order failed: {response.status}, {text}", level="ERROR")
-                raise Exception(f"Failed to create spot order: {response.status}, message={text!r}")
+            if not success:
+                error_text = await response.text() if response else "No response"
+                self.log_message(f"❌ All spot payload variants failed: {response.status if response else 'No response'}, error: {error_text}", level="ERROR")
+                raise Exception(f"Failed to create spot order: {response.status if response else 'No response'}, message={error_text!r}")
             
             result = await response.json()
             self.log_message(f"✅ Spot order created successfully! Response: {result}", level="INFO")
@@ -408,8 +448,8 @@ class HyperliquidBrowser:
                     "reduce_only": order_data.get("reduce_only", False),
                     "order_type": {"market": {}},
                     "cloid": f"0x{int(time.time() * 1000):x}",
-                    "nonce": int(time.time() * 1000)
-                }
+                "nonce": int(time.time() * 1000)
+            }
             ]
             
             # Диагностика: проверим баланс и права доступа
