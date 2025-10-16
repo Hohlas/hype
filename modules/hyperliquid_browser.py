@@ -302,14 +302,14 @@ class HyperliquidBrowser:
             
     async def create_order(self, order_data: dict):
         """
-        Создание ордера
+        Создание ордера - используем общий endpoint /exchange
         """
         try:
             # Проверяем, это spot или futures торговля
             coin = order_data.get("coin", "BTC-SPOT")
             
             if "-SPOT" in coin:
-                # Spot торговля - используем spotTransfer
+                # Spot торговля - используем правильную структуру action
                 return await self._create_spot_order(order_data)
             else:
                 # Futures торговля - используем обычный placeOrder
@@ -322,11 +322,11 @@ class HyperliquidBrowser:
 
     async def _create_spot_order(self, order_data: dict):
         """
-        Создание spot ордера через /exchange/spot/placeOrder endpoint.
+        Создание spot ордера через общий endpoint /exchange с правильной структурой action.
         """
         try:
-            # Правильный endpoint для spot ордеров (из Perplexity)
-            url = f"{self.BASE_URL}/exchange/spot/placeOrder"
+            # Общий endpoint для всех ордеров (spot и futures)
+            url = f"{self.BASE_URL}/exchange"
             
             # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
@@ -336,16 +336,21 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
-            # Правильная структура для spot ордера
+            # ПРАВИЛЬНАЯ структура для spot ордера через /exchange
             spot_payload = {
-                "coin": order_data.get("coin", "BTC-SPOT"),
-                "is_buy": bool(order_data.get("is_buy", True)),
-                "sz": sz_str,
-                "limit_px": px_str,
-                "order_type": {
-                    "limit": {"tif": "Gtc"}
+                "action": {
+                "type": "order",
+                    "orders": [{
+                        "a": order_data.get("coin", "BTC-SPOT"),  # строка "BTC-SPOT"
+                        "b": bool(order_data.get("is_buy", True)),  # boolean
+                        "s": sz_str,  # строка размера
+                        "p": px_str,  # строка цены
+                        "r": False,  # reduceOnly
+                        "t": {"limit": {"tif": "Gtc"}}
+                    }],
+                    "grouping": "na"
                 },
-                "reduce_only": False
+                "nonce": int(time.time() * 1000)
             }
             
             self.log_message(f"🔍 DEBUG: Spot payload: {spot_payload}", level="DEBUG")
