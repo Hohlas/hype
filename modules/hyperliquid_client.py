@@ -80,15 +80,14 @@ class HyperliquidClient:
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
-            # Подготовка данных ордера для Hyperliquid API
-            # Используем правильные типы данных и поля для spot торговли
+            # Подготовка данных ордера для Hyperliquid Spot API
+            # Используем структуру, специфичную для spot торговли
             order_data = {
-                "a": token,  # Asset (токен)
-                "is_buy": side == "BUY",  # Is buy order (boolean) - используем is_buy для spot
-                "p": float(price) if price else float(token_price),  # Price (number)
-                "s": float(quantity),  # Size (количество) (number)
-                "r": False,  # Reduce only (boolean)
-                "t": "Limit" if order_type == "LIMIT" else "Market"  # Order type (string)
+                "coin": token,  # Asset (токен) - используем coin для spot
+                "is_buy": side == "BUY",  # Is buy order (boolean)
+                "sz": float(quantity),  # Size (количество) (number) - используем sz для spot
+                "limit_px": float(price) if price else float(token_price),  # Price (number) - используем limit_px для spot
+                "order_type": {"limit": {"tif": "Ioc"}} if order_type == "LIMIT" else {"market": {}}  # Order type
             }
             
             # Создание ордера
