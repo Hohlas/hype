@@ -276,7 +276,7 @@ class HyperliquidBrowser:
             
     async def get_account_orders(self):
         """
-        Получение активных ордеров аккаунта
+        Получение активных ордеров аккаунта для spot торговли
         """
         try:
             url = f"{self.BASE_URL}/info"
@@ -304,11 +304,13 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/exchange"
             
-            # Подготовка данных ордера для Hyperliquid API
-            # Попробуем структуру без action
+            # Подготовка данных ордера для Hyperliquid Spot API
+            # Для spot торговли используется другая структура
             order_payload = {
-                "type": "order",
-                "orders": [order_data],
+                "action": {
+                    "type": "order",
+                    "orders": [order_data]
+                },
                 "nonce": int(time.time() * 1000)
             }
             
@@ -357,8 +359,8 @@ class HyperliquidBrowser:
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "a": token_name,
-                        "o": order_id
+                        "coin": token_name,
+                        "oid": order_id
                     }]
                 },
                 "nonce": int(time.time() * 1000),
