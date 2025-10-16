@@ -299,13 +299,14 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/exchange"
             
-            # Подготовка данных ордера
+            # Подготовка данных ордера для Hyperliquid API
             order_payload = {
                 "action": {
                     "type": "order",
                     "orders": [order_data]
                 },
                 "nonce": int(time.time() * 1000),
+                "vaultAddress": None  # Для spot торговли
             }
             
             # Логируем данные ордера для отладки

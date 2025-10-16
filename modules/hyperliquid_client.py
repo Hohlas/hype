@@ -1,4 +1,5 @@
 import asyncio
+import time
 from decimal import Decimal
 from typing import Dict, List, Optional
 import settings
@@ -87,6 +88,7 @@ class HyperliquidClient:
                 "s": str(quantity),  # Size (количество)
                 "r": False,  # Reduce only
                 "t": "Limit" if order_type == "LIMIT" else "Market",  # Order type
+                "i": int(time.time() * 1000),  # Client order ID
             }
             
             # Создание ордера
