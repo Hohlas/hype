@@ -308,28 +308,40 @@ class HyperliquidBrowser:
             # Используем правильный endpoint
             url = f"{self.BASE_URL}/exchange"
             
-            # Попробуем разные структуры payload для spot торговли
+            # Попробуем разные структуры payload на основе официального SDK
             payload_variants = [
-                # Вариант 1: Прямая структура (текущий)
+                # Вариант 1: Официальный SDK формат (без nonce)
                 {
-                    **order_data,
-                    "nonce": int(time.time() * 1000)
+                    "coin": order_data.get("coin", "BTC-SPOT"),
+                    "is_buy": order_data.get("is_buy", True),
+                    "sz": float(order_data.get("sz", "0.001")),
+                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "reduce_only": order_data.get("reduce_only", False),
+                    "order_type": {"limit": {"tif": "Gtc"}}
                 },
-                # Вариант 2: С оберткой type/orders
+                # Вариант 2: Market ордер с limit_px
+                {
+                    "coin": order_data.get("coin", "BTC-SPOT"),
+                    "is_buy": order_data.get("is_buy", True),
+                    "sz": float(order_data.get("sz", "0.001")),
+                    "limit_px": float(order_data.get("limit_px", 108000)),
+                    "reduce_only": order_data.get("reduce_only", False),
+                    "order_type": {"market": {}}
+                },
+                # Вариант 3: С оберткой type/orders
                 {
                     "type": "order",
-                    "orders": [order_data],
+                    "orders": [{
+                        "coin": order_data.get("coin", "BTC-SPOT"),
+                        "is_buy": order_data.get("is_buy", True),
+                        "sz": float(order_data.get("sz", "0.001")),
+                        "limit_px": float(order_data.get("limit_px", 108000)),
+                        "reduce_only": order_data.get("reduce_only", False),
+                        "order_type": {"limit": {"tif": "Gtc"}}
+                    }],
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: С оберткой action
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [order_data]
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 4: Futures структура
+                # Вариант 4: Futures структура (a, b, p, s, r, t)
                 {
                     "a": order_data.get("coin", "BTC-SPOT"),
                     "b": order_data.get("is_buy", True),
