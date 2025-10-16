@@ -189,8 +189,8 @@ class HyperliquidBrowser:
             if response.status != 200:
                 raise Exception(f'Failed to get token price: {result}')
             
-            # Логируем структуру ответа для отладки
-            self.log_message(f"🔍 DEBUG: Price data keys: {list(result.keys())}", level="DEBUG")
+            # Логируем структуру ответа для отладки (отключено)
+            # self.log_message(f"🔍 DEBUG: Price data keys: {list(result.keys())}", level="DEBUG")
             
             # Пробуем разные варианты названий токенов
             possible_keys = [
@@ -204,7 +204,7 @@ class HyperliquidBrowser:
             for key in possible_keys:
                 if key in result:
                     price = Decimal(str(result[key]))
-                    self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
+                    # self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
                     return price
             
             # Если не нашли, показываем доступные токены

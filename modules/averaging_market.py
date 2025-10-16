@@ -383,9 +383,12 @@ async def trade_averaging_market(client, token_name: str, futures_action: str):
                             tp_orders.remove(tp_order)
                 
                 # Если нет активных TP ордеров или их мало, создаем новый ордер
+                client.browser.log_message(f"🔍 DEBUG: TP orders count: {len(tp_orders)}, Max orders: {max_orders}", level="DEBUG")
+                
                 if len(tp_orders) < max_orders:
                     # Рассчитываем размер ордера
                     usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
+                    client.browser.log_message(f"🔍 DEBUG: Calculated order size: ${usdc_amount:.2f}, Min required: ${min_notional:.2f}", level="DEBUG")
                     
                     if usdc_amount >= min_notional:
                         # Пересчитываем баланс для корректного логирования
