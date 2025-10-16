@@ -305,16 +305,12 @@ class HyperliquidBrowser:
         Создание ордера
         """
         try:
-            # Попробуем разные endpoints для торговли
+            # Используем только рабочий endpoint для futures торговли
             endpoints_to_try = [
-                f"{self.BASE_URL}/exchange",
-                f"{self.BASE_URL}/spot-exchange",
-                f"{self.BASE_URL}/spot/exchange",
-                f"{self.BASE_URL}/api/exchange",
-                f"{self.BASE_URL}/exchange/spot"
+                f"{self.BASE_URL}/exchange"
             ]
             
-            # Попробуем разные структуры payload для futures торговли
+            # Попробуем основные структуры payload для futures торговли
             payload_variants = [
                 # Вариант 1: Futures структура (a, b, p, s, r, t) - основной
                 {
@@ -336,34 +332,16 @@ class HyperliquidBrowser:
                     "t": "Limit",
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Официальный SDK формат для futures
-                {
-                    "coin": order_data.get("coin", "BTC-PERP"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"limit": {"tif": "Gtc"}}
-                },
-                # Вариант 4: Market ордер с limit_px
-                {
-                    "coin": order_data.get("coin", "BTC-PERP"),
-                    "is_buy": order_data.get("is_buy", True),
-                    "sz": float(order_data.get("sz", "0.001")),
-                    "limit_px": float(order_data.get("limit_px", 108000)),
-                    "reduce_only": order_data.get("reduce_only", False),
-                    "order_type": {"market": {}}
-                },
-                # Вариант 5: С оберткой type/orders
+                # Вариант 3: С оберткой type/orders
                 {
                     "type": "order",
                     "orders": [{
-                        "coin": order_data.get("coin", "BTC-PERP"),
-                        "is_buy": order_data.get("is_buy", True),
-                        "sz": float(order_data.get("sz", "0.001")),
-                        "limit_px": float(order_data.get("limit_px", 108000)),
-                        "reduce_only": order_data.get("reduce_only", False),
-                        "order_type": {"limit": {"tif": "Gtc"}}
+                        "a": order_data.get("coin", "BTC-PERP"),
+                        "b": order_data.get("is_buy", True),
+                        "p": str(order_data.get("limit_px", 108000)),
+                        "s": str(order_data.get("sz", "0.001")),
+                        "r": order_data.get("reduce_only", False),
+                        "t": "Market"
                     }],
                     "nonce": int(time.time() * 1000)
                 }
