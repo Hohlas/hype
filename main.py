@@ -33,7 +33,12 @@ def initialize_account(module_data: dict, group_data: dict = None):
 
 
 async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
-    async with address_locks[module_data["wallet_address"]]:
+    # Инициализируем блокировку для адреса кошелька
+    wallet_address = module_data["wallet_address"]
+    if wallet_address not in address_locks:
+        address_locks[wallet_address] = asyncio.Lock()
+    
+    async with address_locks[wallet_address]:
         async with sem:
             hyperliquid_client = None
             try:
@@ -89,7 +94,13 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
 
 
 async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
-    async with MultiLock([wallet_data["wallet_address"] for wallet_data in group_data["wallets_data"]]):
+    # Инициализируем блокировки для всех адресов кошельков
+    wallet_addresses = [wallet_data["wallet_address"] for wallet_data in group_data["wallets_data"]]
+    for address in wallet_addresses:
+        if address not in address_locks:
+            address_locks[address] = asyncio.Lock()
+    
+    async with MultiLock(wallet_addresses):
         async with sem:
             hyperliquid_clients = []
             try:
