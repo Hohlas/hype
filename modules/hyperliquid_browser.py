@@ -370,6 +370,7 @@ class HyperliquidBrowser:
             ]
             
             # Диагностика: проверим баланс и права доступа
+            usdc_balance = None  # Инициализируем переменную
             try:
                 self.log_message("🔍 DEBUG: Checking account balance and permissions...", level="DEBUG")
                 account_info = await self.get_account_info()
@@ -394,33 +395,29 @@ class HyperliquidBrowser:
                             self.log_message(f"🔍 DEBUG: Spot balances from clearinghouse: {spot_balances}", level="DEBUG")
                             
                             # Проверим, есть ли USDC баланс
-                            usdc_balance = None
                             for balance in spot_balances:
                                 if balance.get("coin") == "USDC":
                                     usdc_balance = float(balance.get("total", "0"))
+                                    self.log_message(f"🔍 DEBUG: USDC balance from clearinghouse: {usdc_balance}", level="DEBUG")
                                     break
-                            
-                            if usdc_balance is None:
-                                self.log_message("⚠️ WARNING: No USDC balance found in spot account", level="WARNING")
-                            else:
-                                self.log_message(f"🔍 DEBUG: USDC balance: {usdc_balance}", level="DEBUG")
                     else:
                         self.log_message(f"⚠️ WARNING: Failed to get spot clearinghouse info: {spot_response.status}", level="WARNING")
                 except Exception as spot_error:
                     self.log_message(f"⚠️ WARNING: Failed to get spot clearinghouse info: {spot_error}", level="WARNING")
                 
                 # Проверим, есть ли USDC баланс в основном аккаунте
-                usdc_balance = None
-                for balance in spot_balance:
-                    if balance.get("coin") == "USDC":
-                        usdc_balance = float(balance.get("total", "0"))
-                        break
-                
-                # Если не нашли в основном аккаунте, используем данные из clearinghouse
                 if usdc_balance is None:
-                    self.log_message("⚠️ WARNING: No USDC balance found in main account, checking clearinghouse...", level="WARNING")
+                    for balance in spot_balance:
+                        if balance.get("coin") == "USDC":
+                            usdc_balance = float(balance.get("total", "0"))
+                            self.log_message(f"🔍 DEBUG: USDC balance from main account: {usdc_balance}", level="DEBUG")
+                            break
+                
+                # Финальная проверка
+                if usdc_balance is None:
+                    self.log_message("⚠️ WARNING: No USDC balance found in any account", level="WARNING")
                 else:
-                    self.log_message(f"🔍 DEBUG: USDC balance from main account: {usdc_balance}", level="DEBUG")
+                    self.log_message(f"✅ USDC balance confirmed: {usdc_balance}", level="INFO")
                     
             except Exception as e:
                 self.log_message(f"⚠️ WARNING: Failed to check account info: {e}", level="WARNING")
