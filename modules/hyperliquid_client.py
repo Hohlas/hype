@@ -81,15 +81,28 @@ class HyperliquidClient:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
             # Подготовка данных ордера для Hyperliquid API
-            # Используем стандартную структуру для всех типов торговли
+            # Используем правильную структуру согласно L1 data schemas
             order_data = {
-                "a": token,  # Asset (токен)
-                "b": side == "BUY",  # Is buy order (boolean)
-                "p": float(price) if price else float(token_price),  # Price (number)
-                "s": float(quantity),  # Size (количество) (number)
-                "r": False,  # Reduce only (boolean)
-                "t": "Limit" if order_type == "LIMIT" else "Market"  # Order type (string)
+                "coin": token,  # Asset (токен)
+                "side": "B" if side == "BUY" else "A",  # "B" для покупки, "A" для продажи
+                "sz": str(quantity),  # Size (количество) как строка
+                "orderType": "Limit" if order_type == "LIMIT" else "Market",  # Order type
+                "reduceOnly": False,  # Reduce only
+                "isTrigger": False,  # Not a trigger order
+                "triggerPx": "0.0",  # Trigger price
+                "triggerCondition": "N/A",  # Trigger condition
+                "tif": "Alo",  # Time in force
+                "cloid": None,  # Client order ID
+                "children": [],  # Children orders
+                "isPositionTpsl": False,  # Not position TP/SL
+                "origSz": str(quantity),  # Original size
+                "timestamp": int(time.time() * 1000),  # Timestamp
+                "oid": int(time.time() * 1000)  # Order ID
             }
+            
+            # Добавляем limitPx только для limit ордеров
+            if order_type == "LIMIT":
+                order_data["limitPx"] = str(price) if price else str(token_price)
             
             # Создание ордера
             result = await self.browser.create_order(order_data)
