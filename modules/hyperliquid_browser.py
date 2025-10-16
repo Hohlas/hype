@@ -462,38 +462,102 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
-            # ПРАВИЛЬНАЯ структура для spot ордера с числовым asset ID
-            spot_payload = {
-                "action": {
-                "type": "order",
-                    "orders": [{
-                        "a": asset_id,  # ЧИСЛОВОЙ asset ID (например, 10002)
-                        "b": bool(order_data.get("is_buy", True)),  # boolean
-                        "s": sz_str,  # строка размера
-                        "p": px_str,  # строка цены
-                        "r": False,  # reduceOnly
-                        "t": {"limit": {"tif": "Gtc"}}
-                    }],
-                    "grouping": "na"
+            # Пробуем разные варианты структуры payload для spot ордеров
+            payload_variants = [
+                # Вариант 1: Простая структура без action wrapper
+                {
+                    "coin": f"{coin.split('-')[0]}-SPOT",  # "BTC-SPOT"
+                    "is_buy": bool(order_data.get("is_buy", True)),
+                    "sz": sz_str,
+                    "limit_px": px_str,
+                    "reduce_only": False,
+                    "order_type": {"limit": {"tif": "Gtc"}},
+                    "nonce": int(time.time() * 1000)
                 },
-                "nonce": int(time.time() * 1000)
-            }
+                # Вариант 2: С action wrapper и числовым asset ID
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": asset_id,  # ЧИСЛОВОЙ asset ID
+                            "b": bool(order_data.get("is_buy", True)),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": False,
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 3: С action wrapper и строковым asset ID
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": f"{coin.split('-')[0]}-SPOT",  # "BTC-SPOT"
+                            "b": bool(order_data.get("is_buy", True)),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": False,
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 4: Market ордер с числовым asset ID
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": asset_id,
+                            "b": bool(order_data.get("is_buy", True)),
+                            "s": sz_str,
+                            "r": False,
+                            "t": {"market": {}}
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 5: Без nonce
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": asset_id,
+                            "b": bool(order_data.get("is_buy", True)),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": False,
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }],
+                        "grouping": "na"
+                    }
+                }
+            ]
             
-            self.log_message(f"🔍 DEBUG: Spot payload with asset_id {asset_id}: {spot_payload}", level="DEBUG")
+            success = False
+            response = None
             
-            # Отправка запроса с подписью
-            response = await self.send_request(
-                method="POST",
-                url=url,
-                data=spot_payload,
-                build_signature=True
-            )
+            # Пробуем каждый вариант payload
+            for i, order_payload in enumerate(payload_variants, 1):
+                try:
+                    self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {order_payload}", level="DEBUG")
+                    response = await self.send_request("POST", url, data=order_payload, build_signature=True)
+                    if response.status == 200:
+                        success = True
+                        self.log_message(f"✅ SUCCESS: Spot payload variant {i} worked!", level="INFO")
+                        break
+                    else:
+                        self.log_message(f"❌ Spot payload variant {i} failed: {response.status}", level="DEBUG")
+                except Exception as e:
+                    self.log_message(f"❌ Spot payload variant {i} error: {e}", level="DEBUG")
             
-            # Проверяем статус
-            if response.status != 200:
-                text = await response.text()
-                self.log_message(f"❌ Spot order failed: {response.status}, {text}", level="ERROR")
-                raise Exception(f"Failed to create spot order: {response.status}, message={text!r}")
+            if not success:
+                error_text = await response.text() if response else "No response"
+                raise Exception(f'Failed to create spot order: {response.status if response else "No response"}, message=\'{error_text}\'')
             
             result = await response.json()
             self.log_message(f"✅ Spot order created successfully! Response: {result}", level="INFO")
