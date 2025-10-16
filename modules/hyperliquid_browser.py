@@ -409,6 +409,12 @@ class HyperliquidBrowser:
             
             if not success:
                 self.log_message("❌ All payload variants failed", level="WARNING")
+                
+                # Проверяем, есть ли USDC баланс
+                if usdc_balance is None or usdc_balance == 0:
+                    self.log_message("❌ CRITICAL: No USDC balance in spot account! You need to deposit USDC first.", level="ERROR")
+                    self.log_message("💡 SOLUTION: Transfer USDC to your spot account before trading.", level="INFO")
+                    raise Exception("No USDC balance in spot account")
             
             # Проверяем статус ответа
             if response and response.status != 200:
@@ -416,10 +422,10 @@ class HyperliquidBrowser:
                 try:
                     error_text = await response.text()
                     self.log_message(f"🔍 DEBUG: Error response text: {error_text}", level="DEBUG")
-                    raise Exception(f'Failed to create order: {response.status}, message=\'{error_text}\', url=\'{url}\'')
+                    raise Exception(f'Failed to create order: {response.status}, message=\'{error_text}\'')
                 except Exception as text_error:
                     self.log_message(f"🔍 DEBUG: Failed to get error text: {text_error}", level="DEBUG")
-                    raise Exception(f'Failed to create order: {response.status}, url=\'{url}\'')
+                    raise Exception(f'Failed to create order: {response.status}')
             
             # Пытаемся парсить JSON
             try:
