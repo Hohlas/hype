@@ -40,16 +40,31 @@ class HyperliquidBrowser:
         # Web3 setup
         self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
         
-        # Диагностика приватного ключа (убрано для чистоты логов)
+        # Диагностика приватного ключа и инициализация аккаунта
         if private_key:
-            self.account = Account.from_key(private_key)
-            
-            # Проверка совпадения адресов
-            if self.account.address.lower() != wallet_address.lower():
-                self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
-                self.log_message(f"❌ This means the private key doesn't match the wallet address!", level="ERROR")
+            # Убедимся что ключ в правильном формате (без 0x или с 0x)
+            if private_key.startswith('0x'):
+                clean_key = private_key[2:]  # Убираем 0x
             else:
-                self.log_message(f"✅ SUCCESS: Private key matches wallet address!", level="INFO")
+                clean_key = private_key
+                
+            self.log_message(f"🔍 DEBUG: Private key length: {len(clean_key)}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Private key format check passed: {len(clean_key) == 64}", level="DEBUG")
+            
+            # Создаем и сохраняем аккаунт
+            try:
+                self.account = Account.from_key(clean_key)
+                self.log_message(f"🔍 DEBUG: Created account with address: {self.account.address}", level="DEBUG")
+                
+                # Проверка совпадения адресов
+                if self.account.address.lower() != wallet_address.lower():
+                    self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
+                    self.log_message(f"❌ This means the private key doesn't match the wallet address!", level="ERROR")
+                else:
+                    self.log_message(f"✅ SUCCESS: Private key matches wallet address!", level="INFO")
+            except Exception as e:
+                self.log_message(f"❌ Failed to create account: {str(e)}", level="ERROR")
+                raise
         else:
             self.log_message(f"❌ No private key provided!", level="ERROR")
             self.account = None
@@ -163,9 +178,16 @@ class HyperliquidBrowser:
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
-            # Проверка соответствия адреса
-            if self.wallet_address.lower() != self.account.address.lower():
-                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+            # Проверим наличие аккаунта
+            if not self.account:
+                raise Exception("No account available for signing")
+                
+            # Проверка соответствия адреса и вывод текущего адреса для диагностики
+            current_address = self.account.address.lower()
+            self.log_message(f"🔍 DEBUG: Current signing address: {current_address}", level="DEBUG")
+            
+            if self.wallet_address.lower() != current_address:
+                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {current_address}")
             
             def normalize_number(n):
                 if isinstance(n, str):
