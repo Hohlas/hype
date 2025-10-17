@@ -151,9 +151,8 @@ class HyperliquidBrowser:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
             # Определяем phantom agent - попробуем другой способ
-            # Создаем connectionId из action + nonce
-            action_with_nonce = {**action, "nonce": nonce}
-            connection_id_hash = keccak(text=json.dumps(action_with_nonce, separators=(',', ':'), sort_keys=True))
+            # Создаем connectionId только из action (без nonce)
+            connection_id_hash = keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
             
             # Попробуем другую структуру EIP-712 для Hyperliquid
             data = {
@@ -164,18 +163,18 @@ class HyperliquidBrowser:
                     "version": "1"
                 },
                 "types": {
-                    "Agent": [
-                        {"name": "source", "type": "address"},
-                        {"name": "connectionId", "type": "bytes32"}
-                    ],
                     "EIP712Domain": [
                         {"name": "name", "type": "string"},
                         {"name": "version", "type": "string"},
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "Action": [
+                        {"name": "source", "type": "address"},
+                        {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
-                "primaryType": "Agent",
+                "primaryType": "Action",
                 "message": {
                     "source": self.wallet_address,
                     "connectionId": connection_id_hash
