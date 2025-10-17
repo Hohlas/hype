@@ -154,12 +154,14 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Создаем и форматируем connectionId правильно
+            # Создаем bytes32 для connectionId
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
             connection_id_bytes = keccak(text=action_str)
             
-            # Преобразуем bytes32 в правильный формат для EIP-712
-            connection_id = "0x" + connection_id_bytes.hex()
+            # Для логирования создаем hex версию
+            connection_id_hex = "0x" + connection_id_bytes.hex()
+            self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Connection ID (hex): {connection_id_hex}", level="DEBUG")
             
             # Структура EIP-712 для Hyperliquid
             data = {
@@ -184,7 +186,7 @@ class HyperliquidBrowser:
                 "primaryType": "Action",
                 "message": {
                     "source": self.wallet_address.lower(),  # Используем нижний регистр
-                    "connectionId": connection_id  # Используем правильно форматированный connectionId
+                    "connectionId": connection_id_bytes  # Используем чистые bytes
                 }
             }
             
@@ -196,7 +198,6 @@ class HyperliquidBrowser:
                 # Дополнительная проверка подписи
                 self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
                 self.log_message(f"🔍 DEBUG: Message source: {self.wallet_address.lower()}", level="DEBUG")
-                self.log_message(f"🔍 DEBUG: Using connectionId: {connection_id}", level="DEBUG")
             except Exception as e:
                 self.log_message(f"❌ Failed to encode/sign data: {str(e)}", level="ERROR")
                 raise
@@ -208,7 +209,7 @@ class HyperliquidBrowser:
                 "primaryType": data["primaryType"],
                 "message": {
                     "source": data["message"]["source"],
-                    "connectionId": connection_id
+                    "connectionId": connection_id_hex
                 }
             }
             self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
