@@ -185,10 +185,17 @@ class HyperliquidBrowser:
             self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Combined hash: 0x{combined_hash.hex()}", level="DEBUG")
             
-            # Используем EIP-712 с нашим адресом вместо phantom agent
+            # Create phantom agent with nonce
+            phantom_agent = {
+                "source": "a",  # "a" for mainnet
+                "connectionId": combined_hash,  # action hash
+                "nonce": nonce  # add nonce to the signature
+            }
+            
+            # Структура EIP-712 для Hyperliquid с phantom agent
             data = {
                 "domain": {
-                    "chainId": 42161,  # Arbitrum mainnet
+                    "chainId": 42161,  # Arbitrum
                     "name": "Hyperliquid",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
@@ -200,16 +207,14 @@ class HyperliquidBrowser:
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
                     ],
-                    "Action": [
-                        {"name": "action", "type": "string"},
-                        {"name": "sender", "type": "address"}
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"},
+                        {"name": "nonce", "type": "uint256"}
                     ]
                 },
-                "primaryType": "Action",
-                "message": {
-                    "action": action_str,  # JSON строка с действием
-                    "sender": self.wallet_address  # Наш адрес кошелька
-                }
+                "primaryType": "Agent",
+                "message": phantom_agent
             }
             
             # Подписываем с EIP-712
@@ -218,7 +223,7 @@ class HyperliquidBrowser:
                 signature = self.account.sign_message(encoded_data)
                 
                 # Дополнительная проверка подписи
-                self.log_message(f"🔍 DEBUG: Sender address: {self.wallet_address}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Phantom agent: {phantom_agent}", level="DEBUG")
                 self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
             except Exception as e:
                 self.log_message(f"❌ Failed to encode/sign data: {str(e)}", level="ERROR")
