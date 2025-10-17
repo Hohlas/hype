@@ -801,30 +801,21 @@ class HyperliquidBrowser:
             # Payload подготовлен для отправки
             
             try:
-                response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)  # Не нужна дополнительная подпись
-                if response.status == 200:
-                    success = True
+                response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
+                result = await response.json()
+                
+                if response.status == 200 and result.get('status') != 'err':
                     self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                    return result
                 else:
-                    self.log_message(f"❌ Spot order failed: {response.status}", level="ERROR")
-                    
-                    # Получаем детальную информацию об ошибке
-                    try:
-                        error_text = await response.text()
-                        self.log_message(f"🔍 DEBUG: Error details: {error_text}", level="DEBUG")
-                    except Exception as e:
-                        self.log_message(f"🔍 DEBUG: Failed to get error details: {e}", level="DEBUG")
+                    error_msg = result.get('response') if isinstance(result, dict) else str(result)
+                    error_text = f"Status: {response.status}, Error: {error_msg}"
+                    self.log_message(f"❌ Spot order failed: {error_text}", level="ERROR")
+                    raise Exception(f'Failed to create spot order: {error_text}')
                         
             except Exception as e:
                 self.log_message(f"❌ Spot order error: {e}", level="ERROR")
-            
-            if not success:
-                error_text = await response.text() if response else "No response"
-                raise Exception(f'Failed to create spot order: {response.status if response else "No response"}, message=\'{error_text}\'')
-            
-            result = await response.json()
-            self.log_message(f"✅ Spot order created successfully! Response: {result}", level="INFO")
-            return result
+                raise
 
         except Exception as e:
             self.log_message(f"Failed to create spot order: {e}", level="ERROR")
