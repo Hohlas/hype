@@ -47,6 +47,10 @@ class DataBase:
         """
         Выполнение SQL запроса.
         """
+        if not self.pool:
+            logger.warning("Database pool not initialized, skipping query execution")
+            return None
+            
         async with self.pool.acquire() as conn:
             return await conn.execute(query, *args)
             
@@ -54,6 +58,10 @@ class DataBase:
         """
         Получение данных из базы.
         """
+        if not self.pool:
+            logger.warning("Database pool not initialized, skipping query fetch")
+            return []
+            
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *args)
             
@@ -61,6 +69,10 @@ class DataBase:
         """
         Получение одной строки из базы.
         """
+        if not self.pool:
+            logger.warning("Database pool not initialized, skipping query fetchrow")
+            return None
+            
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(query, *args)
             
@@ -82,6 +94,11 @@ class DataBase:
         Получение отчетов аккаунта.
         """
         try:
+            # Проверяем, что пул соединений инициализирован
+            if not self.pool:
+                logger.warning("Database pool not initialized, skipping report retrieval")
+                return []
+                
             query = """
                 SELECT message FROM reports 
                 WHERE wallet_address = $1 AND id > $2

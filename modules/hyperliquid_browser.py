@@ -229,33 +229,59 @@ class HyperliquidBrowser:
             if response.status != 200:
                 raise Exception(f'Failed to get token price: {result}')
             
-            # Логируем структуру ответа для отладки (отключено)
-            # self.log_message(f"🔍 DEBUG: Price data keys: {list(result.keys())}", level="DEBUG")
-            
             # Пробуем разные варианты названий токенов
             possible_keys = [
                 f"{token_name}USD",
                 f"{token_name}USDT", 
                 f"{token_name}",
                 token_name.upper(),
-                token_name.lower()
+                token_name.lower(),
+                f"{token_name}-PERP",  # Для futures
+                f"{token_name}-SPOT"   # Для spot
             ]
             
             for key in possible_keys:
                 if key in result:
                     price = Decimal(str(result[key]))
-                    # self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
+                    self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
                     return price
             
             # Если не нашли, показываем доступные токены
-            available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key]
-            self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens}", level="DEBUG")
+            available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key or 'PERP' in key or 'SPOT' in key]
+            self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens[:10]}...", level="DEBUG")
             
-            raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens}')
+            raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens[:10]}...')
                 
         except Exception as e:
             self.log_message(f"Failed to get token price: {e}", level="ERROR")
             raise
+            
+    async def get_available_assets(self):
+        """
+        Получение списка доступных активов для торговли
+        """
+        try:
+            url = f"{self.BASE_URL}/info"
+            data = {
+                "type": "meta"
+            }
+            
+            response = await self.send_request("POST", url, data=data)
+            result = await response.json()
+            
+            if response.status != 200:
+                raise Exception(f'Failed to get assets: {result}')
+            
+            # Извлекаем информацию об активах
+            assets = result.get("universe", [])
+            asset_names = [asset.get("name", "") for asset in assets]
+            
+            self.log_message(f"📋 Available assets: {asset_names[:10]}...", level="INFO")
+            return asset_names
+            
+        except Exception as e:
+            self.log_message(f"Failed to get available assets: {e}", level="ERROR")
+            return []
             
     async def get_account_positions(self):
         """
@@ -302,11 +328,18 @@ class HyperliquidBrowser:
             
     async def create_order(self, order_data: dict):
         """
-        Создание ордера - используем единую структуру payload для всех типов торговли
+        Создание ордера - используем spot торговлю с правильной структурой payload
         """
         try:
-            # Всегда используем futures структуру payload, но с доступными средствами
-            return await self._create_futures_order(order_data)
+            # Проверяем, это spot или futures торговля
+            coin = order_data.get("coin", "BTC-SPOT")
+            
+            if "-SPOT" in coin:
+                # Spot торговля - используем правильную структуру payload
+                return await self._create_spot_order(order_data)
+            else:
+                # Futures торговля - используем обычный placeOrder
+                return await self._create_futures_order(order_data)
                 
         except Exception as e:
             self.log_message(f"Failed to create order: {e}", level="ERROR")
@@ -442,7 +475,7 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/exchange"
             
-            # Структура для перевода средств
+            # Правильная структура для перевода средств согласно Hyperliquid API
             transfer_payload = {
                 "action": {
                     "type": "transferBetweenSpotAndPerp",
@@ -455,15 +488,27 @@ class HyperliquidBrowser:
             self.log_message(f"🔄 Transferring ${amount} {'to futures' if to_perp else 'to spot'}...", level="INFO")
             self.log_message(f"🔍 DEBUG: Transfer payload: {transfer_payload}", level="DEBUG")
             
+            # Проверяем, что у нас есть приватный ключ для подписи
+            if not self.private_key:
+                raise Exception("Private key is required for transfers")
+            
             response = await self.send_request("POST", url, data=transfer_payload, build_signature=True)
             
             if response.status != 200:
                 error_text = await response.text()
+                self.log_message(f"❌ Transfer failed: {error_text}", level="ERROR")
                 raise Exception(f"Transfer failed: {response.status}, {error_text}")
             
-            result = await response.json()
-            self.log_message(f"✅ Transfer successful: {result}", level="INFO")
-            return result
+            # Проверяем, что ответ содержит валидный JSON
+            try:
+                result = await response.json()
+                self.log_message(f"✅ Transfer successful: {result}", level="INFO")
+                return result
+            except Exception as json_error:
+                # Если не JSON, возвращаем текст ответа
+                text_result = await response.text()
+                self.log_message(f"✅ Transfer successful (non-JSON): {text_result}", level="INFO")
+                return {"status": "success", "message": text_result}
             
         except Exception as e:
             self.log_message(f"Failed to transfer between spot and perp: {e}", level="ERROR")
@@ -498,7 +543,7 @@ class HyperliquidBrowser:
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
             
             payload_variants = [
-                # Вариант 1: Market ордер с правильной структурой
+                # Вариант 1: Market ордер с правильной структурой для spot
                 {
                     "action": {
                         "type": "order",
@@ -612,65 +657,64 @@ class HyperliquidBrowser:
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
             
             payload_variants = [
-                # Вариант 1: Market ордер с правильной структурой
+                # Вариант 1: Правильная структура для Hyperliquid API v2
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"market": {}}  # market ордер
+                            "a": order_data.get("coin", "BTC-PERP"),  # Asset name
+                            "b": order_data.get("is_buy", True),  # Boolean для покупки/продажи
+                            "p": px_str,  # Price как строка
+                            "s": sz_str,  # Size как строка
+                            "r": order_data.get("reduce_only", False),  # Reduce only
+                            "t": {"market": {}}  # Market order
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: Limit ордер с правильной структурой
+                # Вариант 2: Limit ордер с GTC
                 {
                     "action": {
-                        "type": "order",
+                        "type": "order", 
                         "orders": [{
-                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
+                            "a": order_data.get("coin", "BTC-PERP"),
+                            "b": order_data.get("is_buy", True),
+                            "p": px_str,
+                            "s": sz_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"limit": {"tif": "Gtc"}}
                         }],
                         "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Market ордер с ценой (для market ордеров цена тоже нужна!)
+                # Вариант 3: Упрощенная структура без grouping
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью (нужна даже для market!)
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"market": {}}  # market ордер с ценой
-                        }],
-                        "grouping": "na"
+                            "a": order_data.get("coin", "BTC-PERP"),
+                            "b": order_data.get("is_buy", True),
+                            "p": px_str,
+                            "s": sz_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"market": {}}
+                        }]
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 4: Limit ордер с IOC (Immediate Or Cancel)
+                # Вариант 4: Альтернативная структура с числовыми значениями
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": order_data.get("coin", "BTC-PERP"),  # строка "BTC-PERP"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"limit": {"tif": "Ioc"}}  # IOC ордер
+                            "a": order_data.get("coin", "BTC-PERP"),
+                            "b": order_data.get("is_buy", True),
+                            "p": float(px_str),  # Числовое значение цены
+                            "s": float(sz_str),  # Числовое значение размера
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"market": {}}
                         }],
                         "grouping": "na"
                     },
@@ -690,14 +734,24 @@ class HyperliquidBrowser:
                 if account_value == 0.0:
                     self.log_message("⚠️ WARNING: No funds on futures account. Trying to transfer USDC from spot...", level="WARNING")
                     
-                    # Попробуем перевести USDC с spot на futures
-                    try:
-                        transfer_result = await self.transfer_between_spot_and_perp(50.0, True)  # Переводим $50 на futures
-                        self.log_message(f"✅ Transfer result: {transfer_result}", level="INFO")
-                    except Exception as e:
-                        self.log_message(f"❌ Transfer failed: {e}", level="ERROR")
-                        self.log_message("💡 SOLUTION: You need to deposit USDC to your futures account or transfer from spot", level="INFO")
-                        raise Exception("No funds on futures account and transfer failed")
+                    # Сначала проверим spot баланс
+                    spot_balance = await self.get_balance()
+                    self.log_message(f"🔍 DEBUG: Spot USDC balance: ${spot_balance}", level="DEBUG")
+                    
+                    if spot_balance > 0:
+                        # Попробуем перевести USDC с spot на futures
+                        try:
+                            transfer_amount = min(spot_balance * 0.5, 50.0)  # Переводим 50% от баланса или максимум $50
+                            transfer_result = await self.transfer_between_spot_and_perp(transfer_amount, True)
+                            self.log_message(f"✅ Transfer result: {transfer_result}", level="INFO")
+                        except Exception as e:
+                            self.log_message(f"❌ Transfer failed: {e}", level="ERROR")
+                            self.log_message("💡 SOLUTION: You need to deposit USDC to your futures account or transfer from spot", level="INFO")
+                            raise Exception("No funds on futures account and transfer failed")
+                    else:
+                        self.log_message("❌ CRITICAL: No USDC balance in spot account! You need to deposit USDC first.", level="ERROR")
+                        self.log_message("💡 SOLUTION: Transfer USDC to your spot account before trading.", level="INFO")
+                        raise Exception("No USDC balance in spot account")
                 account_info = await self.get_account_info()
                 self.log_message(f"🔍 DEBUG: Account info: {account_info}", level="DEBUG")
                 
@@ -773,6 +827,21 @@ class HyperliquidBrowser:
             if not success:
                 self.log_message("❌ All payload variants failed", level="WARNING")
                 
+                # Получаем детальную информацию об ошибке
+                if response:
+                    try:
+                        error_text = await response.text()
+                        self.log_message(f"🔍 DEBUG: Last error response: {error_text}", level="DEBUG")
+                        
+                        # Попробуем получить JSON ошибки
+                        try:
+                            error_json = await response.json()
+                            self.log_message(f"🔍 DEBUG: Error JSON: {error_json}", level="DEBUG")
+                        except:
+                            pass
+                    except Exception as e:
+                        self.log_message(f"🔍 DEBUG: Failed to get error details: {e}", level="DEBUG")
+                
                 # Проверяем, есть ли USDC баланс (используем данные из clearinghouse)
                 if usdc_balance is None or usdc_balance == 0:
                     self.log_message("❌ CRITICAL: No USDC balance in spot account! You need to deposit USDC first.", level="ERROR")
@@ -781,6 +850,7 @@ class HyperliquidBrowser:
                 else:
                     self.log_message(f"✅ USDC balance found: {usdc_balance}, but trading still failed", level="WARNING")
                     self.log_message("💡 This suggests the issue is with the order structure, not balance", level="INFO")
+                    self.log_message("💡 SOLUTION: Check Hyperliquid API documentation for correct payload format", level="INFO")
             
             # Проверяем статус ответа
             if response and response.status != 200:

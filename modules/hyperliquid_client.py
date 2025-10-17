@@ -83,7 +83,7 @@ class HyperliquidClient:
             # Подготовка данных ордера для Hyperliquid API
             # Используем правильную структуру payload для всех типов ордеров
             order_data = {
-                "coin": f"{token}-PERP",  # Используем BTC-PERP для всех типов торговли
+                "coin": f"{token}-SPOT",  # Используем BTC-SPOT для spot торговли
                 "is_buy": side == "BUY",  # true для покупки, false для продажи
                 "sz": str(quantity),  # Size как строка
                 "limit_px": str(price) if price else str(token_price),  # Всегда нужен limit_px
