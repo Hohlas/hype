@@ -621,7 +621,7 @@ class HyperliquidBrowser:
         Создание spot ордера через общий endpoint /exchange с числовым asset ID.
         """
         try:
-            # Диагностика кошелька (убрано для чистоты логов)
+            # Диагностика кошелька (убрано  для чистоты логов)
             
             # Получаем числовой asset ID для spot актива
             coin = order_data.get("coin", "BTC-SPOT")
