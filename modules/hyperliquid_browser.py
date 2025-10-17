@@ -138,9 +138,10 @@ class HyperliquidBrowser:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
             # Определяем phantom agent
+            connection_id_hash = keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
             phantom_agent = {
                 "source": "0x0000000000000000000000000000000000000000" if is_mainnet else "0x0000000000000000000000000000000000000001",
-                "connectionId": keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
+                "connectionId": connection_id_hash.hex()  # Конвертируем в hex строку
             }
             
             # Структура для подписи EIP-712
@@ -166,7 +167,7 @@ class HyperliquidBrowser:
                 "primaryType": "Agent",
                 "message": {
                     "source": phantom_agent["source"],
-                    "connectionId": phantom_agent["connectionId"].hex()
+                    "connectionId": phantom_agent["connectionId"]
                 }
             }
             
