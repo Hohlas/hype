@@ -167,28 +167,31 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Encode action as JSON first, без пробелов
-            action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            action_bytes = action_str.encode('utf-8')
+            # Encode action as msgpack first
+            action_bytes = msgpack.packb(action)
             
-            # Хешируем action
-            action_hash = keccak(action_bytes)
+            # Add nonce to the end (8 bytes)
+            nonce_bytes = struct.pack(">Q", nonce)
             
-            # Создаем connectionId из одного только хеша action
-            combined_hash = action_hash
+            # Add flag for active pool (1 byte)
+            active_pool_flag = bytes([0])  # 0 for no active pool
+            
+            # Combine everything
+            data_to_hash = action_bytes + nonce_bytes + active_pool_flag
+            
+            # Hash the combined data
+            action_hash = keccak(data_to_hash)
             
             # Выводим для диагностики
-            self.log_message(f"🔍 DEBUG: Action JSON: {action_str}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Action JSON: {json.dumps(action)}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
-            
-            action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Combined hash: 0x{combined_hash.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Action string: {json.dumps(action)}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Combined hash: 0x{action_hash.hex()}", level="DEBUG")
             
             # Create phantom agent with nonce
             phantom_agent = {
                 "source": "a",  # "a" for mainnet
-                "connectionId": combined_hash,  # action hash
+                "connectionId": bytes(action_hash),  # Pass the raw bytes
                 "nonce": nonce  # add nonce to the signature
             }
             
@@ -196,7 +199,7 @@ class HyperliquidBrowser:
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
-                    "name": "Hyperliquid",
+                    "name": "Exchange",  # Changed from "Hyperliquid" to "Exchange"
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
                 },
@@ -236,13 +239,14 @@ class HyperliquidBrowser:
                 "primaryType": data["primaryType"],
                 "message": {
                     "source": data["message"]["source"],
-                    "connectionId": "0x" + combined_hash.hex(),
+                    "connectionId": "0x" + action_hash.hex(),
                     "nonce": nonce
                 }
             }
             self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
             self.log_message(f"🔍 Wallet address in signature: {self.wallet_address}", level="DEBUG")
             
+            # Return the signature in the expected format
             return {
                 "r": "0x" + signature.r.to_bytes(32, "big").hex(),
                 "s": "0x" + signature.s.to_bytes(32, "big").hex(),
