@@ -158,7 +158,7 @@ class HyperliquidBrowser:
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
-                    "name": "Exchange",
+                    "name": "Hyperliquid",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
                 },
@@ -170,7 +170,7 @@ class HyperliquidBrowser:
                         {"name": "verifyingContract", "type": "address"}
                     ],
                     "Action": [
-                        {"name": "source", "type": "address"},
+                        {"name": "source", "type": "string"},
                         {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
