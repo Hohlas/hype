@@ -154,11 +154,14 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Создаем connectionId из action
+            # Создаем и форматируем connectionId правильно
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            connection_id_hash = keccak(text=action_str)
+            connection_id_bytes = keccak(text=action_str)
             
-            # Правильная структура EIP-712 для Hyperliquid с нижним регистром адреса
+            # Преобразуем bytes32 в правильный формат для EIP-712
+            connection_id = "0x" + connection_id_bytes.hex()
+            
+            # Структура EIP-712 для Hyperliquid
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
@@ -181,28 +184,31 @@ class HyperliquidBrowser:
                 "primaryType": "Action",
                 "message": {
                     "source": self.wallet_address.lower(),  # Используем нижний регистр
-                    "connectionId": connection_id_hash.hex()  # Преобразуем bytes в hex
+                    "connectionId": connection_id  # Используем правильно форматированный connectionId
                 }
             }
             
             # Подписываем с EIP-712
-            encoded_data = encode_structured_data(data)
-            signature = self.account.sign_message(encoded_data)
-            
-            # Дополнительная проверка подписи
-            self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Message source: {self.wallet_address.lower()}", level="DEBUG")
+            try:
+                encoded_data = encode_structured_data(data)
+                signature = self.account.sign_message(encoded_data)
+                
+                # Дополнительная проверка подписи
+                self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Message source: {self.wallet_address.lower()}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Using connectionId: {connection_id}", level="DEBUG")
+            except Exception as e:
+                self.log_message(f"❌ Failed to encode/sign data: {str(e)}", level="ERROR")
+                raise
             
             # Диагностика: показываем что подписываем
-            # Преобразуем bytes в hex для JSON сериализации
-            connection_id_hex = connection_id_hash.hex()
             data_for_log = {
                 "domain": data["domain"],
                 "types": data["types"],
                 "primaryType": data["primaryType"],
                 "message": {
                     "source": data["message"]["source"],
-                    "connectionId": f"0x{connection_id_hex}"
+                    "connectionId": connection_id
                 }
             }
             self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
