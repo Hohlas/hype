@@ -45,6 +45,9 @@ class HyperliquidBrowser:
             # Проверка совпадения адресов
             if self.account.address.lower() != wallet_address.lower():
                 self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
+                self.log_message(f"❌ This means the private key doesn't match the wallet address!", level="ERROR")
+            else:
+                self.log_message(f"✅ SUCCESS: Private key matches wallet address!", level="INFO")
         else:
             self.log_message(f"❌ No private key provided!", level="ERROR")
             self.account = None
@@ -605,6 +608,11 @@ class HyperliquidBrowser:
         Создание spot ордера через общий endpoint /exchange с числовым asset ID.
         """
         try:
+            # Отладочный вывод для диагностики
+            self.log_message(f"🔍 DEBUG: Using wallet address: {self.wallet_address}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Using private key starts with: {self.private_key[:10]}...", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Account address from private key: {self.account.address}", level="DEBUG")
+            
             # Попробуем разные endpoint'ы для spot торговли
             endpoints_to_try = [
                 f"{self.BASE_URL}/exchange",  # Основной endpoint
