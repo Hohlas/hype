@@ -44,8 +44,12 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
                     "proxy": parts[3].strip() if len(parts) > 3 else "",
                 }
                 
-                wallets.append(wallet_data)
+                # Диагностика загруженного кошелька
                 print(f"✅ Загружен кошелек: {wallet_data['label']} ({wallet_data['wallet_address'][:10]}...)")
+                print(f"🔑 Private key length: {len(wallet_data['private_key'])}")
+                print(f"🔑 Private key starts with: {wallet_data['private_key'][:10]}...")
+                
+                wallets.append(wallet_data)
     
     except Exception as e:
         print(f"❌ Ошибка чтения файла {file_path}: {e}")

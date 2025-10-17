@@ -34,7 +34,20 @@ class HyperliquidBrowser:
         
         # Web3 setup
         self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
-        self.account = Account.from_key(private_key) if private_key else None
+        
+        # Диагностика приватного ключа
+        if private_key:
+            self.log_message(f"🔑 Using private key: {private_key[:10]}...", level="DEBUG")
+            self.account = Account.from_key(private_key)
+            self.log_message(f"✅ Account address: {self.account.address}", level="DEBUG")
+            self.log_message(f"✅ Expected address: {wallet_address}", level="DEBUG")
+            
+            # Проверка совпадения адресов
+            if self.account.address.lower() != wallet_address.lower():
+                self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
+        else:
+            self.log_message(f"❌ No private key provided!", level="ERROR")
+            self.account = None
         
         # Session management
         self.session = None
