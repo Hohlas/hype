@@ -167,20 +167,46 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Encode action as msgpack first
-            action_bytes = msgpack.packb(action)
+            # First normalize the action to remove trailing zeros
+            def normalize_number(n):
+                if isinstance(n, str):
+                    # Remove trailing zeros after decimal point
+                    if '.' in n:
+                        return n.rstrip('0').rstrip('.')
+                    return n
+                return n
+
+            def normalize_action(obj):
+                if isinstance(obj, dict):
+                    return {k: normalize_action(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [normalize_action(x) for x in obj]
+                elif isinstance(obj, (int, float)):
+                    return str(obj)  # Convert numbers to strings
+                return normalize_number(obj) if isinstance(obj, str) else obj
+
+            # Normalize the action
+            normalized_action = normalize_action(action)
             
-            # Add nonce to the end (8 bytes)
-            nonce_bytes = struct.pack(">Q", nonce)
+            # Encode action as msgpack
+            action_bytes = msgpack.packb(normalized_action, use_bin_type=True)
             
-            # Add flag for active pool (1 byte)
-            active_pool_flag = bytes([0])  # 0 for no active pool
+            # Create the buffer with exact size
+            total_size = len(action_bytes) + 9  # 8 bytes for nonce + 1 byte for flag
+            data = bytearray(total_size)
             
-            # Combine everything
-            data_to_hash = action_bytes + nonce_bytes + active_pool_flag
+            # Copy action bytes
+            data[:len(action_bytes)] = action_bytes
+            
+            # Add nonce as big-endian uint64
+            nonce_bytes = nonce.to_bytes(8, byteorder='big', signed=False)
+            data[len(action_bytes):len(action_bytes) + 8] = nonce_bytes
+            
+            # Add flag byte (0 for no vault address)
+            data[-1] = 0
             
             # Hash the combined data
-            action_hash = keccak(data_to_hash)
+            action_hash = keccak(bytes(data))
             
             # Выводим для диагностики
             self.log_message(f"🔍 DEBUG: Action JSON: {json.dumps(action)}", level="DEBUG")
@@ -188,18 +214,18 @@ class HyperliquidBrowser:
             self.log_message(f"🔍 DEBUG: Action string: {json.dumps(action)}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Combined hash: 0x{action_hash.hex()}", level="DEBUG")
             
-            # Create phantom agent with nonce
+            # Create phantom agent data structure
             phantom_agent = {
                 "source": "a",  # "a" for mainnet
-                "connectionId": bytes(action_hash),  # Pass the raw bytes
+                "connectionId": action_hash,  # Use the raw hash bytes
                 "nonce": nonce  # add nonce to the signature
             }
-            
-            # Структура EIP-712 для Hyperliquid с phantom agent
+
+            # Create the EIP-712 signature structure
             data = {
                 "domain": {
-                    "chainId": 42161,  # Arbitrum
-                    "name": "Exchange",  # Changed from "Hyperliquid" to "Exchange"
+                    "chainId": 1337,  # Fixed chainId from reference code
+                    "name": "Exchange",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
                 },
