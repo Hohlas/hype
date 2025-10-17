@@ -6,6 +6,8 @@ import json
 import time
 import hmac
 import hashlib
+import struct
+import msgpack
 from eth_account import Account
 from eth_account.messages import encode_defunct, encode_structured_data
 from eth_account.signers.local import LocalAccount
@@ -154,23 +156,41 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Готовим данные в правильном порядке
+            # Encode the action as msgpack and combine with nonce and vault address
+            action_bytes = msgpack.packb(action, use_bin_type=True)
+            
+            # Add nonce bytes (8 bytes big-endian)
+            nonce_bytes = struct.pack('>Q', nonce)  # Q = unsigned long long, 8 bytes
+            
+            # Add vault flag and address if present
+            vault_address = None  # We don't use vault addresses for spot trading
+            if vault_address is None:
+                vault_bytes = bytes([0])  # 0 = no vault
+            else:
+                vault_bytes = bytes([1]) + bytes.fromhex(vault_address[2:])  # 1 = has vault, followed by address
+                
+            # Combine all components in order
+            all_bytes = action_bytes + nonce_bytes + vault_bytes
+            
+            # Hash the combined bytes to get connectionId
+            combined_hash = keccak(all_bytes)
+            
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            
-            # Создаем хэш action отдельно, это будет нашим connectionId
-            connection_hash = keccak(text=action_str)
-            
-            # Нам не нужно комбинировать хэши, connectionId это просто хэш action
-            combined_hash = connection_hash
-            
             self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Connection hash: 0x{connection_hash.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Combined hash: 0x{combined_hash.hex()}", level="DEBUG")
             
-            # Структура EIP-712 для Hyperliquid с обновленными типами
+            # Create phantom agent for the signature
+            is_mainnet = True  # Always true for spot trading
+            phantom_agent = {
+                "source": "a" if is_mainnet else "b",  # "a" for mainnet, "b" for testnet
+                "connectionId": combined_hash  # Use the hash we calculated
+            }
+            
+            # Структура EIP-712 для Hyperliquid с phantom agent
             data = {
                 "domain": {
-                    "chainId": 42161,  # Arbitrum
-                    "name": "Hyperliquid",
+                    "chainId": 1337,  # Fixed value for phantom domain
+                    "name": "Exchange",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
                 },
@@ -181,18 +201,13 @@ class HyperliquidBrowser:
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
                     ],
-                    "Action": [
-                        {"name": "source", "type": "address"},
-                        {"name": "connectionId", "type": "bytes32"},
-                        {"name": "nonce", "type": "uint256"}
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
-                "primaryType": "Action",
-                "message": {
-                    "source": self.wallet_address,  # Оставляем оригинальный регистр
-                    "connectionId": combined_hash,  # Используем комбинированный хэш
-                    "nonce": nonce
-                }
+                "primaryType": "Agent",
+                "message": phantom_agent
             }
             
             # Подписываем с EIP-712
@@ -201,8 +216,8 @@ class HyperliquidBrowser:
                 signature = self.account.sign_message(encoded_data)
                 
                 # Дополнительная проверка подписи
+                self.log_message(f"🔍 DEBUG: Phantom source: {phantom_agent['source']}", level="DEBUG")
                 self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
-                self.log_message(f"🔍 DEBUG: Message source: {self.wallet_address.lower()}", level="DEBUG")
             except Exception as e:
                 self.log_message(f"❌ Failed to encode/sign data: {str(e)}", level="ERROR")
                 raise
