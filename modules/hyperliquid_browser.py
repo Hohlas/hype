@@ -142,14 +142,22 @@ class HyperliquidBrowser:
             logger.error(f"Request failed: {e}")
             raise
             
-    def float_to_wire(self, x: float) -> str:
+    def float_to_wire(self, x: float, is_price: bool = False) -> str:
         """Конвертирует float в строку с правильным форматированием"""
-        rounded = "{:.8f}".format(x)
-        # Убираем trailing zeros, но оставляем хотя бы один знак после точки
-        if '.' in rounded:
-            rounded = rounded.rstrip('0')
-            if rounded.endswith('.'):
-                rounded = rounded + '0'
+        if is_price:
+            # Для цен используем фиксированное количество знаков после точки (1)
+            # и округляем до размера тика
+            if self.btc_tick_size:
+                x = round(x / self.btc_tick_size) * self.btc_tick_size
+            rounded = "{:.1f}".format(x)
+        else:
+            # Для остальных чисел (размер ордера и т.д.) используем прежнюю логику
+            rounded = "{:.8f}".format(x)
+            # Убираем trailing zeros, но оставляем хотя бы один знак после точки
+            if '.' in rounded:
+                rounded = rounded.rstrip('0')
+                if rounded.endswith('.'):
+                    rounded = rounded + '0'
         return rounded
 
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
@@ -682,12 +690,10 @@ class HyperliquidBrowser:
             sz_value = float(order_data.get("sz", "0.001"))
             sz_str = f"{sz_value:.5f}"  # строка, напр. "0.00116"
             
-            # Форматируем цену до 2 знаков после запятой
+            # Берем цену из данных ордера
             px_value = float(order_data.get("limit_px", 108000))
-            # Округляем цену до ближайшего тика
-            if self.btc_tick_size:
-                px_value = round(px_value / self.btc_tick_size) * self.btc_tick_size
-            px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
+            # Округление до тика теперь происходит в float_to_wire
+            px_str = self.float_to_wire(px_value, is_price=True)  # строка с правильным форматированием
             
             # Используем ту же правильную структуру payload, что и для futures
             # Форматируем числовые поля с правильной точностью
@@ -701,7 +707,7 @@ class HyperliquidBrowser:
             order = {
                 "a": asset_id,  # asset ID из spotMeta
                 "b": order_data.get("is_buy", True),  # true для покупки
-                "p": self.float_to_wire(float(px_str)),  # цена с правильным форматированием
+                "p": px_str,  # цена уже отформатирована
                 "s": self.float_to_wire(float(sz_str)),  # размер с правильным форматированием
                 "r": order_data.get("reduce_only", False),  # reduceOnly
                 "t": {"limit": {"tif": "Gtc"}}  # тип ордера
