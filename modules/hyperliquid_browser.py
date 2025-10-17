@@ -348,67 +348,64 @@ class HyperliquidBrowser:
 
     async def _get_spot_asset_id(self, coin: str) -> int:
         """
-        Получить числовой asset ID для spot актива.
-        BTC-SPOT -> используем стандартный asset ID для BTC.
+        Получить числовой asset ID для spot актива через spotMeta.
+        BTC-SPOT -> ищем UBTC/USDC в spotMeta и используем 10000 + index.
         """
         try:
-            # Для основных криптовалют используем стандартные asset ID
             symbol_base = coin.split("-")[0]  # "BTC-SPOT" -> "BTC"
             
-            # Стандартные asset ID для основных криптовалют в Hyperliquid
-            asset_mapping = {
-                "BTC": 10000,  # BTC spot asset ID
-                "ETH": 10001,  # ETH spot asset ID  
-                "SOL": 10002,  # SOL spot asset ID
-                "AVAX": 10003, # AVAX spot asset ID
-                "PURR": 10004, # PURR spot asset ID
-            }
+            # Получаем spotMeta для определения правильного asset ID
+            url = f"{self.BASE_URL}/info"
+            spot_meta_data = {"type": "spotMeta"}
             
-            if symbol_base in asset_mapping:
-                asset_id = asset_mapping[symbol_base]
-                self.log_message(f"✅ Using standard asset ID for {symbol_base}: {asset_id}", level="INFO")
-                return asset_id
+            self.log_message(f"🔍 Getting spotMeta for {symbol_base}...", level="DEBUG")
+            response = await self.send_request("POST", url, data=spot_meta_data, build_signature=False)
             
-            # Если не нашли в стандартных, попробуем получить через API
-            self.log_message(f"⚠️ {symbol_base} not in standard mapping, trying API...", level="INFO")
+            if response.status != 200:
+                raise Exception(f"Failed to get spotMeta: {response.status}")
             
-            # Попробуем разные типы запросов к API
-            api_requests = [
-                {"type": "meta"},
-                {"type": "allMids"},
-                {"type": "clearinghouseState"},
-                {"type": "openOrders"},
-            ]
+            spot_meta = await response.json()
+            self.log_message(f"🔍 DEBUG: spotMeta response: {spot_meta}", level="DEBUG")
             
-            for request_type in api_requests:
-                try:
-                    url = f"{self.BASE_URL}/info"
-                    response = await self.send_request("POST", url, data=request_type, build_signature=False)
-                    
-                    if response.status == 200:
-                        data = await response.json()
-                        self.log_message(f"🔍 DEBUG: API response for {request_type}: {data}", level="DEBUG")
-                        
-                        # Ищем актив в ответе
-                        if isinstance(data, dict):
-                            for key, value in data.items():
-                                if isinstance(value, list):
-                                    for item in value:
-                                        if isinstance(item, dict) and item.get("name") == symbol_base:
-                                            asset_id = item.get("index", 0) + 10000
-                                            self.log_message(f"✅ Found {symbol_base} in {request_type}: asset_id={asset_id}", level="INFO")
-                                            return asset_id
-                except Exception as e:
-                    self.log_message(f"⚠️ API request {request_type} failed: {e}", level="DEBUG")
-                    continue
+            # Ищем нужный актив в universe
+            universe = spot_meta.get("universe", [])
+            self.log_message(f"📋 Found {len(universe)} spot assets in universe", level="INFO")
             
-            # Если ничего не нашли, используем дефолтный asset ID для BTC
-            if symbol_base == "BTC":
-                default_asset_id = 10000
-                self.log_message(f"⚠️ Using default asset ID for BTC: {default_asset_id}", level="WARNING")
-                return default_asset_id
+            # Ищем BTC или UBTC в spot активах
+            target_symbols = [symbol_base, f"U{symbol_base}"]  # BTC и UBTC
             
-            raise Exception(f"Spot asset not found for {coin}. Tried standard mapping and API requests.")
+            for asset in universe:
+                asset_name = asset.get("name", "")
+                asset_index = asset.get("index", -1)
+                
+                # Показываем все доступные активы для справки
+                self.log_message(f"  📋 Asset: {asset_name} (index: {asset_index})", level="DEBUG")
+                
+                # Проверяем, подходит ли этот актив
+                if asset_name in target_symbols:
+                    asset_id = 10000 + asset_index
+                    self.log_message(f"✅ Found {symbol_base} as {asset_name} with index {asset_index}, asset_id: {asset_id}", level="INFO")
+                    return asset_id
+            
+            # Если не нашли точное совпадение, попробуем найти по базовому токену
+            self.log_message(f"⚠️ Exact match not found for {target_symbols}, searching by base token...", level="WARNING")
+            
+            for asset in universe:
+                asset_name = asset.get("name", "")
+                asset_index = asset.get("index", -1)
+                
+                # Проверяем, содержит ли название наш символ
+                if symbol_base in asset_name or asset_name in symbol_base:
+                    asset_id = 10000 + asset_index
+                    self.log_message(f"✅ Found similar asset {asset_name} with index {asset_index}, asset_id: {asset_id}", level="INFO")
+                    return asset_id
+            
+            # Если ничего не нашли, показываем все доступные активы
+            available_assets = [asset.get("name", "") for asset in universe]
+            self.log_message(f"❌ Asset {symbol_base} not found in spot universe", level="ERROR")
+            self.log_message(f"📋 Available spot assets: {available_assets}", level="INFO")
+            
+            raise Exception(f"Spot asset {symbol_base} not found. Available: {available_assets}")
             
         except Exception as e:
             self.log_message(f"Failed to get spot asset ID: {e}", level="ERROR")
@@ -547,91 +544,68 @@ class HyperliquidBrowser:
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
             
             payload_variants = [
-                # Вариант 1: Альтернативная структура для spot торговли
+                # Вариант 1: Правильная структура согласно документации Hyperliquid
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",
-                            "b": order_data.get("is_buy", True),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"market": {}}
-                        }]
+                            "a": asset_id,  # 10000 + spot_index из spotMeta
+                            "b": order_data.get("is_buy", True),  # true для покупки
+                            "p": px_str,  # цена как строка
+                            "s": sz_str,  # размер как строка
+                            "r": order_data.get("reduce_only", False),  # reduceOnly
+                            "t": {"limit": {"tif": "Gtc"}},  # тип ордера
+                            "c": None  # cloid опционально
+                        }],
+                        "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: Структура без grouping
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",
-                            "b": order_data.get("is_buy", True),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"limit": {"tif": "Gtc"}}
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 3: Попробуем числовые значения вместо строк
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",
-                            "b": order_data.get("is_buy", True),
-                            "s": float(sz_str),
-                            "p": float(px_str),
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"market": {}}
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 4: Попробуем без поля "t" (тип ордера)
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",
-                            "b": order_data.get("is_buy", True),
-                            "s": sz_str,
-                            "p": px_str,
-                            "r": order_data.get("reduce_only", False)
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 5: Попробуем с числовым asset ID
+                # Вариант 2: Market ордер с IOC
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
                             "a": asset_id,
                             "b": order_data.get("is_buy", True),
-                            "s": sz_str,
                             "p": px_str,
+                            "s": sz_str,
                             "r": order_data.get("reduce_only", False),
-                            "t": {"market": {}}
-                        }]
+                            "t": {"limit": {"tif": "Ioc"}},  # Market ордер через IOC
+                            "c": None
+                        }],
+                        "grouping": "na"
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 6: Попробуем другую структуру с isBuy вместо b
+                # Вариант 3: Без поля "c" (cloid)
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",
-                            "isBuy": order_data.get("is_buy", True),
-                            "sz": sz_str,
-                            "px": px_str,
-                            "reduceOnly": order_data.get("reduce_only", False),
-                            "orderType": {"market": {}}
+                            "a": asset_id,
+                            "b": order_data.get("is_buy", True),
+                            "p": px_str,
+                            "s": sz_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }],
+                        "grouping": "na"
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 4: Без поля "grouping"
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": asset_id,
+                            "b": order_data.get("is_buy", True),
+                            "p": px_str,
+                            "s": sz_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"limit": {"tif": "Gtc"}},
+                            "c": None
                         }]
                     },
                     "nonce": int(time.time() * 1000)
@@ -996,7 +970,7 @@ class HyperliquidBrowser:
         try:
             self.log_message("🔍 Starting API structure diagnosis...", level="INFO")
             
-            # Получаем мета-информацию
+            # Получаем мета-информацию для futures
             try:
                 url = f"{self.BASE_URL}/info"
                 meta_data = {"type": "meta"}
@@ -1004,21 +978,48 @@ class HyperliquidBrowser:
                 
                 if response.status == 200:
                     meta_result = await response.json()
-                    self.log_message(f"✅ Meta API response: {meta_result}", level="INFO")
+                    self.log_message(f"✅ Futures Meta API response: {meta_result}", level="INFO")
                     
                     # Извлекаем информацию об активах
                     universe = meta_result.get("universe", [])
-                    self.log_message(f"📋 Universe contains {len(universe)} assets", level="INFO")
+                    self.log_message(f"📋 Futures Universe contains {len(universe)} assets", level="INFO")
                     
                     # Показываем первые несколько активов
                     for i, asset in enumerate(universe[:5]):
                         self.log_message(f"  {i+1}. {asset}", level="INFO")
                         
                 else:
-                    self.log_message(f"❌ Meta API failed: {response.status}", level="ERROR")
+                    self.log_message(f"❌ Futures Meta API failed: {response.status}", level="ERROR")
                     
             except Exception as e:
-                self.log_message(f"❌ Meta API error: {e}", level="ERROR")
+                self.log_message(f"❌ Futures Meta API error: {e}", level="ERROR")
+            
+            # Получаем spotMeta для spot торговли
+            try:
+                url = f"{self.BASE_URL}/info"
+                spot_meta_data = {"type": "spotMeta"}
+                response = await self.send_request("POST", url, data=spot_meta_data, build_signature=False)
+                
+                if response.status == 200:
+                    spot_meta_result = await response.json()
+                    self.log_message(f"✅ Spot Meta API response: {spot_meta_result}", level="INFO")
+                    
+                    # Извлекаем информацию о spot активах
+                    spot_universe = spot_meta_result.get("universe", [])
+                    self.log_message(f"📋 Spot Universe contains {len(spot_universe)} assets", level="INFO")
+                    
+                    # Показываем все spot активы с их индексами
+                    for i, asset in enumerate(spot_universe):
+                        asset_name = asset.get("name", "")
+                        asset_index = asset.get("index", -1)
+                        asset_id = 10000 + asset_index
+                        self.log_message(f"  {i+1}. {asset_name} (index: {asset_index}, asset_id: {asset_id})", level="INFO")
+                        
+                else:
+                    self.log_message(f"❌ Spot Meta API failed: {response.status}", level="ERROR")
+                    
+            except Exception as e:
+                self.log_message(f"❌ Spot Meta API error: {e}", level="ERROR")
             
             # Получаем информацию о ценах
             try:
