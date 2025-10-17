@@ -187,7 +187,18 @@ class HyperliquidBrowser:
             signature = self.account.sign_message(encoded_data)
             
             # Диагностика: показываем что подписываем
-            self.log_message(f"🔍 EIP-712 data: {json.dumps(data, indent=2)}", level="DEBUG")
+            # Преобразуем bytes в hex для JSON сериализации
+            connection_id_hex = connection_id_hash.hex()
+            data_for_log = {
+                "domain": data["domain"],
+                "types": data["types"],
+                "primaryType": data["primaryType"],
+                "message": {
+                    "source": data["message"]["source"],
+                    "connectionId": f"0x{connection_id_hex}"
+                }
+            }
+            self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
             self.log_message(f"🔍 Wallet address in signature: {self.wallet_address}", level="DEBUG")
             
             return {
