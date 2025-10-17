@@ -623,16 +623,16 @@ class HyperliquidBrowser:
         try:
             # Диагностика кошелька (убрано для чистоты логов)
             
-            # Попробуем разные endpoint'ы для spot торговли
-            endpoints_to_try = [
-                f"{self.BASE_URL}/exchange",  # Основной endpoint
-                f"{self.BASE_URL}/spot",     # Возможный spot endpoint
-                f"{self.BASE_URL}/orders",  # Возможный orders endpoint
-            ]
-            
             # Получаем числовой asset ID для spot актива
             coin = order_data.get("coin", "BTC-SPOT")
             asset_id = await self._get_spot_asset_id(coin)
+            
+            # Make sure wallet address matches
+            if self.wallet_address.lower() != self.account.address.lower():
+                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+                
+            # Using only the main exchange endpoint for spot trading
+            endpoint_url = f"{self.BASE_URL}/exchange"
             
             # Форматируем размер до 5 знаков после запятой
             sz_value = float(order_data.get("sz", "0.001"))
@@ -737,10 +737,14 @@ class HyperliquidBrowser:
                 f"{self.BASE_URL}/exchange"
             ]
             
-            # ПРАВИЛЬНАЯ структура payload для futures торговли согласно Perplexity
+            # Double check wallet address before preparing payload
+            if self.wallet_address.lower() != self.account.address.lower():
+                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+            
+            # ПРАВИЛЬНАЯ структура payload для futures торговли
             # Форматируем числовые поля с правильной точностью
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки для BTC-PERP
+            sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки
             
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
