@@ -371,33 +371,50 @@ class HyperliquidBrowser:
             universe = spot_meta.get("universe", [])
             self.log_message(f"📋 Found {len(universe)} spot assets in universe", level="INFO")
             
-            # Ищем BTC или UBTC в spot активах
+            # Ищем BTC или UBTC в spot активах через tokens
             target_symbols = [symbol_base, f"U{symbol_base}"]  # BTC и UBTC
             
+            # Получаем список токенов для поиска
+            tokens = spot_meta.get("tokens", [])
+            self.log_message(f"📋 Found {len(tokens)} tokens in spotMeta", level="INFO")
+            
+            # Ищем токен BTC в списке токенов
+            btc_token_index = None
+            for token in tokens:
+                token_name = token.get("name", "")
+                token_index = token.get("index", -1)
+                
+                if token_name in target_symbols:
+                    btc_token_index = token_index
+                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (index: {token_index})", level="INFO")
+                    break
+            
+            if btc_token_index is None:
+                # Показываем первые несколько токенов для справки
+                self.log_message(f"📋 First 10 tokens: {[t.get('name', '') for t in tokens[:10]]}", level="INFO")
+                
+                # Попробуем найти BTC в полном списке токенов
+                self.log_message(f"🔍 Searching for BTC in all {len(tokens)} tokens...", level="INFO")
+                for i, token in enumerate(tokens):
+                    token_name = token.get("name", "")
+                    if "BTC" in token_name.upper() or token_name.upper() == "BTC":
+                        btc_token_index = token.get("index", -1)
+                        self.log_message(f"✅ Found BTC token: {token_name} (index: {btc_token_index})", level="INFO")
+                        break
+                
+                if btc_token_index is None:
+                    raise Exception(f"Token {symbol_base} not found in tokens list")
+            
+            # Теперь ищем spot актив, который использует этот токен
             for asset in universe:
                 asset_name = asset.get("name", "")
                 asset_index = asset.get("index", -1)
+                asset_tokens = asset.get("tokens", [])
                 
-                # Показываем все доступные активы для справки
-                self.log_message(f"  📋 Asset: {asset_name} (index: {asset_index})", level="DEBUG")
-                
-                # Проверяем, подходит ли этот актив
-                if asset_name in target_symbols:
+                # Проверяем, содержит ли этот актив наш токен
+                if btc_token_index in asset_tokens:
                     asset_id = 10000 + asset_index
-                    self.log_message(f"✅ Found {symbol_base} as {asset_name} with index {asset_index}, asset_id: {asset_id}", level="INFO")
-                    return asset_id
-            
-            # Если не нашли точное совпадение, попробуем найти по базовому токену
-            self.log_message(f"⚠️ Exact match not found for {target_symbols}, searching by base token...", level="WARNING")
-            
-            for asset in universe:
-                asset_name = asset.get("name", "")
-                asset_index = asset.get("index", -1)
-                
-                # Проверяем, содержит ли название наш символ
-                if symbol_base in asset_name or asset_name in symbol_base:
-                    asset_id = 10000 + asset_index
-                    self.log_message(f"✅ Found similar asset {asset_name} with index {asset_index}, asset_id: {asset_id}", level="INFO")
+                    self.log_message(f"✅ Found {symbol_base} spot asset: {asset_name} (index: {asset_index}, tokens: {asset_tokens}), asset_id: {asset_id}", level="INFO")
                     return asset_id
             
             # Если ничего не нашли, показываем все доступные активы
