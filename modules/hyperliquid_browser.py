@@ -8,6 +8,8 @@ import hmac
 import hashlib
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from eth_account.signers.local import LocalAccount
+from eth_utils import keccak
 import web3
 from loguru import logger
 import settings
@@ -122,9 +124,72 @@ class HyperliquidBrowser:
             logger.error(f"Request failed: {e}")
             raise
             
+    def float_to_wire(self, x: float) -> str:
+        """Конвертирует float в строку с правильным форматированием"""
+        rounded = "{:.8f}".format(x)
+        # Убираем trailing zeros, но оставляем хотя бы один знак после точки
+        if '.' in rounded:
+            rounded = rounded.rstrip('0')
+            if rounded.endswith('.'):
+                rounded = rounded + '0'
+        return rounded
+
+    def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
+        """Подписывает action для Hyperliquid L1 с EIP-712"""
+        try:
+            # Определяем phantom agent
+            phantom_agent = {
+                "source": "0x0000000000000000000000000000000000000000" if is_mainnet else "0x0000000000000000000000000000000000000001",
+                "connectionId": keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
+            }
+            
+            # Структура для подписи EIP-712
+            data = {
+                "domain": {
+                    "chainId": 42161,  # Arbitrum
+                    "name": "Exchange",
+                    "verifyingContract": "0x0000000000000000000000000000000000000000",
+                    "version": "1"
+                },
+                "types": {
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
+                    ],
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ]
+                },
+                "primaryType": "Agent",
+                "message": {
+                    "source": phantom_agent["source"],
+                    "connectionId": phantom_agent["connectionId"].hex()
+                }
+            }
+            
+            # Подписываем с EIP-712
+            signature = self.account.sign_typed_data(
+                domain_data=data["domain"],
+                message_types=data["types"],
+                message_data=data["message"]
+            )
+            
+            return {
+                "r": "0x" + signature.r.to_bytes(32, "big").hex(),
+                "s": "0x" + signature.s.to_bytes(32, "big").hex(),
+                "v": signature.v
+            }
+            
+        except Exception as e:
+            self.log_message(f"Failed to sign L1 action: {e}", level="ERROR")
+            raise
+
     async def _sign_message(self, message: dict) -> str:
         """
-        Подписание сообщения приватным ключом кошелька
+        Подписание сообщения приватным ключом кошелька (legacy метод)
         """
         try:
             # Сериализация сообщения
@@ -560,74 +625,37 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
             
-            payload_variants = [
-                # Вариант 1: Правильная структура согласно документации Hyperliquid
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,  # 10000 + spot_index из spotMeta
-                            "b": order_data.get("is_buy", True),  # true для покупки
-                            "p": px_str,  # цена как строка
-                            "s": sz_str,  # размер как строка
-                            "r": order_data.get("reduce_only", False),  # reduceOnly
-                            "t": {"limit": {"tif": "Gtc"}},  # тип ордера
-                            "c": None  # cloid опционально
-                        }],
-                        "grouping": "na"
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 2: Market ордер с IOC
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,
-                            "b": order_data.get("is_buy", True),
-                            "p": px_str,
-                            "s": sz_str,
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"limit": {"tif": "Ioc"}},  # Market ордер через IOC
-                            "c": None
-                        }],
-                        "grouping": "na"
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 3: Без поля "c" (cloid)
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,
-                            "b": order_data.get("is_buy", True),
-                            "p": px_str,
-                            "s": sz_str,
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"limit": {"tif": "Gtc"}}
-                        }],
-                        "grouping": "na"
-                    },
-                    "nonce": int(time.time() * 1000)
-                },
-                # Вариант 4: Без поля "grouping"
-                {
-                    "action": {
-                        "type": "order",
-                        "orders": [{
-                            "a": asset_id,
-                            "b": order_data.get("is_buy", True),
-                            "p": px_str,
-                            "s": sz_str,
-                            "r": order_data.get("reduce_only", False),
-                            "t": {"limit": {"tif": "Gtc"}},
-                            "c": None
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000)
-                }
-            ]
+            # Создаем правильную структуру ордера с EIP-712 подписью
+            order = {
+                "a": asset_id,  # asset ID из spotMeta
+                "b": order_data.get("is_buy", True),  # true для покупки
+                "p": self.float_to_wire(float(px_str)),  # цена с правильным форматированием
+                "s": self.float_to_wire(float(sz_str)),  # размер с правильным форматированием
+                "r": order_data.get("reduce_only", False),  # reduceOnly
+                "t": {"limit": {"tif": "Gtc"}}  # тип ордера
+            }
+            
+            # Формируем action
+            action = {
+                "type": "order",
+                "orders": [order],
+                "grouping": "na"
+            }
+            
+            # Создаем nonce
+            nonce = int(time.time() * 1000)
+            
+            # Подписываем action с EIP-712
+            signature = self.sign_l1_action(action, nonce, is_mainnet=True)
+            
+            # Формируем финальный payload
+            payload = {
+                "action": action,
+                "nonce": nonce,
+                "signature": signature
+            }
+            
+            payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
             success = False
             response = None
@@ -639,33 +667,28 @@ class HyperliquidBrowser:
             except Exception as e:
                 self.log_message(f"⚠️ Failed to get available assets: {e}", level="WARNING")
             
-            # Пробуем каждый endpoint с каждым вариантом payload
-            for endpoint_url in endpoints_to_try:
-                self.log_message(f"🔍 DEBUG: Trying endpoint: {endpoint_url}", level="DEBUG")
-                
-                for i, order_payload in enumerate(payload_variants, 1):
+            # Отправляем правильно подписанный payload
+            endpoint_url = f"{self.BASE_URL}/exchange"  # Используем только основной endpoint
+            self.log_message(f"🔍 DEBUG: Sending signed payload to: {endpoint_url}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Payload: {payload}", level="DEBUG")
+            
+            try:
+                response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)  # Не нужна дополнительная подпись
+                if response.status == 200:
+                    success = True
+                    self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                else:
+                    self.log_message(f"❌ Spot order failed: {response.status}", level="ERROR")
+                    
+                    # Получаем детальную информацию об ошибке
                     try:
-                        self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {order_payload}", level="DEBUG")
-                        response = await self.send_request("POST", endpoint_url, data=order_payload, build_signature=True)
-                        if response.status == 200:
-                            success = True
-                            self.log_message(f"✅ SUCCESS: Endpoint {endpoint_url} with spot payload variant {i} worked!", level="INFO")
-                            break
-                        else:
-                            self.log_message(f"❌ Endpoint {endpoint_url} spot payload variant {i} failed: {response.status}", level="DEBUG")
-                            
-                            # Получаем детальную информацию об ошибке
-                            try:
-                                error_text = await response.text()
-                                self.log_message(f"🔍 DEBUG: Error details for {endpoint_url} variant {i}: {error_text}", level="DEBUG")
-                            except Exception as e:
-                                self.log_message(f"🔍 DEBUG: Failed to get error details for {endpoint_url} variant {i}: {e}", level="DEBUG")
-                                
+                        error_text = await response.text()
+                        self.log_message(f"🔍 DEBUG: Error details: {error_text}", level="DEBUG")
                     except Exception as e:
-                        self.log_message(f"❌ Endpoint {endpoint_url} spot payload variant {i} error: {e}", level="DEBUG")
-                
-                if success:
-                    break
+                        self.log_message(f"🔍 DEBUG: Failed to get error details: {e}", level="DEBUG")
+                        
+            except Exception as e:
+                self.log_message(f"❌ Spot order error: {e}", level="ERROR")
             
             if not success:
                 error_text = await response.text() if response else "No response"
