@@ -150,10 +150,12 @@ class HyperliquidBrowser:
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
-            # Определяем phantom agent
-            connection_id_hash = keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
+            # Определяем phantom agent - попробуем другой способ
+            # Создаем connectionId из action + nonce
+            action_with_nonce = {**action, "nonce": nonce}
+            connection_id_hash = keccak(text=json.dumps(action_with_nonce, separators=(',', ':'), sort_keys=True))
             
-            # Структура для подписи EIP-712
+            # Попробуем другую структуру EIP-712 для Hyperliquid
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
@@ -163,7 +165,7 @@ class HyperliquidBrowser:
                 },
                 "types": {
                     "Agent": [
-                        {"name": "source", "type": "string"},
+                        {"name": "source", "type": "address"},
                         {"name": "connectionId", "type": "bytes32"}
                     ],
                     "EIP712Domain": [
@@ -175,14 +177,18 @@ class HyperliquidBrowser:
                 },
                 "primaryType": "Agent",
                 "message": {
-                    "source": self.wallet_address,  # Используем реальный адрес кошелька
-                    "connectionId": connection_id_hash  # Используем hash объект напрямую
+                    "source": self.wallet_address,
+                    "connectionId": connection_id_hash
                 }
             }
             
             # Подписываем с EIP-712
             encoded_data = encode_structured_data(data)
             signature = self.account.sign_message(encoded_data)
+            
+            # Диагностика: показываем что подписываем
+            self.log_message(f"🔍 EIP-712 data: {json.dumps(data, indent=2)}", level="DEBUG")
+            self.log_message(f"🔍 Wallet address in signature: {self.wallet_address}", level="DEBUG")
             
             return {
                 "r": "0x" + signature.r.to_bytes(32, "big").hex(),
