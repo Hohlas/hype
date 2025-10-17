@@ -154,17 +154,16 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Создаем структурированное сообщение
+            # Готовим данные в правильном порядке
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            connection_id_bytes = keccak(text=action_str)
-            connection_id_hex = "0x" + connection_id_bytes.hex()
-
-            # Добавляем nonce в connectionId
-            final_connection_id = keccak(text=f"{connection_id_hex}{nonce}")
+            
+            # Сначала создаем connectionId из action и nonce
+            message_to_hash = f"{action_str}{nonce}"
+            connection_id = keccak(text=message_to_hash)
             
             self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Raw connection ID: {connection_id_hex}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Final connection ID: 0x{final_connection_id.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Message to hash: {message_to_hash}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Connection ID: 0x{connection_id.hex()}", level="DEBUG")
             
             # Структура EIP-712 для Hyperliquid с обновленными типами
             data = {
@@ -190,7 +189,7 @@ class HyperliquidBrowser:
                 "primaryType": "Action",
                 "message": {
                     "source": self.wallet_address,  # Оставляем оригинальный регистр
-                    "connectionId": final_connection_id,  # Используем final_connection_id
+                    "connectionId": connection_id,  # Используем единый connectionId
                     "nonce": nonce
                 }
             }
@@ -214,7 +213,7 @@ class HyperliquidBrowser:
                 "primaryType": data["primaryType"],
                 "message": {
                     "source": data["message"]["source"],
-                    "connectionId": connection_id_hex
+                    "connectionId": "0x" + connection_id.hex()
                 }
             }
             self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
