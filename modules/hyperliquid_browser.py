@@ -35,12 +35,9 @@ class HyperliquidBrowser:
         # Web3 setup
         self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
         
-        # Диагностика приватного ключа
+        # Диагностика приватного ключа (убрано для чистоты логов)
         if private_key:
-            self.log_message(f"🔑 Using private key: {private_key[:10]}...", level="DEBUG")
             self.account = Account.from_key(private_key)
-            self.log_message(f"✅ Account address: {self.account.address}", level="DEBUG")
-            self.log_message(f"✅ Expected address: {wallet_address}", level="DEBUG")
             
             # Проверка совпадения адресов
             if self.account.address.lower() != wallet_address.lower():
@@ -178,7 +175,7 @@ class HyperliquidBrowser:
                 },
                 "primaryType": "Agent",
                 "message": {
-                    "source": "0x0000000000000000000000000000000000000000" if is_mainnet else "0x0000000000000000000000000000000000000001",
+                    "source": self.wallet_address,  # Используем реальный адрес кошелька
                     "connectionId": connection_id_hash  # Используем hash объект напрямую
                 }
             }
@@ -318,7 +315,7 @@ class HyperliquidBrowser:
             for key in possible_keys:
                 if key in result:
                     price = Decimal(str(result[key]))
-                    self.log_message(f"🔍 DEBUG: Found price for {token_name} as {key}: ${price}", level="DEBUG")
+                    # Цена найдена
                     return price
             
             # Если не нашли, показываем доступные токены
@@ -440,7 +437,7 @@ class HyperliquidBrowser:
                 raise Exception(f"Failed to get spotMeta: {response.status}")
             
             spot_meta = await response.json()
-            self.log_message(f"🔍 DEBUG: spotMeta response: {spot_meta}", level="DEBUG")
+            # spotMeta получен успешно
             
             # Ищем нужный актив в universe
             universe = spot_meta.get("universe", [])
@@ -608,10 +605,7 @@ class HyperliquidBrowser:
         Создание spot ордера через общий endpoint /exchange с числовым asset ID.
         """
         try:
-            # Отладочный вывод для диагностики
-            self.log_message(f"🔍 DEBUG: Using wallet address: {self.wallet_address}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Using private key starts with: {self.private_key[:10]}...", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Account address from private key: {self.account.address}", level="DEBUG")
+            # Диагностика кошелька (убрано для чистоты логов)
             
             # Попробуем разные endpoint'ы для spot торговли
             endpoints_to_try = [
@@ -678,14 +672,14 @@ class HyperliquidBrowser:
             # Сначала получим информацию о доступных активах для диагностики
             try:
                 available_assets = await self.get_available_assets()
-                self.log_message(f"🔍 DEBUG: Available assets for reference: {available_assets[:5]}...", level="DEBUG")
+                # Список доступных активов получен
             except Exception as e:
                 self.log_message(f"⚠️ Failed to get available assets: {e}", level="WARNING")
             
             # Отправляем правильно подписанный payload
             endpoint_url = f"{self.BASE_URL}/exchange"  # Используем только основной endpoint
-            self.log_message(f"🔍 DEBUG: Sending signed payload to: {endpoint_url}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Payload: {payload}", level="DEBUG")
+            # Отправляем подписанный payload
+            # Payload подготовлен для отправки
             
             try:
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)  # Не нужна дополнительная подпись
