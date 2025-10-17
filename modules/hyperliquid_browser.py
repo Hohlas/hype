@@ -34,6 +34,9 @@ class HyperliquidBrowser:
         self.BASE_URL = settings.HYPERLIQUID_BASE_URL
         self.TESTNET_URL = settings.HYPERLIQUID_TESTNET_URL
         
+        # Trading parameters
+        self.btc_tick_size = 0.5  # Default tick size for BTC
+        
         # Web3 setup
         self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
         
@@ -502,15 +505,20 @@ class HyperliquidBrowser:
             tokens = spot_meta.get("tokens", [])
             self.log_message(f"📋 Found {len(tokens)} tokens in spotMeta", level="INFO")
             
-            # Ищем токен BTC в списке токенов
+            # Ищем токен BTC в списке токенов и его параметры
             btc_token_index = None
+            btc_tick_size = None
             for token in tokens:
                 token_name = token.get("name", "")
                 token_index = token.get("index", -1)
                 
                 if token_name in target_symbols:
                     btc_token_index = token_index
-                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (index: {token_index})", level="INFO")
+                    # Получаем размер тика для токена
+                    meta = token.get("meta", {})
+                    if isinstance(meta, dict):
+                        self.btc_tick_size = float(meta.get("tick", "0.5"))
+                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (index: {token_index}, tick: {self.btc_tick_size})", level="INFO")
                     break
             
             if btc_token_index is None:
@@ -676,6 +684,9 @@ class HyperliquidBrowser:
             
             # Форматируем цену до 2 знаков после запятой
             px_value = float(order_data.get("limit_px", 108000))
+            # Округляем цену до ближайшего тика
+            if self.btc_tick_size:
+                px_value = round(px_value / self.btc_tick_size) * self.btc_tick_size
             px_str = f"{px_value:.2f}"  # строка, напр. "107833.50"
             
             # Используем ту же правильную структуру payload, что и для futures
