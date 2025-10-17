@@ -7,7 +7,7 @@ import time
 import hmac
 import hashlib
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_structured_data
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -171,11 +171,8 @@ class HyperliquidBrowser:
             }
             
             # Подписываем с EIP-712
-            signature = self.account.sign_typed_data(
-                domain_data=data["domain"],
-                message_types=data["types"],
-                message_data=data["message"]
-            )
+            encoded_data = encode_structured_data(data)
+            signature = self.account.sign_message(encoded_data)
             
             return {
                 "r": "0x" + signature.r.to_bytes(32, "big").hex(),
