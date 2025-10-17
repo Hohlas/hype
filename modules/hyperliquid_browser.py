@@ -167,25 +167,39 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # First normalize the action to remove trailing zeros
+            # First normalize the action to remove trailing zeros and handle special fields
             def normalize_number(n):
                 if isinstance(n, str):
                     # Remove trailing zeros after decimal point
                     if '.' in n:
                         return n.rstrip('0').rstrip('.')
                     return n
+                elif isinstance(n, (int, float)):
+                    # Convert to string and normalize
+                    return normalize_number(str(n))
                 return n
 
             def normalize_action(obj):
                 if isinstance(obj, dict):
+                    # Special handling for order fields
+                    if all(k in obj for k in ['a', 'b', 'p', 's', 'r', 't']):
+                        # This is an order object, ensure correct types
+                        return {
+                            'a': int(obj['a']),  # asset ID must be integer
+                            'b': bool(obj['b']),  # is_buy must be boolean
+                            'p': normalize_number(obj['p']),  # price as normalized string
+                            's': normalize_number(obj['s']),  # size as normalized string
+                            'r': bool(obj['r']),  # reduce_only must be boolean
+                            't': normalize_action(obj['t'])  # type object
+                        }
                     return {k: normalize_action(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
                     return [normalize_action(x) for x in obj]
                 elif isinstance(obj, (int, float)):
-                    return str(obj)  # Convert numbers to strings
+                    return normalize_number(obj)
                 return normalize_number(obj) if isinstance(obj, str) else obj
 
-            # Normalize the action
+            # Normalize the action with special field handling
             normalized_action = normalize_action(action)
             
             # Encode action as msgpack
@@ -215,9 +229,10 @@ class HyperliquidBrowser:
             self.log_message(f"🔍 DEBUG: Combined hash: 0x{action_hash.hex()}", level="DEBUG")
             
             # Create phantom agent data structure
+            # CRITICAL: connectionId must be hex string for bytes32 type
             phantom_agent = {
                 "source": "a",  # "a" for mainnet
-                "connectionId": action_hash,  # Use the raw hash bytes
+                "connectionId": "0x" + action_hash.hex(),  # Convert bytes to hex string
                 "nonce": nonce  # add nonce to the signature
             }
 
