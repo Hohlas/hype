@@ -156,20 +156,15 @@ class HyperliquidBrowser:
             
             # Готовим данные в правильном порядке
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
-            nonce_str = str(nonce)
             
-            # Создаем хэш для каждого компонента отдельно
-            action_hash = keccak(text=action_str)
-            nonce_hash = keccak(text=nonce_str)
+            # Создаем хэш action отдельно, это будет нашим connectionId
+            connection_hash = keccak(text=action_str)
             
-            # Комбинируем хэши
-            combined_hash = keccak(action_hash + nonce_hash)
+            # Нам не нужно комбинировать хэши, connectionId это просто хэш action
+            combined_hash = connection_hash
             
             self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Nonce ({nonce}): {nonce_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Nonce hash: 0x{nonce_hash.hex()}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Combined hash: 0x{combined_hash.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Connection hash: 0x{connection_hash.hex()}", level="DEBUG")
             
             # Структура EIP-712 для Hyperliquid с обновленными типами
             data = {
