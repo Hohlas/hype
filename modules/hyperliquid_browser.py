@@ -154,16 +154,19 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Создаем bytes32 для connectionId
+            # Создаем структурированное сообщение
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
             connection_id_bytes = keccak(text=action_str)
-            
-            # Для логирования создаем hex версию
             connection_id_hex = "0x" + connection_id_bytes.hex()
-            self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Connection ID (hex): {connection_id_hex}", level="DEBUG")
+
+            # Добавляем nonce в connectionId
+            final_connection_id = keccak(text=f"{connection_id_hex}{nonce}")
             
-            # Структура EIP-712 для Hyperliquid
+            self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Raw connection ID: {connection_id_hex}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Final connection ID: 0x{final_connection_id.hex()}", level="DEBUG")
+            
+            # Структура EIP-712 для Hyperliquid с обновленными типами
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
@@ -179,14 +182,16 @@ class HyperliquidBrowser:
                         {"name": "verifyingContract", "type": "address"}
                     ],
                     "Action": [
-                        {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"}
+                        {"name": "source", "type": "address"},
+                        {"name": "connectionId", "type": "bytes32"},
+                        {"name": "nonce", "type": "uint256"}
                     ]
                 },
                 "primaryType": "Action",
                 "message": {
-                    "source": self.wallet_address.lower(),  # Используем нижний регистр
-                    "connectionId": connection_id_bytes  # Используем чистые bytes
+                    "source": self.wallet_address,  # Оставляем оригинальный регистр
+                    "connectionId": final_connection_id,  # Используем final_connection_id
+                    "nonce": nonce
                 }
             }
             
