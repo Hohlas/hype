@@ -156,14 +156,20 @@ class HyperliquidBrowser:
             
             # Готовим данные в правильном порядке
             action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
+            nonce_str = str(nonce)
             
-            # Сначала создаем connectionId из action и nonce
-            message_to_hash = f"{action_str}{nonce}"
-            connection_id = keccak(text=message_to_hash)
+            # Создаем хэш для каждого компонента отдельно
+            action_hash = keccak(text=action_str)
+            nonce_hash = keccak(text=nonce_str)
+            
+            # Комбинируем хэши
+            combined_hash = keccak(action_hash + nonce_hash)
             
             self.log_message(f"🔍 DEBUG: Action string: {action_str}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Message to hash: {message_to_hash}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Connection ID: 0x{connection_id.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Nonce ({nonce}): {nonce_str}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Nonce hash: 0x{nonce_hash.hex()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Combined hash: 0x{combined_hash.hex()}", level="DEBUG")
             
             # Структура EIP-712 для Hyperliquid с обновленными типами
             data = {
@@ -189,7 +195,7 @@ class HyperliquidBrowser:
                 "primaryType": "Action",
                 "message": {
                     "source": self.wallet_address,  # Оставляем оригинальный регистр
-                    "connectionId": connection_id,  # Используем единый connectionId
+                    "connectionId": combined_hash,  # Используем комбинированный хэш
                     "nonce": nonce
                 }
             }
@@ -213,7 +219,8 @@ class HyperliquidBrowser:
                 "primaryType": data["primaryType"],
                 "message": {
                     "source": data["message"]["source"],
-                    "connectionId": "0x" + connection_id.hex()
+                    "connectionId": "0x" + combined_hash.hex(),
+                    "nonce": nonce
                 }
             }
             self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
