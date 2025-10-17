@@ -8,7 +8,7 @@
 3. Следуйте инструкциям для создания бота
 4. Скопируйте полученный токен в `TG_BOT_TOKEN`
 
-### 2. Telegram Chat ID
+### 2. Telegram Chat  ID
 1. Найдите @userinfobot в Telegram
 2. Отправьте любое сообщение
 3. Скопируйте ваш ID в `TG_CHAT_ID`
