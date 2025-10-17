@@ -519,8 +519,12 @@ class HyperliquidBrowser:
         Создание spot ордера через общий endpoint /exchange с числовым asset ID.
         """
         try:
-            # Общий endpoint для всех ордеров (spot и futures)
-            url = f"{self.BASE_URL}/exchange"
+            # Попробуем разные endpoint'ы для spot торговли
+            endpoints_to_try = [
+                f"{self.BASE_URL}/exchange",  # Основной endpoint
+                f"{self.BASE_URL}/spot",     # Возможный spot endpoint
+                f"{self.BASE_URL}/orders",  # Возможный orders endpoint
+            ]
             
             # Получаем числовой asset ID для spot актива
             coin = order_data.get("coin", "BTC-SPOT")
@@ -543,67 +547,92 @@ class HyperliquidBrowser:
             px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
             
             payload_variants = [
-                # Вариант 1: Market ордер с правильной структурой для spot
+                # Вариант 1: Альтернативная структура для spot торговли
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",  # строка "BTC-SPOT"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"market": {}}  # market ордер
-                        }],
-                        "grouping": "na"
+                            "a": f"{coin.split('-')[0]}-SPOT",
+                            "b": order_data.get("is_buy", True),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"market": {}}
+                        }]
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 2: Limit ордер с правильной структурой
+                # Вариант 2: Структура без grouping
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": f"{coin.split('-')[0]}-SPOT",  # строка "BTC-SPOT"
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
-                        }],
-                        "grouping": "na"
+                            "a": f"{coin.split('-')[0]}-SPOT",
+                            "b": order_data.get("is_buy", True),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"limit": {"tif": "Gtc"}}
+                        }]
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 3: Market ордер с числовым asset ID
+                # Вариант 3: Попробуем числовые значения вместо строк
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": asset_id,  # ЧИСЛОВОЙ asset ID
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"market": {}}  # market ордер
-                        }],
-                        "grouping": "na"
+                            "a": f"{coin.split('-')[0]}-SPOT",
+                            "b": order_data.get("is_buy", True),
+                            "s": float(sz_str),
+                            "p": float(px_str),
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"market": {}}
+                        }]
                     },
                     "nonce": int(time.time() * 1000)
                 },
-                # Вариант 4: Limit ордер с числовым asset ID
+                # Вариант 4: Попробуем без поля "t" (тип ордера)
                 {
                     "action": {
                         "type": "order",
                         "orders": [{
-                            "a": asset_id,  # ЧИСЛОВОЙ asset ID
-                            "b": bool(order_data.get("is_buy", True)),  # boolean
-                            "s": sz_str,  # строка размера с правильной точностью
-                            "p": px_str,  # строка цены с правильной точностью
-                            "r": bool(order_data.get("reduce_only", False)),  # boolean
-                            "t": {"limit": {"tif": "Gtc"}}  # limit ордер
-                        }],
-                        "grouping": "na"
+                            "a": f"{coin.split('-')[0]}-SPOT",
+                            "b": order_data.get("is_buy", True),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": order_data.get("reduce_only", False)
+                        }]
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 5: Попробуем с числовым asset ID
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": asset_id,
+                            "b": order_data.get("is_buy", True),
+                            "s": sz_str,
+                            "p": px_str,
+                            "r": order_data.get("reduce_only", False),
+                            "t": {"market": {}}
+                        }]
+                    },
+                    "nonce": int(time.time() * 1000)
+                },
+                # Вариант 6: Попробуем другую структуру с isBuy вместо b
+                {
+                    "action": {
+                        "type": "order",
+                        "orders": [{
+                            "a": f"{coin.split('-')[0]}-SPOT",
+                            "isBuy": order_data.get("is_buy", True),
+                            "sz": sz_str,
+                            "px": px_str,
+                            "reduceOnly": order_data.get("reduce_only", False),
+                            "orderType": {"market": {}}
+                        }]
                     },
                     "nonce": int(time.time() * 1000)
                 }
@@ -612,19 +641,40 @@ class HyperliquidBrowser:
             success = False
             response = None
             
-            # Пробуем каждый вариант payload
-            for i, order_payload in enumerate(payload_variants, 1):
-                try:
-                    self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {order_payload}", level="DEBUG")
-                    response = await self.send_request("POST", url, data=order_payload, build_signature=True)
-                    if response.status == 200:
-                        success = True
-                        self.log_message(f"✅ SUCCESS: Spot payload variant {i} worked!", level="INFO")
-                        break
-                    else:
-                        self.log_message(f"❌ Spot payload variant {i} failed: {response.status}", level="DEBUG")
-                except Exception as e:
-                    self.log_message(f"❌ Spot payload variant {i} error: {e}", level="DEBUG")
+            # Сначала получим информацию о доступных активах для диагностики
+            try:
+                available_assets = await self.get_available_assets()
+                self.log_message(f"🔍 DEBUG: Available assets for reference: {available_assets[:5]}...", level="DEBUG")
+            except Exception as e:
+                self.log_message(f"⚠️ Failed to get available assets: {e}", level="WARNING")
+            
+            # Пробуем каждый endpoint с каждым вариантом payload
+            for endpoint_url in endpoints_to_try:
+                self.log_message(f"🔍 DEBUG: Trying endpoint: {endpoint_url}", level="DEBUG")
+                
+                for i, order_payload in enumerate(payload_variants, 1):
+                    try:
+                        self.log_message(f"🔍 DEBUG: Trying spot payload variant {i}: {order_payload}", level="DEBUG")
+                        response = await self.send_request("POST", endpoint_url, data=order_payload, build_signature=True)
+                        if response.status == 200:
+                            success = True
+                            self.log_message(f"✅ SUCCESS: Endpoint {endpoint_url} with spot payload variant {i} worked!", level="INFO")
+                            break
+                        else:
+                            self.log_message(f"❌ Endpoint {endpoint_url} spot payload variant {i} failed: {response.status}", level="DEBUG")
+                            
+                            # Получаем детальную информацию об ошибке
+                            try:
+                                error_text = await response.text()
+                                self.log_message(f"🔍 DEBUG: Error details for {endpoint_url} variant {i}: {error_text}", level="DEBUG")
+                            except Exception as e:
+                                self.log_message(f"🔍 DEBUG: Failed to get error details for {endpoint_url} variant {i}: {e}", level="DEBUG")
+                                
+                    except Exception as e:
+                        self.log_message(f"❌ Endpoint {endpoint_url} spot payload variant {i} error: {e}", level="DEBUG")
+                
+                if success:
+                    break
             
             if not success:
                 error_text = await response.text() if response else "No response"
@@ -939,6 +989,77 @@ class HyperliquidBrowser:
             logger.error(f"Failed to get orders history: {e}")
             return []
             
+    async def diagnose_api_structure(self):
+        """
+        Диагностика структуры API Hyperliquid для понимания правильного формата
+        """
+        try:
+            self.log_message("🔍 Starting API structure diagnosis...", level="INFO")
+            
+            # Получаем мета-информацию
+            try:
+                url = f"{self.BASE_URL}/info"
+                meta_data = {"type": "meta"}
+                response = await self.send_request("POST", url, data=meta_data, build_signature=False)
+                
+                if response.status == 200:
+                    meta_result = await response.json()
+                    self.log_message(f"✅ Meta API response: {meta_result}", level="INFO")
+                    
+                    # Извлекаем информацию об активах
+                    universe = meta_result.get("universe", [])
+                    self.log_message(f"📋 Universe contains {len(universe)} assets", level="INFO")
+                    
+                    # Показываем первые несколько активов
+                    for i, asset in enumerate(universe[:5]):
+                        self.log_message(f"  {i+1}. {asset}", level="INFO")
+                        
+                else:
+                    self.log_message(f"❌ Meta API failed: {response.status}", level="ERROR")
+                    
+            except Exception as e:
+                self.log_message(f"❌ Meta API error: {e}", level="ERROR")
+            
+            # Получаем информацию о ценах
+            try:
+                url = f"{self.BASE_URL}/info"
+                price_data = {"type": "allMids"}
+                response = await self.send_request("POST", url, data=price_data, build_signature=False)
+                
+                if response.status == 200:
+                    price_result = await response.json()
+                    price_keys = list(price_result.keys())
+                    self.log_message(f"📊 Price API contains {len(price_keys)} assets", level="INFO")
+                    self.log_message(f"📊 Sample price keys: {price_keys[:10]}", level="INFO")
+                    
+                else:
+                    self.log_message(f"❌ Price API failed: {response.status}", level="ERROR")
+                    
+            except Exception as e:
+                self.log_message(f"❌ Price API error: {e}", level="ERROR")
+            
+            # Тестируем различные endpoint'ы
+            test_endpoints = [
+                f"{self.BASE_URL}/exchange",
+                f"{self.BASE_URL}/spot", 
+                f"{self.BASE_URL}/orders",
+                f"{self.BASE_URL}/trade",
+                f"{self.BASE_URL}/api/v1/orders"
+            ]
+            
+            for endpoint in test_endpoints:
+                try:
+                    # Простой GET запрос для проверки доступности
+                    response = await self.send_request("GET", endpoint)
+                    self.log_message(f"🔍 Endpoint {endpoint}: {response.status}", level="INFO")
+                except Exception as e:
+                    self.log_message(f"🔍 Endpoint {endpoint}: Error - {e}", level="DEBUG")
+            
+            self.log_message("✅ API diagnosis completed", level="INFO")
+            
+        except Exception as e:
+            self.log_message(f"❌ API diagnosis failed: {e}", level="ERROR")
+
     def log_message(self, message: str, level: str = "INFO"):
         """
         Логирование сообщений
