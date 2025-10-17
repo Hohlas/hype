@@ -150,11 +150,15 @@ class HyperliquidBrowser:
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
-            # Определяем phantom agent - попробуем другой способ
-            # Создаем connectionId только из action (без nonce)
-            connection_id_hash = keccak(text=json.dumps(action, separators=(',', ':'), sort_keys=True))
+            # Убедимся что адрес кошелька совпадает
+            if self.wallet_address.lower() != self.account.address.lower():
+                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # Попробуем другую структуру EIP-712 для Hyperliquid
+            # Создаем connectionId из action
+            action_str = json.dumps(action, separators=(',', ':'), sort_keys=True)
+            connection_id_hash = keccak(text=action_str)
+            
+            # Правильная структура EIP-712 для Hyperliquid с нижним регистром адреса
             data = {
                 "domain": {
                     "chainId": 42161,  # Arbitrum
@@ -176,14 +180,18 @@ class HyperliquidBrowser:
                 },
                 "primaryType": "Action",
                 "message": {
-                    "source": self.wallet_address,
-                    "connectionId": connection_id_hash
+                    "source": self.wallet_address.lower(),  # Используем нижний регистр
+                    "connectionId": connection_id_hash.hex()  # Преобразуем bytes в hex
                 }
             }
             
             # Подписываем с EIP-712
             encoded_data = encode_structured_data(data)
             signature = self.account.sign_message(encoded_data)
+            
+            # Дополнительная проверка подписи
+            self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Message source: {self.wallet_address.lower()}", level="DEBUG")
             
             # Диагностика: показываем что подписываем
             # Преобразуем bytes в hex для JSON сериализации
