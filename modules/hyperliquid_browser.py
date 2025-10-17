@@ -163,34 +163,29 @@ class HyperliquidBrowser:
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
         """Подписывает action для Hyperliquid L1 с EIP-712"""
         try:
-            # Убедимся что адрес кошелька совпадает
+            # Проверка соответствия адреса
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            # First normalize the action to remove trailing zeros and handle special fields
             def normalize_number(n):
                 if isinstance(n, str):
-                    # Remove trailing zeros after decimal point
                     if '.' in n:
                         return n.rstrip('0').rstrip('.')
                     return n
                 elif isinstance(n, (int, float)):
-                    # Convert to string and normalize
                     return normalize_number(str(n))
                 return n
 
             def normalize_action(obj):
                 if isinstance(obj, dict):
-                    # Special handling for order fields
                     if all(k in obj for k in ['a', 'b', 'p', 's', 'r', 't']):
-                        # This is an order object, ensure correct types
                         return {
-                            'a': int(obj['a']),  # asset ID must be integer
-                            'b': bool(obj['b']),  # is_buy must be boolean
-                            'p': normalize_number(obj['p']),  # price as normalized string
-                            's': normalize_number(obj['s']),  # size as normalized string
-                            'r': bool(obj['r']),  # reduce_only must be boolean
-                            't': normalize_action(obj['t'])  # type object
+                            'a': int(obj['a']),
+                            'b': bool(obj['b']),
+                            'p': normalize_number(obj['p']),
+                            's': normalize_number(obj['s']),
+                            'r': bool(obj['r']),
+                            't': normalize_action(obj['t'])
                         }
                     return {k: normalize_action(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
@@ -199,47 +194,30 @@ class HyperliquidBrowser:
                     return normalize_number(obj)
                 return normalize_number(obj) if isinstance(obj, str) else obj
 
-            # Normalize the action with special field handling
+            # Нормализация и кодирование
             normalized_action = normalize_action(action)
-            
-            # Encode action as msgpack
             action_bytes = msgpack.packb(normalized_action, use_bin_type=True)
             
-            # Create the buffer with exact size
-            total_size = len(action_bytes) + 9  # 8 bytes for nonce + 1 byte for flag
+            # Создание буфера данных
+            total_size = len(action_bytes) + 9
             data = bytearray(total_size)
-            
-            # Copy action bytes
             data[:len(action_bytes)] = action_bytes
-            
-            # Add nonce as big-endian uint64
             nonce_bytes = nonce.to_bytes(8, byteorder='big', signed=False)
             data[len(action_bytes):len(action_bytes) + 8] = nonce_bytes
-            
-            # Add flag byte (0 for no vault address)
             data[-1] = 0
             
-            # Hash the combined data
+            # Хеширование данных
             action_hash = keccak(bytes(data))
             
-            # Выводим для диагностики
+            # Логирование для отладки
             self.log_message(f"🔍 DEBUG: Action JSON: {json.dumps(action)}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Action string: {json.dumps(action)}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Combined hash: 0x{action_hash.hex()}", level="DEBUG")
             
-            # Create phantom agent data structure
-            # CRITICAL: connectionId must be hex string for bytes32 type
-            phantom_agent = {
-                "source": "a",  # "a" for mainnet
-                "connectionId": "0x" + action_hash.hex(),  # Convert bytes to hex string
-                "nonce": nonce  # add nonce to the signature
-            }
-
-            # Create the EIP-712 signature structure
-            data = {
+            # Базовая структура EIP-712
+            eip712_data = {
                 "domain": {
-                    "chainId": 1337,  # Fixed chainId from reference code
+                    "chainId": 1337,
                     "name": "Exchange",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
@@ -257,37 +235,68 @@ class HyperliquidBrowser:
                         {"name": "nonce", "type": "uint256"}
                     ]
                 },
-                "primaryType": "Agent",
-                "message": phantom_agent
+                "primaryType": "Agent"
             }
             
-            # Подписываем с EIP-712
-            try:
-                encoded_data = encode_structured_data(data)
-                signature = self.account.sign_message(encoded_data)
-                
-                # Дополнительная проверка подписи
-                self.log_message(f"🔍 DEBUG: Phantom agent: {phantom_agent}", level="DEBUG")
-                self.log_message(f"🔍 DEBUG: Signing with address: {self.account.address.lower()}", level="DEBUG")
-            except Exception as e:
-                self.log_message(f"❌ Failed to encode/sign data: {str(e)}", level="ERROR")
-                raise
+            success = False
+            last_error = None
+            signature = None
             
-            # Диагностика: показываем что подписываем
-            data_for_log = {
-                "domain": data["domain"],
-                "types": data["types"],
-                "primaryType": data["primaryType"],
-                "message": {
-                    "source": data["message"]["source"],
-                    "connectionId": "0x" + action_hash.hex(),
+            # Вариант 1: Сырые байты
+            try:
+                msg = eip712_data.copy()
+                msg["message"] = {
+                    "source": "a",
+                    "connectionId": action_hash,
                     "nonce": nonce
                 }
-            }
-            self.log_message(f"🔍 EIP-712 data: {json.dumps(data_for_log, indent=2)}", level="DEBUG")
-            self.log_message(f"🔍 Wallet address in signature: {self.wallet_address}", level="DEBUG")
-            
-            # Return the signature in the expected format
+                encoded = encode_structured_data(msg)
+                signature = self.account.sign_message(encoded)
+                success = True
+                self.log_message("✅ Вариант 1 (сырые байты) успешен", level="DEBUG")
+            except Exception as e:
+                last_error = e
+                self.log_message(f"❌ Вариант 1 failed: {e}", level="DEBUG")
+
+            # Вариант 2: Hex строка
+            if not success:
+                try:
+                    msg = eip712_data.copy()
+                    msg["message"] = {
+                        "source": "a",
+                        "connectionId": action_hash.hex(),
+                        "nonce": nonce
+                    }
+                    encoded = encode_structured_data(msg)
+                    signature = self.account.sign_message(encoded)
+                    success = True
+                    self.log_message("✅ Вариант 2 (hex) успешен", level="DEBUG")
+                except Exception as e:
+                    last_error = e
+                    self.log_message(f"❌ Вариант 2 failed: {e}", level="DEBUG")
+
+            # Вариант 3: eth_utils
+            if not success:
+                try:
+                    from eth_utils import to_bytes
+                    msg = eip712_data.copy()
+                    msg["message"] = {
+                        "source": "a",
+                        "connectionId": to_bytes(hexstr=action_hash.hex()),
+                        "nonce": nonce
+                    }
+                    encoded = encode_structured_data(msg)
+                    signature = self.account.sign_message(encoded)
+                    success = True
+                    self.log_message("✅ Вариант 3 (eth_utils) успешен", level="DEBUG")
+                except Exception as e:
+                    last_error = e
+                    self.log_message(f"❌ Вариант 3 failed: {e}", level="DEBUG")
+
+            if not success:
+                raise Exception(f"Все варианты подписи failed. Последняя ошибка: {last_error}")
+
+            # Возвращаем подпись в нужном формате
             return {
                 "r": "0x" + signature.r.to_bytes(32, "big").hex(),
                 "s": "0x" + signature.s.to_bytes(32, "big").hex(),
