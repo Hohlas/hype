@@ -57,18 +57,43 @@ class HyperliquidClient:
         Возвращает (min_qty, min_notional)
         """
         try:
-            # Для Hyperliquid используем стандартные лимиты
-            # Минимальное количество токена
-            min_qty = 0.001  # Минимум 0.001 токена
+            # Получаем реальные лимиты от API Hyperliquid
+            url = f"{self.browser.BASE_URL}/info"
+            data = {
+                "type": "spotMeta"
+            }
             
-            # Минимальная номинальная стоимость в USDC
-            min_notional = 10.0  # Минимум $10 USDC для spot торговли
+            response = await self.browser.send_request("POST", url, data=data)
+            result = await response.json()
             
-            return min_qty, min_notional
+            if response.status != 200:
+                raise Exception(f'Failed to get spot meta: {result}')
+            
+            # Ищем токен в метаданных
+            tokens = result.get("tokens", [])
+            for token in tokens:
+                token_name_from_api = token.get("name", "")
+                if token_name_from_api == token_name or token_name_from_api == f"U{token_name}":
+                    # Получаем минимальный размер из метаданных токена
+                    meta = token.get("meta", {})
+                    if isinstance(meta, dict):
+                        min_qty = float(meta.get("minSz", "0.001"))  # Минимальный размер
+                        min_notional = float(meta.get("minNotional", "10.0"))  # Минимальная номинальная стоимость
+                        
+                        self.browser.log_message(
+                            f"📏 Token limits from API: {token_name_from_api} - MinQty={min_qty}, MinNotional=${min_notional}",
+                            level="INFO"
+                        )
+                        
+                        return min_qty, min_notional
+            
+            # Если токен не найден, используем значения из настроек
+            self.browser.log_message(f"⚠️ Token {token_name} not found in API, using settings limits", level="WARNING")
+            return settings.MIN_TOKEN_QUANTITY, settings.MIN_ORDER_NOTIONAL
             
         except Exception as e:
             self.browser.log_message(f"Failed to get token limits: {e}", level="ERROR")
-            return 0.001, 5.0
+            return settings.MIN_TOKEN_QUANTITY, settings.MIN_ORDER_NOTIONAL
             
     async def place_order(self, token: str, side: str, order_type: str, 
                          quantity: float = None, price: float = None, 

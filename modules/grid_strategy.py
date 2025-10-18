@@ -80,6 +80,13 @@ async def check_minimum_order_size(client, token_name: str, usdc_amount: float, 
         # Рассчитываем количество токенов
         token_qty = usdc_amount / token_price
         
+        # Логируем детали расчета для отладки
+        client.browser.log_message(
+            f"🔍 Order size check: Price=${token_price:.2f}, Amount=${usdc_amount:.2f}, "
+            f"Qty={token_qty:.6f}, MinQty={min_qty:.6f}, MinNotional=${min_notional:.2f}",
+            level="DEBUG"
+        )
+        
         # Проверяем минимальное количество
         if token_qty < min_qty:
             return False, f"Quantity {token_qty:.6f} < min {min_qty:.6f} (Free margin: ${balance:.2f}, Order: ${usdc_amount:.2f})"
