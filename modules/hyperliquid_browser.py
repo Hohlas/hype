@@ -749,15 +749,23 @@ class HyperliquidBrowser:
             # Using only the main exchange endpoint for spot trading
             endpoint_url = f"{self.BASE_URL}/exchange"
             
-            # Форматируем размер как в рабочем примере
+            def remove_trailing_zeros(value: str) -> str:
+                """Удаляет лишние нули в конце десятичных чисел"""
+                if '.' in value:
+                    return value.rstrip('0').rstrip('.')
+                return value
+            
+            # Форматируем размер и удаляем trailing zeros
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = f"{sz_value:.5f}"  # Простое форматирование как в рабочем примере
+            sz_str = remove_trailing_zeros(f"{sz_value:.5f}")
             
+            # Форматируем цену и удаляем trailing zeros
             px_value = float(order_data.get("limit_px", 108000))
-            px_str = f"{px_value:.2f}"  # Простое форматирование как в рабочем примере
+            px_str = remove_trailing_zeros(f"{px_value:.2f}")
             
-            # Отладочная информация для проверки округления
-            self.log_message(f"🔧 Price formatting: {px_value} -> {px_str} (tick_size: {self.btc_tick_size})", level="DEBUG")
+            # Отладочная информация для проверки форматирования
+            self.log_message(f"🔧 Size formatting: {sz_value} -> {sz_str}", level="DEBUG")
+            self.log_message(f"🔧 Price formatting: {px_value} -> {px_str}", level="DEBUG")
             
             # Создаем правильную структуру ордера с EIP-712 подписью
             order = {
@@ -780,11 +788,15 @@ class HyperliquidBrowser:
                 order_type_copy["trigger"]["triggerPx"] = int(trigger_price)
                 order["t"] = order_type_copy
                 self.log_message(f"🔍 DEBUG: Creating trigger order without price field, triggerPx: {int(trigger_price)}", level="DEBUG")
+            elif "market" in order_type:
+                # Для маркет ордеров НЕ добавляем поле p (цену)
+                order["t"] = order_type
+                self.log_message(f"🔍 DEBUG: Creating market order without price field", level="DEBUG")
             else:
-                # Для всех ордеров добавляем цену (включая маркет ордера)
-                order["p"] = px_str  # цена уже отформатирована
+                # Для лимитных ордеров добавляем цену (без trailing zeros)
+                order["p"] = px_str  # цена уже отформатирована без trailing zeros
                 order["t"] = order_type  # тип ордера
-                self.log_message(f"🔍 DEBUG: Creating order with price: {px_str}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Creating limit order with price: {px_str}", level="DEBUG")
             
             # Логируем финальную структуру ордера
             self.log_message(f"🔍 DEBUG: Final order structure: {order}", level="DEBUG")
