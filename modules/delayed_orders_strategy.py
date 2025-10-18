@@ -500,9 +500,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         await client.place_order(
                             token=token_name,
                             side="BUY",
-                            order_type="STOP_LIMIT",
+                            order_type="LIMIT",
                             price=price_above,
-                            stop_price=price_above,
                             usdc_amount=usdc_amount
                         )
                     else:
