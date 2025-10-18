@@ -40,7 +40,7 @@ class HyperliquidBrowser:
         # Web3 setup
         self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
         
-        # Диагностика приватного ключа и инициализация аккаунта
+            # Инициализация аккаунта
         if private_key:
             # Убедимся что ключ в правильном формате (без 0x или с 0x)
             if private_key.startswith('0x'):
@@ -48,20 +48,16 @@ class HyperliquidBrowser:
             else:
                 clean_key = private_key
                 
-            self.log_message(f"🔍 DEBUG: Private key length: {len(clean_key)}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Private key format check passed: {len(clean_key) == 64}", level="DEBUG")
-            
             # Создаем и сохраняем аккаунт
             try:
                 self.account = Account.from_key(clean_key)
-                self.log_message(f"🔍 DEBUG: Created account with address: {self.account.address}", level="DEBUG")
                 
                 # Проверка совпадения адресов
                 if self.account.address.lower() != wallet_address.lower():
                     self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
                     self.log_message(f"❌ This means the private key doesn't match the wallet address!", level="ERROR")
                 else:
-                    self.log_message(f"✅ SUCCESS: Private key matches wallet address!", level="INFO")
+                    self.log_message(f"✅ Wallet initialized: {self.account.address}", level="INFO")
             except Exception as e:
                 self.log_message(f"❌ Failed to create account: {str(e)}", level="ERROR")
                 raise
@@ -160,11 +156,12 @@ class HyperliquidBrowser:
     def float_to_wire(self, x: float, is_price: bool = False) -> str:
         """Конвертирует float в строку с правильным форматированием"""
         if is_price:
-            # Для цен используем фиксированное количество знаков после точки (1)
-            # и округляем до размера тика
+            # Для цен округляем до размера тика
             if self.btc_tick_size:
                 x = round(x / self.btc_tick_size) * self.btc_tick_size
-            rounded = "{:.1f}".format(x)
+            # Форматируем с правильным количеством знаков после точки
+            # Для tick_size = 0.5 нужен 1 знак после точки
+            rounded = f"{x:.1f}"
         else:
             # Для остальных чисел (размер ордера и т.д.) используем прежнюю логику
             rounded = "{:.8f}".format(x)
@@ -182,12 +179,9 @@ class HyperliquidBrowser:
             if not self.account:
                 raise Exception("No account available for signing")
                 
-            # Проверка соответствия адреса и вывод текущего адреса для диагностики
-            current_address = self.account.address.lower()
-            self.log_message(f"🔍 DEBUG: Current signing address: {current_address}", level="DEBUG")
-            
-            if self.wallet_address.lower() != current_address:
-                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {current_address}")
+            # Проверка соответствия адреса
+            if self.wallet_address.lower() != self.account.address.lower():
+                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
             def normalize_number(n):
                 if isinstance(n, str):
@@ -231,10 +225,7 @@ class HyperliquidBrowser:
             # Хеширование данных
             action_hash = keccak(bytes(data))
             
-            # Логирование для отладки
-            self.log_message(f"🔍 DEBUG: Action JSON: {json.dumps(action)}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: Action string: {json.dumps(action)}", level="DEBUG")
+            # Логирование только при ошибках
             
             # Базовая структура EIP-712 (БЕЗ nonce в Agent согласно официальной документации)
             eip712_data = {
@@ -273,10 +264,9 @@ class HyperliquidBrowser:
                 encoded = encode_structured_data(msg)
                 signature = self.account.sign_message(encoded)
                 success = True
-                self.log_message("✅ EIP-712 подпись успешна (исправленная структура)", level="DEBUG")
             except Exception as e:
                 last_error = e
-                self.log_message(f"❌ EIP-712 подпись failed: {e}", level="DEBUG")
+                self.log_message(f"❌ EIP-712 подпись failed: {e}", level="ERROR")
 
             if not success:
                 raise Exception(f"EIP-712 подпись failed. Ошибка: {last_error}")
@@ -528,25 +518,21 @@ class HyperliquidBrowser:
             url = f"{self.BASE_URL}/info"
             spot_meta_data = {"type": "spotMeta"}
             
-            self.log_message(f"🔍 Getting spotMeta for {symbol_base}...", level="DEBUG")
+            # Получаем spotMeta
             response = await self.send_request("POST", url, data=spot_meta_data, build_signature=False)
             
             if response.status != 200:
                 raise Exception(f"Failed to get spotMeta: {response.status}")
             
             spot_meta = await response.json()
-            # spotMeta получен успешно
-            
             # Ищем нужный актив в universe
             universe = spot_meta.get("universe", [])
-            self.log_message(f"📋 Found {len(universe)} spot assets in universe", level="INFO")
             
             # Ищем BTC или UBTC в spot активах через tokens
             target_symbols = [symbol_base, f"U{symbol_base}"]  # BTC и UBTC
             
             # Получаем список токенов для поиска
             tokens = spot_meta.get("tokens", [])
-            self.log_message(f"📋 Found {len(tokens)} tokens in spotMeta", level="INFO")
             
             # Ищем токен BTC в списке токенов и его параметры
             btc_token_index = None
@@ -561,7 +547,7 @@ class HyperliquidBrowser:
                     meta = token.get("meta", {})
                     if isinstance(meta, dict):
                         self.btc_tick_size = float(meta.get("tick", "0.5"))
-                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (index: {token_index}, tick: {self.btc_tick_size})", level="INFO")
+                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (tick: {self.btc_tick_size})", level="INFO")
                     break
             
             if btc_token_index is None:
@@ -569,12 +555,11 @@ class HyperliquidBrowser:
                 self.log_message(f"📋 First 10 tokens: {[t.get('name', '') for t in tokens[:10]]}", level="INFO")
                 
                 # Попробуем найти BTC в полном списке токенов
-                self.log_message(f"🔍 Searching for BTC in all {len(tokens)} tokens...", level="INFO")
                 for i, token in enumerate(tokens):
                     token_name = token.get("name", "")
                     if "BTC" in token_name.upper() or token_name.upper() == "BTC":
                         btc_token_index = token.get("index", -1)
-                        self.log_message(f"✅ Found BTC token: {token_name} (index: {btc_token_index})", level="INFO")
+                        self.log_message(f"✅ Found BTC token: {token_name}", level="INFO")
                         break
                 
                 if btc_token_index is None:
@@ -589,7 +574,7 @@ class HyperliquidBrowser:
                 # Проверяем, содержит ли этот актив наш токен
                 if btc_token_index in asset_tokens:
                     asset_id = 10000 + asset_index
-                    self.log_message(f"✅ Found {symbol_base} spot asset: {asset_name} (index: {asset_index}, tokens: {asset_tokens}), asset_id: {asset_id}", level="INFO")
+                    self.log_message(f"✅ Found {symbol_base} spot asset: {asset_name} (asset_id: {asset_id})", level="INFO")
                     return asset_id
             
             # Если ничего не нашли, показываем все доступные активы
@@ -769,20 +754,14 @@ class HyperliquidBrowser:
                 "vaultAddress": None  # Для основного кошелька используем None
             }
             
-            # Логируем финальный payload для диагностики
-            self.log_message(f"🔍 DEBUG: Final payload: {json.dumps(payload, indent=2)}", level="DEBUG")
+            # Логируем только при ошибках
             
             payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
             success = False
             response = None
             
-            # Сначала получим информацию о доступных активах для диагностики
-            try:
-                available_assets = await self.get_available_assets()
-                # Список доступных активов получен
-            except Exception as e:
-                self.log_message(f"⚠️ Failed to get available assets: {e}", level="WARNING")
+            # Получаем информацию о доступных активах только при ошибках
             
             # Отправляем правильно подписанный payload
             endpoint_url = f"{self.BASE_URL}/exchange"  # Используем только основной endpoint
@@ -799,9 +778,8 @@ class HyperliquidBrowser:
                 
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
                 
-                # Всегда пытаемся прочитать текст ответа
+                # Читаем ответ только при ошибках
                 response_text = await response.text()
-                self.log_message(f"🔍 DEBUG: Raw response: {response_text}", level="DEBUG")
                 
                 try:
                     result = json.loads(response_text)
@@ -809,12 +787,32 @@ class HyperliquidBrowser:
                     # Если не JSON, используем текст как есть
                     result = {"status": "err", "response": response_text}
                 
-                if response.status == 200 and result.get('status') != 'err':
-                    self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
-                    return result
+                if response.status == 200:
+                    # Проверяем не только внешний status, но и содержимое
+                    if result.get('status') == 'ok':
+                        response_data = result.get('response', {})
+                        statuses = response_data.get('data', {}).get('statuses', [])
+                        
+                        # Проверяем есть ли ошибки в statuses
+                        has_errors = any('error' in status for status in statuses)
+                        
+                        if not has_errors:
+                            self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                            return result
+                        else:
+                            # Показываем ошибки из statuses
+                            for status in statuses:
+                                if 'error' in status:
+                                    self.log_message(f"❌ Order error: {status['error']}", level="ERROR")
+                            raise Exception(f"Order rejected: {[status.get('error') for status in statuses if 'error' in status]}")
+                    else:
+                        error_msg = result.get('response') if isinstance(result, dict) else str(result)
+                        error_text = f"API Status: {result.get('status')}, Error: {error_msg}"
+                        self.log_message(f"❌ Spot order failed: {error_text}", level="ERROR")
+                        raise Exception(f'Failed to create spot order: {error_text}')
                 else:
                     error_msg = result.get('response') if isinstance(result, dict) else str(result)
-                    error_text = f"Status: {response.status}, Error: {error_msg}"
+                    error_text = f"HTTP Status: {response.status}, Error: {error_msg}"
                     self.log_message(f"❌ Spot order failed: {error_text}", level="ERROR")
                     raise Exception(f'Failed to create spot order: {error_text}')
                         
@@ -1055,15 +1053,39 @@ class HyperliquidBrowser:
                     self.log_message(f"🔍 DEBUG: Failed to get error text: {text_error}", level="DEBUG")
                     raise Exception(f'Failed to create order: {response.status}')
             
-            # Пытаемся парсить JSON
+            # Пытаемся парсить JSON и проверить статус
             try:
                 result = await response.json()
-                return result
+                
+                # Проверяем статус ответа для futures ордеров
+                if response.status == 200:
+                    if result.get('status') == 'ok':
+                        response_data = result.get('response', {})
+                        statuses = response_data.get('data', {}).get('statuses', [])
+                        
+                        # Проверяем есть ли ошибки в statuses
+                        has_errors = any('error' in status for status in statuses)
+                        
+                        if not has_errors:
+                            return result
+                        else:
+                            # Показываем ошибки из statuses
+                            for status in statuses:
+                                if 'error' in status:
+                                    self.log_message(f"❌ Futures order error: {status['error']}", level="ERROR")
+                            raise Exception(f"Futures order rejected: {[status.get('error') for status in statuses if 'error' in status]}")
+                    else:
+                        error_msg = result.get('response') if isinstance(result, dict) else str(result)
+                        raise Exception(f'Futures order failed: API Status: {result.get("status")}, Error: {error_msg}')
+                else:
+                    error_msg = result.get('response') if isinstance(result, dict) else str(result)
+                    raise Exception(f'Futures order failed: HTTP Status: {response.status}, Error: {error_msg}')
+                    
             except Exception as json_error:
                 # Если не JSON, возвращаем текст
                 text_result = await response.text()
-                self.log_message(f"🔍 DEBUG: Non-JSON response: {text_result}", level="DEBUG")
-                return {"status": "success", "message": text_result}
+                self.log_message(f"❌ Non-JSON response: {text_result}", level="ERROR")
+                raise Exception(f"Invalid response format: {text_result}")
             
         except Exception as e:
             logger.error(f"Failed to create order: {e}")
