@@ -196,14 +196,14 @@ if __name__ == '__main__':
 
                 case "module":
                     # Отправляем уведомление о старте
-                    mode_names = {
-                        0: "Delayed Orders Strategy",
-                        1: "Grid Strategy (Legacy)", 
-                        2: "Averaging Market (Legacy)",
-                        3: "Pair Futures Limits",
-                        4: "Cancel Orders",
-                        5: "Parse"
-                    }
+mode_names = {
+    0: "New Strategy (Limit Below + Market Above)",
+    1: "Grid Strategy (Legacy)", 
+    2: "Averaging Market (Legacy)",
+    3: "Pair Futures Limits",
+    4: "Cancel Orders",
+    5: "Parse"
+}
                     mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
                     
                     async def send_start_notification():

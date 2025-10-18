@@ -461,13 +461,14 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
 
 async def trade_delayed_orders_strategy(client, token_name: str):
     """
-    Простая стратегия: два отложенных ордера на покупку
-    - Один снизу на STEP
-    - Один сверху на STEP/2
+    Новая стратегия:
+    - Лимитные ордера снизу на усреднение (min_TP_price - STEP*2)
+    - Маркет ордера сверху при подходе к уровню (current_price > max_TP_price - STEP/2)
+    - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
     """
     try:
         step = Decimal(str(settings.STEP))
-        client.browser.log_message(f"📊 Simple Delayed Orders: STEP ${step}", level="INFO")
+        client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
         # Получаем лимиты токена
         min_qty, min_notional = await client.get_token_limits(token_name)
@@ -480,43 +481,80 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Получаем все открытые ордера
                 open_orders = await client.browser.get_account_orders()
                 buy_orders = [order for order in open_orders if order.get("side") == "BUY"]
+                sell_orders = [order for order in open_orders if order.get("side") == "SELL"]
                 
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
                 
-                # Проверяем, есть ли ордера сверху и снизу
-                has_order_above = any(float(order.get("limitPx", 0)) > current_price for order in buy_orders)
+                # Проверяем, есть ли ордера снизу
                 has_order_below = any(float(order.get("limitPx", 0)) < current_price for order in buy_orders)
                 
-                # 1. Ордер сверху (на STEP/2) - ВРЕМЕННО ОТКЛЮЧЕН
-                # Trigger ордера не поддерживаются для spot торговли на Hyperliquid
-                if not has_order_above:
-                    price_above = current_price + float(step) / 2
+                # Находим минимальную и максимальную цены TP ордеров
+                min_tp_price = 0.0
+                max_tp_price = 0.0
+                if sell_orders:
+                    tp_prices = [float(order.get("limitPx", 0)) for order in sell_orders]
+                    min_tp_price = min(tp_prices)
+                    max_tp_price = max(tp_prices)
+                
+                # 1. Лимитный ордер снизу на усреднение
+                # Условие: нет лимитных ордеров ниже текущей цены
+                if not has_order_below and min_tp_price > 0:
+                    price_below = min_tp_price - float(step) * 2
                     client.browser.log_message(
-                        f"⚠️ Skipping order above ${price_above:.2f} - trigger orders not supported for spot trading",
-                        level="WARNING"
+                        f"🔍 Averaging: min_TP=${min_tp_price:.2f}, creating BUY limit at ${price_below:.2f}",
+                        level="INFO"
+                    )
+                    await client.place_order(
+                        token=token_name,
+                        side="BUY",
+                        order_type="LIMIT",
+                        price=price_below,
+                        usdc_amount=usdc_amount
+                    )
+                    
+                    # Сразу ставим TP ордер на продажу
+                    tp_price = price_below + float(step)
+                    client.browser.log_message(
+                        f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                        level="INFO"
+                    )
+                    await client.place_order(
+                        token=token_name,
+                        side="SELL",
+                        order_type="LIMIT",
+                        price=tp_price,
+                        usdc_amount=usdc_amount
                     )
                 
-                # 2. Ордер снизу (на STEP)
-                if not has_order_below:
-                    price_below = current_price - float(step)
-                    # Проверяем, что ордер действительно ниже текущей цены
-                    if price_below < current_price:
+                # 2. Маркет ордер сверху при подходе к уровню
+                # Условие: current_price > max_TP_price - STEP/2
+                if max_tp_price > 0:
+                    trigger_level = max_tp_price - float(step) / 2
+                    if current_price > trigger_level:
                         client.browser.log_message(
-                            f"🔍 Creating BUY order below: ${price_below:.2f} (current: ${current_price:.2f})",
+                            f"🚀 Price ${current_price:.2f} reached trigger level ${trigger_level:.2f}, creating MARKET BUY",
                             level="INFO"
                         )
                         await client.place_order(
                             token=token_name,
                             side="BUY",
-                            order_type="LIMIT",
-                            price=price_below,
+                            order_type="MARKET",
                             usdc_amount=usdc_amount
                         )
-                    else:
+                        
+                        # Сразу ставим TP ордер на продажу
+                        tp_price = current_price + float(step)
                         client.browser.log_message(
-                            f"⚠️ Skipping order below - price ${price_below:.2f} >= current ${current_price:.2f}",
-                            level="WARNING"
+                            f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                            level="INFO"
+                        )
+                        await client.place_order(
+                            token=token_name,
+                            side="SELL",
+                            order_type="LIMIT",
+                            price=tp_price,
+                            usdc_amount=usdc_amount
                         )
                 
                 await async_sleep(15)
