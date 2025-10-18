@@ -789,9 +789,19 @@ class HyperliquidBrowser:
                 order["t"] = order_type_copy
                 self.log_message(f"🔍 DEBUG: Creating trigger order without price field, triggerPx: {int(trigger_price)}", level="DEBUG")
             elif "market" in order_type:
-                # Для маркет ордеров НЕ добавляем поле p (цену)
+                # Для маркет ордеров на spot нужна цена для защиты от проскальзывания
+                # Для BUY: цена выше текущей, для SELL: цена ниже текущей
+                current_price = float(order_data.get("limit_px", 108000))
+                if order_data.get("is_buy", True):
+                    # BUY: цена на 3% выше текущей для защиты от проскальзывания
+                    max_price = current_price * 1.03
+                else:
+                    # SELL: цена на 3% ниже текущей для защиты от проскальзывания
+                    max_price = current_price * 0.97
+                
+                order["p"] = remove_trailing_zeros(f"{max_price:.1f}")
                 order["t"] = order_type
-                self.log_message(f"🔍 DEBUG: Creating market order without price field", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Market order price calculation: current={current_price}, max={max_price}, final={order['p']}", level="DEBUG")
             else:
                 # Для лимитных ордеров добавляем цену (без trailing zeros)
                 order["p"] = px_str  # цена уже отформатирована без trailing zeros
