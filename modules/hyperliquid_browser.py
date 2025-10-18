@@ -1221,13 +1221,21 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/info"
             data = {
-                "type": "userTrades",
-                "user": self.wallet_address,
-                "startTime": 0,  # Начало времени
-                "endTime": int(time.time() * 1000),  # Текущее время
+                "type": "userFills",  # Используем userFills вместо userTrades
+                "user": self.wallet_address
             }
             
             response = await self.send_request("POST", url, data=data)
+            
+            # Проверяем content-type перед парсингом
+            content_type = response.headers.get('Content-Type', '')
+            
+            if 'application/json' not in content_type:
+                self.log_message(f"⚠️ Unexpected content type: {content_type}", level="WARNING")
+                response_text = await response.text()
+                self.log_message(f"Response text: {response_text[:200]}", level="DEBUG")
+                return []
+            
             result = await response.json()
             
             if response.status != 200:
