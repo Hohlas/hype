@@ -771,9 +771,6 @@ class HyperliquidBrowser:
             px_value = float(order_data.get("limit_px", 108000))
             px_str = remove_trailing_zeros(f"{px_value:.2f}")
             
-            # Отладочная информация для проверки форматирования
-            self.log_message(f"🔧 Size formatting: {sz_value} -> {sz_str}", level="DEBUG")
-            self.log_message(f"🔧 Price formatting: {px_value} -> {px_str}", level="DEBUG")
             
             # Создаем правильную структуру ордера с EIP-712 подписью
             order = {
@@ -795,7 +792,6 @@ class HyperliquidBrowser:
                 trigger_price = float(trigger_data["triggerPx"])
                 order_type_copy["trigger"]["triggerPx"] = int(trigger_price)
                 order["t"] = order_type_copy
-                self.log_message(f"🔍 DEBUG: Creating trigger order without price field, triggerPx: {int(trigger_price)}", level="DEBUG")
             elif "market" in order_type:
                 # Для spot торговли используем лимитный ордер с IOC вместо маркет ордера
                 # IOC (Immediate-or-Cancel) ведет себя как маркет ордер с защитой от проскальзывания
@@ -813,17 +809,13 @@ class HyperliquidBrowser:
                 
                 order["p"] = final_price
                 order["t"] = {"limit": {"tif": "Ioc"}}  # Immediate-or-Cancel вместо market
-                self.log_message(f"🔍 DEBUG: Market order as IOC limit: current={current_price}, max={max_price}, tick_size={tick_size}, final={final_price}", level="DEBUG")
             else:
                 # Для лимитных ордеров добавляем цену с округлением по tick size
                 tick_size = 1  # Для UBTC реальный tick size = 1 (целые доллары)
                 final_price = round_to_tick_size(px_value, tick_size)
                 order["p"] = final_price
                 order["t"] = order_type  # тип ордера
-                self.log_message(f"🔍 DEBUG: Creating limit order with price: {px_value} -> {final_price} (tick_size={tick_size})", level="DEBUG")
             
-            # Логируем финальную структуру ордера
-            self.log_message(f"🔍 DEBUG: Final order structure: {order}", level="DEBUG")
             
             # Формируем action
             action = {
@@ -846,8 +838,6 @@ class HyperliquidBrowser:
                 "vaultAddress": None  # Для основного кошелька используем None
             }
             
-            # Логируем полный payload для отладки
-            self.log_message(f"🔍 DEBUG: Full payload: {json.dumps(payload, indent=2)}", level="DEBUG")
             
             payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
@@ -871,12 +861,8 @@ class HyperliquidBrowser:
                 
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
                 
-                # Логируем ответ API для отладки
-                response_text = await response.text()
-                self.log_message(f"🔍 DEBUG: API Response Status: {response.status}", level="DEBUG")
-                self.log_message(f"🔍 DEBUG: API Response Text: {response_text}", level="DEBUG")
-                
                 # Читаем ответ только при ошибках
+                response_text = await response.text()
                 
                 try:
                     result = json.loads(response_text)
@@ -1241,19 +1227,7 @@ class HyperliquidBrowser:
                 "endTime": int(time.time() * 1000),  # Текущее время
             }
             
-            # Добавляем правильные заголовки для JSON
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
-            response = await self.send_request("POST", url, data=data, headers=headers)
-            
-            # Проверяем Content-Type ответа
-            content_type = response.headers.get('content-type', '')
-            if 'application/json' not in content_type:
-                self.log_message(f"⚠️ Unexpected content type: {content_type}", level="WARNING")
-                return []
-                
+            response = await self.send_request("POST", url, data=data)
             result = await response.json()
             
             if response.status != 200:
