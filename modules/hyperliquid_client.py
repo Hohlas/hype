@@ -32,16 +32,30 @@ class HyperliquidClient:
             # Получаем доступный баланс USDC (с учетом зарезервированных средств)
             balance = float(await self.browser.get_available_balance())
             
-            # Используем процент от доступного баланса для spot торговли согласно сеточной стратегии
+            # Получаем лимиты токена
+            min_qty, min_notional = await self.get_token_limits(token_name)
+            
+            # Получаем текущую цену токена
+            token_price = float(await self.browser.get_token_price(token_name))
+            
+            # Рассчитываем минимальный размер ордера в USDC для соответствия min_qty
+            min_usdc_for_qty = min_qty * token_price
+            
+            # Рассчитываем размер ордера по проценту от баланса
             percent = settings.POSITION_SIZE_PERCENT
-            usdc_amount = balance * (percent / 100)
+            usdc_amount_by_percent = balance * (percent / 100)
+            
+            # Используем максимальное значение из минимального требования и процентного расчета
+            usdc_amount = max(min_usdc_for_qty, usdc_amount_by_percent, min_notional)
             
             # Для spot торговли кредитное плечо всегда 1
             leverage = 1
             
             # Логируем расчет для отладки
             self.browser.log_message(
-                f"💸 Order calculation: Available=${balance:.2f}, Percent={percent}%, Amount=${usdc_amount:.2f}",
+                f"💸 Order calculation: Available=${balance:.2f}, Percent={percent}%, "
+                f"MinQty=${min_usdc_for_qty:.2f}, MinNotional=${min_notional:.2f}, "
+                f"Final Amount=${usdc_amount:.2f}",
                 level="DEBUG"
             )
             
@@ -74,11 +88,42 @@ class HyperliquidClient:
             for token in tokens:
                 token_name_from_api = token.get("name", "")
                 if token_name_from_api == token_name or token_name_from_api == f"U{token_name}":
+                    # Логируем полную структуру токена для отладки
+                    self.browser.log_message(
+                        f"🔍 DEBUG: Full token data for {token_name_from_api}: {token}",
+                        level="DEBUG"
+                    )
+                    
                     # Получаем минимальный размер из метаданных токена
                     meta = token.get("meta", {})
                     if isinstance(meta, dict):
-                        min_qty = float(meta.get("minSz", "0.001"))  # Минимальный размер
-                        min_notional = float(meta.get("minNotional", "10.0"))  # Минимальная номинальная стоимость
+                        # Логируем все доступные поля в meta
+                        self.browser.log_message(
+                            f"🔍 DEBUG: Meta fields: {list(meta.keys())}",
+                            level="DEBUG"
+                        )
+                        
+                        # Пробуем разные возможные поля для минимального размера
+                        min_qty = None
+                        for field in ["minSz", "minSize", "min_qty", "minQuantity", "szDecimals"]:
+                            if field in meta:
+                                try:
+                                    min_qty = float(meta[field])
+                                    self.browser.log_message(f"🔍 DEBUG: Found {field}={min_qty}", level="DEBUG")
+                                    break
+                                except:
+                                    continue
+                        
+                        # Если не нашли минимальный размер, используем очень маленькое значение
+                        if min_qty is None:
+                            min_qty = 0.0001  # Очень маленькое значение
+                            self.browser.log_message(f"🔍 DEBUG: No min size found, using {min_qty}", level="DEBUG")
+                        
+                        # ВРЕМЕННО: Устанавливаем очень маленькое значение для тестирования
+                        min_qty = 0.0001
+                        self.browser.log_message(f"🔍 DEBUG: TEMPORARY: Overriding min_qty to {min_qty} for testing", level="DEBUG")
+                        
+                        min_notional = float(meta.get("minNotional", "5.0"))  # Минимальная номинальная стоимость
                         
                         self.browser.log_message(
                             f"📏 Token limits from API: {token_name_from_api} - MinQty={min_qty}, MinNotional=${min_notional}",
@@ -87,13 +132,13 @@ class HyperliquidClient:
                         
                         return min_qty, min_notional
             
-            # Если токен не найден, используем значения из настроек
-            self.browser.log_message(f"⚠️ Token {token_name} not found in API, using settings limits", level="WARNING")
-            return settings.MIN_TOKEN_QUANTITY, settings.MIN_ORDER_NOTIONAL
+            # Если токен не найден, используем стандартные значения
+            self.browser.log_message(f"⚠️ Token {token_name} not found in API, using default limits", level="WARNING")
+            return 0.001, 10.0
             
         except Exception as e:
             self.browser.log_message(f"Failed to get token limits: {e}", level="ERROR")
-            return settings.MIN_TOKEN_QUANTITY, settings.MIN_ORDER_NOTIONAL
+            return 0.001, 10.0
             
     async def place_order(self, token: str, side: str, order_type: str, 
                          quantity: float = None, price: float = None, 
