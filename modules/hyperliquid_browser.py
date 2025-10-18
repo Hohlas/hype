@@ -520,8 +520,10 @@ class HyperliquidBrowser:
             
             if response.status != 200:
                 raise Exception(f'Failed to get account orders: {result}')
-                
-            return result
+            
+            # Возвращаем только список ордеров из ответа
+            orders = result if isinstance(result, list) else result.get('orders', [])
+            return orders
             
         except Exception as e:
             logger.error(f"Failed to get account orders: {e}")

@@ -480,8 +480,24 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Получаем все открытые ордера
                 open_orders = await client.browser.get_account_orders()
+                
+                # Логируем сырой ответ API
+                client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
+                
                 buy_orders = [order for order in open_orders if order.get("side") == "BUY"]
                 sell_orders = [order for order in open_orders if order.get("side") == "SELL"]
+                
+                # Логируем все открытые ордера
+                client.browser.log_message(f"📋 Open Orders ({len(open_orders)} total):", level="INFO")
+                for i, order in enumerate(open_orders):
+                    side = order.get("side", "UNKNOWN")
+                    price = order.get("limitPx", "N/A")
+                    size = order.get("sz", "N/A")
+                    coin = order.get("coin", "N/A")
+                    client.browser.log_message(
+                        f"  {i+1}. {side} {coin} | Price: ${price} | Size: {size}",
+                        level="INFO"
+                    )
                 
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
@@ -502,6 +518,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     f"🔍 DEBUG: Current=${current_price:.2f}, has_order_below={has_order_below}, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
                     level="DEBUG"
                 )
+                
+                # Детальная информация о BUY ордерах
+                if buy_orders:
+                    client.browser.log_message(f"🔍 BUY Orders Analysis:", level="DEBUG")
+                    for order in buy_orders:
+                        order_price = float(order.get("limitPx", 0))
+                        is_below = order_price < current_price
+                        client.browser.log_message(
+                            f"  BUY ${order_price:.2f} {'BELOW' if is_below else 'ABOVE'} current ${current_price:.2f}",
+                            level="DEBUG"
+                        )
+                else:
+                    client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
                 
                 # 1. Лимитный ордер снизу на усреднение
                 # Условие: нет лимитных ордеров ниже текущей цены
