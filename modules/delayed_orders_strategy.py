@@ -491,32 +491,47 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 1. Ордер сверху (на STEP/2)
                 if not has_order_above:
                     price_above = current_price + float(step) / 2
-                    client.browser.log_message(
-                        f"🔍 Creating BUY order above: ${price_above:.2f}",
-                        level="INFO"
-                    )
-                    await client.place_order(
-                        token=token_name,
-                        side="BUY",
-                        order_type="LIMIT",
-                        price=price_above,
-                        usdc_amount=usdc_amount
-                    )
+                    # Проверяем, что ордер действительно выше текущей цены
+                    if price_above > current_price:
+                        client.browser.log_message(
+                            f"🔍 Creating BUY order above: ${price_above:.2f} (current: ${current_price:.2f})",
+                            level="INFO"
+                        )
+                        await client.place_order(
+                            token=token_name,
+                            side="BUY",
+                            order_type="STOP_LIMIT",
+                            price=price_above,
+                            stop_price=price_above,
+                            usdc_amount=usdc_amount
+                        )
+                    else:
+                        client.browser.log_message(
+                            f"⚠️ Skipping order above - price ${price_above:.2f} <= current ${current_price:.2f}",
+                            level="WARNING"
+                        )
                 
                 # 2. Ордер снизу (на STEP)
                 if not has_order_below:
                     price_below = current_price - float(step)
-                    client.browser.log_message(
-                        f"🔍 Creating BUY order below: ${price_below:.2f}",
-                        level="INFO"
-                    )
-                    await client.place_order(
-                        token=token_name,
-                        side="BUY",
-                        order_type="LIMIT",
-                        price=price_below,
-                        usdc_amount=usdc_amount
-                    )
+                    # Проверяем, что ордер действительно ниже текущей цены
+                    if price_below < current_price:
+                        client.browser.log_message(
+                            f"🔍 Creating BUY order below: ${price_below:.2f} (current: ${current_price:.2f})",
+                            level="INFO"
+                        )
+                        await client.place_order(
+                            token=token_name,
+                            side="BUY",
+                            order_type="LIMIT",
+                            price=price_below,
+                            usdc_amount=usdc_amount
+                        )
+                    else:
+                        client.browser.log_message(
+                            f"⚠️ Skipping order below - price ${price_below:.2f} >= current ${current_price:.2f}",
+                            level="WARNING"
+                        )
                 
                 await async_sleep(15)
                 
