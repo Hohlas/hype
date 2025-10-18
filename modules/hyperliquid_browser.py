@@ -159,12 +159,11 @@ class HyperliquidBrowser:
             # Для цен округляем до размера тика
             if self.btc_tick_size:
                 x = round(x / self.btc_tick_size) * self.btc_tick_size
-            # Форматируем с правильным количеством знаков после точки
-            # Для tick_size = 0.5 нужен 1 знак после точки
-            rounded = f"{x:.1f}"
-            # Убираем trailing zero если он есть (106971.0 -> 106971)
-            if rounded.endswith('.0'):
-                rounded = rounded[:-2]
+            
+            # Для BTC-SPOT принудительно округляем до целых чисел
+            # (API может требовать только целые числа для некоторых активов)
+            x = round(x)
+            return str(int(x))
         else:
             # Для остальных чисел (размер ордера и т.д.) используем прежнюю логику
             rounded = "{:.8f}".format(x)
