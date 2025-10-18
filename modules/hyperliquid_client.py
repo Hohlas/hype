@@ -172,11 +172,19 @@ class HyperliquidClient:
                 order_data["limit_px"] = str(token_price)  # Для маркет ордеров нужен limit_px
                 order_data["order_type"] = {"market": {}}
             elif order_type == "STOP_MARKET":
-                # Для стоп-маркет ордеров нужен stop_px
+                # Для стоп-маркет ордеров используем правильную структуру согласно Perplexity
                 if stop_price is None:
                     raise ValueError("stop_price is required for STOP_MARKET orders")
-                order_data["limit_px"] = str(stop_price)
-                order_data["order_type"] = {"trigger": {"triggerPx": str(stop_price), "isMarket": True}}
+                order_data["order_type"] = {
+                    "trigger": {
+                        "isMarket": True,
+                        "triggerPx": str(stop_price),
+                        "tpsl": "sl"  # stop loss
+                    }
+                }
+                # Для trigger ордеров не нужен limit_px
+                if "limit_px" in order_data:
+                    del order_data["limit_px"]
             else:
                 raise ValueError(f"Unsupported order type: {order_type}")
             

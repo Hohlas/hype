@@ -765,11 +765,27 @@ class HyperliquidBrowser:
             order = {
                 "a": asset_id,  # asset ID из spotMeta
                 "b": order_data.get("is_buy", True),  # true для покупки
-                "p": px_str,  # цена уже отформатирована
                 "s": self.float_to_wire(float(sz_str)),  # размер с правильным форматированием
                 "r": order_data.get("reduce_only", False),  # reduceOnly
-                "t": {"limit": {"tif": "Gtc"}}  # тип ордера
             }
+            
+            # Добавляем цену и тип ордера в зависимости от типа
+            order_type = order_data.get("order_type", {"limit": {"tif": "Gtc"}})
+            
+            # Логируем тип ордера для отладки
+            self.log_message(f"🔍 DEBUG: Order type: {order_type}", level="DEBUG")
+            
+            if "trigger" in order_type:
+                # Для trigger ордеров используем triggerPx
+                trigger_data = order_type["trigger"]
+                order["p"] = trigger_data["triggerPx"]  # triggerPx как цена
+                order["t"] = order_type  # тип ордера
+                self.log_message(f"🔍 DEBUG: Creating trigger order with triggerPx: {trigger_data['triggerPx']}", level="DEBUG")
+            else:
+                # Для обычных ордеров используем limit_px
+                order["p"] = px_str  # цена уже отформатирована
+                order["t"] = order_type  # тип ордера
+                self.log_message(f"🔍 DEBUG: Creating regular order with price: {px_str}", level="DEBUG")
             
             # Формируем action
             action = {

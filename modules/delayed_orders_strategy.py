@@ -370,6 +370,12 @@ async def create_stop_market_order(client, token_name: str, stop_price: float, u
     try:
         current_calculation_balance = float(await client.browser.get_balance())
         
+        # Логируем попытку создания стоп-маркет ордера
+        client.browser.log_message(
+            f"🔍 DEBUG: Attempting to create STOP_MARKET order at ${stop_price:.2f}",
+            level="DEBUG"
+        )
+        
         success, order_result = await safe_place_order(
             client,
             token=token_name,
@@ -381,6 +387,12 @@ async def create_stop_market_order(client, token_name: str, stop_price: float, u
             min_notional=min_notional,
             operation_type="Stop Market Breakout",
             stop_price=stop_price  # Цена активации стоп-ордера
+        )
+        
+        # Логируем результат
+        client.browser.log_message(
+            f"🔍 DEBUG: STOP_MARKET order result: success={success}, result={order_result}",
+            level="DEBUG"
         )
         
         if success and order_result:
@@ -487,6 +499,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Проверяем BUY ордера ниже текущей цены
                 buy_orders_below = [order for order in buy_orders if float(order.get("limitPx", 0)) < current_price]
                 
+                # Логируем состояние ордеров
+                client.browser.log_message(
+                    f"🔍 DEBUG: Current price: ${current_price:.2f}, "
+                    f"BUY orders above: {len(buy_orders_above)}, "
+                    f"BUY orders below: {len(buy_orders_below)}, "
+                    f"Min TP price: ${min_tp_price:.2f}",
+                    level="DEBUG"
+                )
+                
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
                 
@@ -514,6 +535,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if usdc_amount >= min_notional:
                         await create_limit_order(
                             client, token_name, limit_price, usdc_amount, min_qty, min_notional, step
+                        )
+                else:
+                    if buy_orders_below:
+                        client.browser.log_message(
+                            f"🔍 DEBUG: Skipping limit order - already have {len(buy_orders_below)} BUY orders below current price",
+                            level="DEBUG"
+                        )
+                    if min_tp_price <= 0:
+                        client.browser.log_message(
+                            f"🔍 DEBUG: Skipping limit order - no TP orders found (min_tp_price={min_tp_price})",
+                            level="DEBUG"
                         )
                 
                 await async_sleep(15)
