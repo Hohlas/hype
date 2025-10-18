@@ -495,8 +495,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🔍 Creating BUY order above: ${price_above:.2f}",
                         level="INFO"
                     )
-                    await create_limit_order(
-                        client, token_name, price_above, usdc_amount, min_qty, min_notional, step
+                    await client.place_order(
+                        token=token_name,
+                        side="BUY",
+                        order_type="LIMIT",
+                        price=price_above,
+                        usdc_amount=usdc_amount
                     )
                 
                 # 2. Ордер снизу (на STEP)
@@ -506,8 +510,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🔍 Creating BUY order below: ${price_below:.2f}",
                         level="INFO"
                     )
-                    await create_limit_order(
-                        client, token_name, price_below, usdc_amount, min_qty, min_notional, step
+                    await client.place_order(
+                        token=token_name,
+                        side="BUY",
+                        order_type="LIMIT",
+                        price=price_below,
+                        usdc_amount=usdc_amount
                     )
                 
                 await async_sleep(15)
