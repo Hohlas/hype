@@ -823,7 +823,7 @@ class HyperliquidBrowser:
             # Получаем информацию о доступных активах только при ошибках
             
             # Отправляем правильно подписанный payload
-            endpoint_url = f"{self.BASE_URL}/spot"  # Используем spot endpoint для spot торговли
+            endpoint_url = f"{self.BASE_URL}/exchange"  # Возвращаемся к /exchange с правильным payload
             # Отправляем подписанный payload
             # Payload подготовлен для отправки
             
