@@ -462,8 +462,9 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
 async def trade_delayed_orders_strategy(client, token_name: str):
     """
     Новая стратегия:
-    - Маркет ордера на усреднение при current_price < min_TP_price - STEP*2
-    - Маркет ордера сверху при подходе к уровню (current_price > max_TP_price - STEP/2)
+    - При отсутствии TP ордеров: маркет покупка по текущей цене + TP ордер
+    - Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
+    - Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
     - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
     """
     try:
@@ -483,6 +484,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Логируем сырой ответ API
                 client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
+                
+                # Получаем историю сделок для анализа
+                trade_history = await client.browser.get_all_orders_history(token_name, limit=10)
+                if trade_history:
+                    client.browser.log_message(f"📈 Recent Trade History ({len(trade_history)} trades):", level="INFO")
+                    for i, trade in enumerate(trade_history[-4:]):  # Показываем последние 4 сделки
+                        side = trade.get("side", "UNKNOWN")
+                        price = trade.get("px", "N/A")
+                        size = trade.get("sz", "N/A")
+                        timestamp = trade.get("time", "N/A")
+                        client.browser.log_message(
+                            f"  {i+1}. {side} | Price: ${price} | Size: {size} | Time: {timestamp}",
+                            level="INFO"
+                        )
                 
                 buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
                 sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S", "A"]]
@@ -520,6 +535,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     level="DEBUG"
                 )
                 
+                # Анализ текущей ситуации
+                if min_tp_price > 0:
+                    trigger_level = min_tp_price - float(step) * 2
+                    client.browser.log_message(
+                        f"📊 Strategy Analysis: min_TP=${min_tp_price:.2f}, trigger_level=${trigger_level:.2f}, current=${current_price:.2f}",
+                        level="INFO"
+                    )
+                    if current_price < trigger_level:
+                        client.browser.log_message("🚀 AVERAGING TRIGGERED: Price below trigger level!", level="INFO")
+                    else:
+                        client.browser.log_message("⏳ Waiting for averaging trigger...", level="INFO")
+                else:
+                    client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
+                
                 # Детальная информация о BUY ордерах
                 if buy_orders:
                     client.browser.log_message(f"🔍 BUY Orders Analysis:", level="DEBUG")
@@ -533,9 +562,35 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 else:
                     client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
                 
-                # 1. Маркет ордер на усреднение
-                # Условие: current_price < min_TP_price - STEP*2
-                if min_tp_price > 0:
+                # 1. При отсутствии TP ордеров: маркет покупка + TP ордер
+                if min_tp_price == 0 and max_tp_price == 0:
+                    client.browser.log_message(
+                        f"🚀 No TP Orders: creating MARKET BUY at current price ${current_price:.2f}",
+                        level="INFO"
+                    )
+                    await client.place_order(
+                        token=token_name,
+                        side="BUY",
+                        order_type="MARKET",
+                        usdc_amount=usdc_amount
+                    )
+                    
+                    # Сразу ставим TP ордер на продажу
+                    tp_price = current_price + float(step)
+                    client.browser.log_message(
+                        f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                        level="INFO"
+                    )
+                    await client.place_order(
+                        token=token_name,
+                        side="SELL",
+                        order_type="LIMIT",
+                        price=tp_price,
+                        usdc_amount=usdc_amount
+                    )
+                
+                # 2. Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
+                elif min_tp_price > 0:
                     trigger_level = min_tp_price - float(step) * 2
                     if current_price < trigger_level:
                         client.browser.log_message(
@@ -567,42 +622,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"⚠️ No averaging needed - current ${current_price:.2f} >= trigger ${trigger_level:.2f}",
                             level="DEBUG"
                         )
-                elif not has_order_below:
-                    # Первый запуск: создаем лимитный ордер на покупку
-                    price_below = current_price - float(step)
-                    client.browser.log_message(
-                        f"🔍 First Position: creating BUY limit at ${price_below:.2f} (current: ${current_price:.2f})",
-                        level="INFO"
-                    )
-                    await client.place_order(
-                        token=token_name,
-                        side="BUY",
-                        order_type="LIMIT",
-                        price=price_below,
-                        usdc_amount=usdc_amount
-                    )
-                    
-                    # Сразу ставим TP ордер на продажу
-                    tp_price = price_below + float(step)
-                    client.browser.log_message(
-                        f"🎯 Setting TP: SELL at ${tp_price:.2f}",
-                        level="INFO"
-                    )
-                    await client.place_order(
-                        token=token_name,
-                        side="SELL",
-                        order_type="LIMIT",
-                        price=tp_price,
-                        usdc_amount=usdc_amount
-                    )
                 
-                # 2. Маркет ордер сверху при подходе к уровню
-                # Условие: current_price > max_TP_price - STEP/2
+                # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
                     trigger_level = max_tp_price - float(step) / 2
                     if current_price > trigger_level:
                         client.browser.log_message(
-                            f"🚀 Price ${current_price:.2f} reached trigger level ${trigger_level:.2f}, creating MARKET BUY",
+                            f"🚀 Pyramiding: current ${current_price:.2f} > trigger ${trigger_level:.2f}, creating MARKET BUY",
                             level="INFO"
                         )
                         await client.place_order(
