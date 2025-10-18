@@ -488,28 +488,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 has_order_above = any(float(order.get("limitPx", 0)) > current_price for order in buy_orders)
                 has_order_below = any(float(order.get("limitPx", 0)) < current_price for order in buy_orders)
                 
-                # 1. Ордер сверху (на STEP/2)
+                # 1. Ордер сверху (на STEP/2) - ВРЕМЕННО ОТКЛЮЧЕН
+                # Trigger ордера не поддерживаются для spot торговли на Hyperliquid
                 if not has_order_above:
                     price_above = current_price + float(step) / 2
-                    # Проверяем, что ордер действительно выше текущей цены
-                    if price_above > current_price:
-                        client.browser.log_message(
-                            f"🔍 Creating BUY order above: ${price_above:.2f} (current: ${current_price:.2f})",
-                            level="INFO"
-                        )
-                        await client.place_order(
-                            token=token_name,
-                            side="BUY",
-                            order_type="STOP_LIMIT",  # Используем стоп-лимит для ордеров выше цены
-                            price=price_above,
-                            stop_price=price_above,  # Стоп-цена равна лимитной цене
-                            usdc_amount=usdc_amount
-                        )
-                    else:
-                        client.browser.log_message(
-                            f"⚠️ Skipping order above - price ${price_above:.2f} <= current ${current_price:.2f}",
-                            level="WARNING"
-                        )
+                    client.browser.log_message(
+                        f"⚠️ Skipping order above ${price_above:.2f} - trigger orders not supported for spot trading",
+                        level="WARNING"
+                    )
                 
                 # 2. Ордер снизу (на STEP)
                 if not has_order_below:
