@@ -375,6 +375,45 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to get spot balance: {e}", level="ERROR")
             return 0.0
             
+    async def get_available_balance(self):
+        """
+        Получение доступного баланса USDC с учетом зарезервированных средств в открытых ордерах
+        """
+        try:
+            # Получаем общий баланс
+            total_balance = await self.get_balance()
+            
+            # Получаем открытые ордера
+            orders = await self.get_account_orders()
+            
+            # Рассчитываем зарезервированные средства для BUY ордеров
+            reserved_usdc = 0.0
+            
+            for order in orders:
+                coin = order.get("coin", "")
+                is_buy = order.get("isBuy", False)
+                size = float(order.get("sz", 0))
+                price = float(order.get("limitPx", 0))
+                
+                # Для BUY ордеров резервируются USDC
+                if is_buy and price > 0:
+                    reserved_usdc += size * price
+            
+            # Доступный баланс = общий баланс - зарезервированные средства
+            available_balance = total_balance - reserved_usdc
+            
+            # Логируем детали для отладки
+            self.log_message(
+                f"💰 Balance check: Total=${total_balance:.2f}, Reserved=${reserved_usdc:.2f}, Available=${available_balance:.2f}",
+                level="DEBUG"
+            )
+            
+            return max(0.0, available_balance)  # Не возвращаем отрицательные значения
+            
+        except Exception as e:
+            self.log_message(f"Failed to get available balance: {e}", level="ERROR")
+            return await self.get_balance()  # Fallback к обычному балансу
+            
     async def get_token_price(self, token_name: str):
         """
         Получение текущей цены токена

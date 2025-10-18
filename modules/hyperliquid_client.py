@@ -29,15 +29,21 @@ class HyperliquidClient:
         Возвращает (usdc_amount, leverage=1 для spot)
         """
         try:
-            # Получаем баланс USDC
-            balance = float(await self.browser.get_balance())
+            # Получаем доступный баланс USDC (с учетом зарезервированных средств)
+            balance = float(await self.browser.get_available_balance())
             
-            # Используем процент от баланса для spot торговли
+            # Используем процент от доступного баланса для spot торговли
             percent = settings.TRADE_AMOUNTS["percent"][0]
             usdc_amount = balance * (percent / 100)
             
             # Для spot торговли кредитное плечо всегда 1
             leverage = 1
+            
+            # Логируем расчет для отладки
+            self.browser.log_message(
+                f"💸 Order calculation: Available=${balance:.2f}, Percent={percent}%, Amount=${usdc_amount:.2f}",
+                level="DEBUG"
+            )
             
             return usdc_amount, leverage
             

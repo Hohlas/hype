@@ -31,7 +31,9 @@ async def check_balance():
     try:
         # Проверяем spot баланс
         spot_balance = await client.get_balance()
+        available_balance = await client.get_available_balance()
         print(f"💰 USDC Spot Balance: ${spot_balance:.2f}")
+        print(f"💵 Available Balance: ${available_balance:.2f}")
         
         # Проверяем spot account info
         spot_info = await client.get_spot_account_info()
