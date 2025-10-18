@@ -828,8 +828,24 @@ class HyperliquidBrowser:
             # Payload подготовлен для отправки
             
             try:
+                # Специальные заголовки для API
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'User-Agent': 'HyperliquidBot/1.0'
+                }
+                
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
-                result = await response.json()
+                
+                # Всегда пытаемся прочитать текст ответа
+                response_text = await response.text()
+                self.log_message(f"🔍 DEBUG: Raw response: {response_text}", level="DEBUG")
+                
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    # Если не JSON, используем текст как есть
+                    result = {"status": "err", "response": response_text}
                 
                 if response.status == 200 and result.get('status') != 'err':
                     self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
@@ -841,7 +857,7 @@ class HyperliquidBrowser:
                     raise Exception(f'Failed to create spot order: {error_text}')
                         
             except Exception as e:
-                self.log_message(f"❌ Spot order error: {e}", level="ERROR")
+                self.log_message(f"❌ Spot order error: {str(e)}", level="ERROR")
                 raise
 
         except Exception as e:
