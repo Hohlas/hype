@@ -229,10 +229,10 @@ class HyperliquidBrowser:
             
             # Логирование только при ошибках
             
-            # Базовая структура EIP-712 (БЕЗ nonce в Agent согласно официальной документации)
+            # Базовая структура EIP-712 для Hyperliquid
             eip712_data = {
                 "domain": {
-                    "chainId": 1337,
+                    "chainId": settings.HYPERLIQUID_CHAIN_ID,  # Arbitrum One (mainnet) - сеть Hyperliquid
                     "name": "Exchange",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
