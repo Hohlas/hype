@@ -839,6 +839,8 @@ class HyperliquidBrowser:
                         
                         if not has_errors:
                             self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                            # Логируем полный ответ API для отладки
+                            self.log_message(f"🔍 DEBUG: API response: {result}", level="DEBUG")
                             return result
                         else:
                             # Показываем ошибки из statuses
