@@ -461,99 +461,60 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
 
 async def trade_delayed_orders_strategy(client, token_name: str):
     """
-    Основная функция стратегии с отложенными ордерами для spot торговли на Hyperliquid.
+    Простая стратегия: два отложенных ордера на покупку
+    - Один снизу на STEP
+    - Один сверху на STEP/2
     """
     try:
-        # Получаем настройки торговли
         step = Decimal(str(settings.STEP))
-        
-        client.browser.log_message(f"📊 Delayed Orders Strategy mode: STEP ${step}", level="INFO")
+        client.browser.log_message(f"📊 Simple Delayed Orders: STEP ${step}", level="INFO")
         
         # Получаем лимиты токена
         min_qty, min_notional = await client.get_token_limits(token_name)
-        client.browser.log_message(f"📏 Min limits for {token_name}: Qty={min_qty}, Notional=${min_notional}", level="INFO")
         
-        # Основной цикл торговли
         while True:
             try:
-                # Получаем текущую цену и баланс
+                # Получаем текущую цену
                 current_price = float(await client.browser.get_token_price(token_name))
                 
-                # Получаем активные ордера
-                buy_orders = await get_active_buy_orders(client, token_name)
-                tp_orders = await get_active_tp_orders(client, token_name)
-                
-                # Проверяем, сработал ли какой-то TP ордер
-                tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
-                
-                if tp_executed:
-                    # Удаляем исполненный ордер из списка
-                    tp_orders.remove(executed_order)
-                
-                # Рассчитываем минимальную цену TP
-                min_tp_price = await calculate_min_tp_price(tp_orders)
-                
-                # Проверяем BUY ордера выше текущей цены
-                buy_orders_above = [order for order in buy_orders if float(order.get("limitPx", 0)) > current_price]
-                
-                # Проверяем BUY ордера ниже текущей цены
-                buy_orders_below = [order for order in buy_orders if float(order.get("limitPx", 0)) < current_price]
-                
-                # Логируем состояние ордеров
-                client.browser.log_message(
-                    f"🔍 DEBUG: Current price: ${current_price:.2f}, "
-                    f"BUY orders above: {len(buy_orders_above)}, "
-                    f"BUY orders below: {len(buy_orders_below)}, "
-                    f"Min TP price: ${min_tp_price:.2f}",
-                    level="DEBUG"
-                )
+                # Получаем все открытые ордера
+                open_orders = await client.browser.get_open_orders(token_name)
+                buy_orders = [order for order in open_orders if order.get("side") == "BUY"]
                 
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
                 
-                # 1. Стоп-маркет ордер на пробой (сверху)
-                if not buy_orders_above:
-                    stop_price = current_price + float(step) / 2
-                    client.browser.log_message(
-                        f"🔍 No BUY orders above current price ${current_price:.2f}, creating stop market at ${stop_price:.2f}",
-                        level="INFO"
-                    )
-                    
-                    if usdc_amount >= min_notional:
-                        await create_stop_market_order(
-                            client, token_name, stop_price, usdc_amount, min_qty, min_notional, step
-                        )
+                # Проверяем, есть ли ордера сверху и снизу
+                has_order_above = any(float(order.get("limitPx", 0)) > current_price for order in buy_orders)
+                has_order_below = any(float(order.get("limitPx", 0)) < current_price for order in buy_orders)
                 
-                # 2. Лимитный ордер на откат (снизу)
-                if not buy_orders_below and min_tp_price > 0:
-                    limit_price = min_tp_price - float(step) * 2
+                # 1. Ордер сверху (на STEP/2)
+                if not has_order_above:
+                    price_above = current_price + float(step) / 2
                     client.browser.log_message(
-                        f"🔍 No BUY orders below current price ${current_price:.2f}, creating limit order at ${limit_price:.2f}",
+                        f"🔍 Creating BUY order above: ${price_above:.2f}",
                         level="INFO"
                     )
-                    
-                    if usdc_amount >= min_notional:
-                        await create_limit_order(
-                            client, token_name, limit_price, usdc_amount, min_qty, min_notional, step
-                        )
-                else:
-                    if buy_orders_below:
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Skipping limit order - already have {len(buy_orders_below)} BUY orders below current price",
-                            level="DEBUG"
-                        )
-                    if min_tp_price <= 0:
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Skipping limit order - no TP orders found (min_tp_price={min_tp_price})",
-                            level="DEBUG"
-                        )
+                    await create_limit_order(
+                        client, token_name, price_above, usdc_amount, min_qty, min_notional, step
+                    )
+                
+                # 2. Ордер снизу (на STEP)
+                if not has_order_below:
+                    price_below = current_price - float(step)
+                    client.browser.log_message(
+                        f"🔍 Creating BUY order below: ${price_below:.2f}",
+                        level="INFO"
+                    )
+                    await create_limit_order(
+                        client, token_name, price_below, usdc_amount, min_qty, min_notional, step
+                    )
                 
                 await async_sleep(15)
                 
             except Exception as e:
                 client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
-                await async_sleep(15)
+                await async_sleep(5)
                 
     except Exception as e:
-        client.browser.log_message(f"❌ Fatal trading error: {e}", level="ERROR")
-        raise
+        client.browser.log_message(f"❌ Strategy error: {e}", level="ERROR")
