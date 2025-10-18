@@ -758,16 +758,16 @@ class HyperliquidBrowser:
             sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки
             
             px_value = float(order_data.get("limit_px", 108000))
-            px_str = self.float_to_wire(px_value, is_price=True)  # правильное округление до тика
+            px_str = f"{px_value:.2f}"  # Простое форматирование как в рабочем примере
             
             # Отладочная информация для проверки округления
             self.log_message(f"🔧 Price formatting: {px_value} -> {px_str} (tick_size: {self.btc_tick_size})", level="DEBUG")
             
             # Создаем правильную структуру ордера с EIP-712 подписью
             order = {
-                "a": asset_id,  # asset ID из spotMeta
+                "a": coin,  # Используем строковое имя актива вместо числового ID
                 "b": order_data.get("is_buy", True),  # true для покупки
-                "s": self.float_to_wire(float(sz_str)),  # размер с правильным форматированием
+                "s": sz_str,  # размер как строка
                 "r": order_data.get("reduce_only", False),  # reduceOnly
             }
             
