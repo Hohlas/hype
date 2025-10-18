@@ -142,7 +142,7 @@ class HyperliquidClient:
             
     async def place_order(self, token: str, side: str, order_type: str, 
                          quantity: float = None, price: float = None, 
-                         usdc_amount: float = None, **kwargs):
+                         usdc_amount: float = None, stop_price: float = None, **kwargs):
         """
         Размещение ордера на Hyperliquid
         """
@@ -157,15 +157,28 @@ class HyperliquidClient:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
             # Подготовка данных ордера для Hyperliquid API
-            # Используем правильную структуру payload для всех типов ордеров
             order_data = {
                 "coin": f"{token}-SPOT",  # Используем BTC-SPOT для spot торговли
                 "is_buy": side == "BUY",  # true для покупки, false для продажи
                 "sz": str(quantity),  # Size как строка
-                "limit_px": str(price) if price else str(token_price),  # Всегда нужен limit_px
-                "order_type": {"limit": {"tif": "Gtc"}} if order_type == "LIMIT" else {"market": {}},  # Тип ордера
                 "reduce_only": False  # Reduce only
             }
+            
+            # Определяем тип ордера и соответствующие параметры
+            if order_type == "LIMIT":
+                order_data["limit_px"] = str(price) if price else str(token_price)
+                order_data["order_type"] = {"limit": {"tif": "Gtc"}}
+            elif order_type == "MARKET":
+                order_data["limit_px"] = str(token_price)  # Для маркет ордеров нужен limit_px
+                order_data["order_type"] = {"market": {}}
+            elif order_type == "STOP_MARKET":
+                # Для стоп-маркет ордеров нужен stop_px
+                if stop_price is None:
+                    raise ValueError("stop_price is required for STOP_MARKET orders")
+                order_data["limit_px"] = str(stop_price)
+                order_data["order_type"] = {"trigger": {"triggerPx": str(stop_price), "isMarket": True}}
+            else:
+                raise ValueError(f"Unsupported order type: {order_type}")
             
             # Создание ордера
             result = await self.browser.create_order(order_data)
@@ -256,17 +269,17 @@ class HyperliquidClient:
         """
         try:
             if mode == 0:
-                # Grid Strategy для spot торговли
+                # Delayed Orders Strategy для spot торговли
+                from modules.delayed_orders_strategy import trade_delayed_orders_strategy
+                return await trade_delayed_orders_strategy(self, "BTC")
+            elif mode == 1:
+                # Grid Strategy для spot торговли (legacy)
                 from modules.grid_strategy import trade_grid_strategy
                 return await trade_grid_strategy(self, "BTC")
-            elif mode == 1:
+            elif mode == 2:
                 # Averaging Market для spot торговли (legacy)
                 from modules.averaging_market import trade_averaging_market
                 return await trade_averaging_market(self, "BTC", "BUY")
-            elif mode == 2:
-                # Futures Limit (не поддерживается для spot)
-                self.browser.log_message("Futures trading not supported in spot mode", level="WARNING")
-                return False
             elif mode == 3:
                 # Pair trading (не поддерживается для spot)
                 self.browser.log_message("Pair trading not supported in spot mode", level="WARNING")
