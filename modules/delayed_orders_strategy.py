@@ -500,8 +500,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         await client.place_order(
                             token=token_name,
                             side="BUY",
-                            order_type="LIMIT",  # Используем обычный лимитный ордер для spot торговли
+                            order_type="STOP_LIMIT",  # Используем стоп-лимит для ордеров выше цены
                             price=price_above,
+                            stop_price=price_above,  # Стоп-цена равна лимитной цене
                             usdc_amount=usdc_amount
                         )
                     else:
