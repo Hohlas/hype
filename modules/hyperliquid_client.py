@@ -32,8 +32,8 @@ class HyperliquidClient:
             # Получаем доступный баланс USDC (с учетом зарезервированных средств)
             balance = float(await self.browser.get_available_balance())
             
-            # Используем процент от доступного баланса для spot торговли
-            percent = settings.TRADE_AMOUNTS["percent"][0]
+            # Используем процент от доступного баланса для spot торговли согласно сеточной стратегии
+            percent = settings.POSITION_SIZE_PERCENT
             usdc_amount = balance * (percent / 100)
             
             # Для spot торговли кредитное плечо всегда 1
@@ -186,13 +186,13 @@ class HyperliquidClient:
         """
         try:
             if mode == 0:
-                # Averaging Market для spot торговли
+                # Grid Strategy для spot торговли
+                from modules.grid_strategy import trade_grid_strategy
+                return await trade_grid_strategy(self, "BTC")
+            elif mode == 1:
+                # Averaging Market для spot торговли (legacy)
                 from modules.averaging_market import trade_averaging_market
                 return await trade_averaging_market(self, "BTC", "BUY")
-            elif mode == 1:
-                # Futures Market (не поддерживается для spot)
-                self.browser.log_message("Futures trading not supported in spot mode", level="WARNING")
-                return False
             elif mode == 2:
                 # Futures Limit (не поддерживается для spot)
                 self.browser.log_message("Futures trading not supported in spot mode", level="WARNING")

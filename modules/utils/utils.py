@@ -56,7 +56,8 @@ class TgReport:
 
 async def send_warning_notification(error_type: str, error_message: str, account_label: str = "Unknown"):
     """
-    Отправляет уведомление о критической ошибке в Telegram.
+    Отправляет уведомление о критической ошибке в Telegram согласно требованиям.
+    Формат: 🚨 [проект] | [аккаунт] ❌ Ошибка: [тип ошибки] 📝 Описание: [описание ошибки]
     """
     try:
         import aiohttp
@@ -68,10 +69,9 @@ async def send_warning_notification(error_type: str, error_message: str, account
             logger.warning("Warning bot token or chat ID not configured")
             return
             
-        message = f"🚨 <b>Hyperliquid Bot Warning</b>\n"
-        message += f"<b>Type:</b> {error_type}\n"
-        message += f"<b>Account:</b> {account_label}\n"
-        message += f"<b>Error:</b> {error_message}"
+        message = f"🚨 Hyperliquid Bot | {account_label}\n"
+        message += f"❌ Ошибка: {error_type}\n"
+        message += f"📝 Описание: {error_message}"
         
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         data = {

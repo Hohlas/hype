@@ -197,8 +197,8 @@ if __name__ == '__main__':
                 case "module":
                     # Отправляем уведомление о старте
                     mode_names = {
-                        0: "Averaging Market",
-                        1: "Futures Market", 
+                        0: "Grid Strategy",
+                        1: "Averaging Market (Legacy)", 
                         2: "Futures Limit",
                         3: "Pair Futures Limits",
                         4: "Cancel Orders",
