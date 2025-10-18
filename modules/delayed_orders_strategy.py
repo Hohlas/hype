@@ -511,17 +511,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
                 
-                # 1. Лимитный ордер на пробой (сверху) - временно заменяем стоп-маркет
+                # 1. Стоп-маркет ордер на пробой (сверху)
                 if not buy_orders_above:
-                    limit_price_above = current_price + float(step) / 2
+                    stop_price = current_price + float(step) / 2
                     client.browser.log_message(
-                        f"🔍 No BUY orders above current price ${current_price:.2f}, creating limit order at ${limit_price_above:.2f}",
+                        f"🔍 No BUY orders above current price ${current_price:.2f}, creating stop market at ${stop_price:.2f}",
                         level="INFO"
                     )
                     
                     if usdc_amount >= min_notional:
-                        await create_limit_order(
-                            client, token_name, limit_price_above, usdc_amount, min_qty, min_notional, step
+                        await create_stop_market_order(
+                            client, token_name, stop_price, usdc_amount, min_qty, min_notional, step
                         )
                 
                 # 2. Лимитный ордер на откат (снизу)
