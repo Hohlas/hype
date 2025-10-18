@@ -809,11 +809,11 @@ class HyperliquidBrowser:
                 "action": action,
                 "nonce": nonce,
                 "signature": signature,
-                "vaultAddress": None,  # Для основного кошелька используем None
-                "walletAddress": self.wallet_address  # Явно указываем основной адрес кошелька
+                "vaultAddress": None  # Для основного кошелька используем None
             }
             
-            # Логируем только при ошибках
+            # Логируем полный payload для отладки
+            self.log_message(f"🔍 DEBUG: Full payload: {payload}", level="DEBUG")
             
             payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
@@ -823,7 +823,7 @@ class HyperliquidBrowser:
             # Получаем информацию о доступных активах только при ошибках
             
             # Отправляем правильно подписанный payload
-            endpoint_url = f"{self.BASE_URL}/exchange"  # Используем только основной endpoint
+            endpoint_url = f"{self.BASE_URL}/spot"  # Используем spot endpoint для spot торговли
             # Отправляем подписанный payload
             # Payload подготовлен для отправки
             
