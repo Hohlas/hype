@@ -755,6 +755,14 @@ class HyperliquidBrowser:
                     return value.rstrip('0').rstrip('.')
                 return value
             
+            def round_to_tick_size(price: float, tick_size: float) -> str:
+                """Округляет цену до ближайшего tick size"""
+                rounded = round(price / tick_size) * tick_size
+                # Убираем trailing zeros
+                if '.' in str(rounded):
+                    return str(rounded).rstrip('0').rstrip('.')
+                return str(rounded)
+            
             # Форматируем размер и удаляем trailing zeros
             sz_value = float(order_data.get("sz", "0.001"))
             sz_str = remove_trailing_zeros(f"{sz_value:.5f}")
@@ -799,14 +807,20 @@ class HyperliquidBrowser:
                     # SELL: цена на 3% ниже текущей для агрессивного исполнения
                     max_price = current_price * 0.97
                 
-                order["p"] = remove_trailing_zeros(f"{max_price:.1f}")
+                # Округляем цену по tick size (для UBTC tick_size = 0.5)
+                tick_size = 0.5  # Для UBTC
+                final_price = round_to_tick_size(max_price, tick_size)
+                
+                order["p"] = final_price
                 order["t"] = {"limit": {"tif": "Ioc"}}  # Immediate-or-Cancel вместо market
-                self.log_message(f"🔍 DEBUG: Market order as IOC limit: current={current_price}, max={max_price}, final={order['p']}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Market order as IOC limit: current={current_price}, max={max_price}, tick_size={tick_size}, final={final_price}", level="DEBUG")
             else:
-                # Для лимитных ордеров добавляем цену (без trailing zeros)
-                order["p"] = px_str  # цена уже отформатирована без trailing zeros
+                # Для лимитных ордеров добавляем цену с округлением по tick size
+                tick_size = 0.5  # Для UBTC
+                final_price = round_to_tick_size(px_value, tick_size)
+                order["p"] = final_price
                 order["t"] = order_type  # тип ордера
-                self.log_message(f"🔍 DEBUG: Creating limit order with price: {px_str}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Creating limit order with price: {px_value} -> {final_price} (tick_size={tick_size})", level="DEBUG")
             
             # Логируем финальную структуру ордера
             self.log_message(f"🔍 DEBUG: Final order structure: {order}", level="DEBUG")
