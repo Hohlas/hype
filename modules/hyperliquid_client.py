@@ -193,7 +193,7 @@ class HyperliquidClient:
                 order_data["order_type"] = {
                     "trigger": {
                         "isMarket": False,
-                        "triggerPx": str(stop_price),
+                        "triggerPx": str(int(stop_price)),  # Убираем десятичную часть
                         "tpsl": "sl"
                     }
                 }

@@ -773,10 +773,10 @@ class HyperliquidBrowser:
             order_type = order_data.get("order_type", {"limit": {"tif": "Gtc"}})
             
             if "trigger" in order_type:
-                # Для trigger ордеров используем triggerPx как цену
+                # Для trigger ордеров используем triggerPx как цену (убираем десятичную часть)
                 trigger_data = order_type["trigger"]
                 trigger_price = float(trigger_data["triggerPx"])
-                px_str = self.float_to_wire(trigger_price, is_price=True)
+                px_str = str(int(trigger_price))  # Убираем десятичную часть
                 order["p"] = px_str
                 order["t"] = order_type
                 self.log_message(f"🔍 DEBUG: Creating trigger order with triggerPx: {px_str}", level="DEBUG")
