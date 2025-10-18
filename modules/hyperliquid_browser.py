@@ -798,13 +798,12 @@ class HyperliquidBrowser:
             # Подписываем action с EIP-712
             signature = self.sign_l1_action(action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload с wallet адресом
+             # Формируем финальный payload
             payload = {
                 "action": action,
                 "nonce": nonce,
                 "signature": signature,
-                "signer": self.wallet_address.lower(),  # Добавляем адрес кошелька
-                "source": "a"  # "a" означает "api"
+                "vaultAddress": None  # Для основного кошелька используем None
             }
             
             # Логируем финальный payload для диагностики
