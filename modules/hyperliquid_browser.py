@@ -786,9 +786,15 @@ class HyperliquidBrowser:
                 self.log_message(f"🔍 DEBUG: Creating trigger order without price field, triggerPx: {int(trigger_price)}", level="DEBUG")
             else:
                 # Для обычных ордеров используем limit_px
-                order["p"] = px_str  # цена уже отформатирована
-                order["t"] = order_type  # тип ордера
-                self.log_message(f"🔍 DEBUG: Creating regular order with price: {px_str}", level="DEBUG")
+                if "market" in order_type:
+                    # Для маркет ордеров не добавляем поле p (цену)
+                    order["t"] = order_type
+                    self.log_message(f"🔍 DEBUG: Creating market order without price field", level="DEBUG")
+                else:
+                    # Для лимитных ордеров добавляем цену
+                    order["p"] = px_str  # цена уже отформатирована
+                    order["t"] = order_type  # тип ордера
+                    self.log_message(f"🔍 DEBUG: Creating limit order with price: {px_str}", level="DEBUG")
             
             # Логируем финальную структуру ордера
             self.log_message(f"🔍 DEBUG: Final order structure: {order}", level="DEBUG")

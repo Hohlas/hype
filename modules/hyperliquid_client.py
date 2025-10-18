@@ -174,10 +174,10 @@ class HyperliquidClient:
                     level="DEBUG"
                 )
             elif order_type == "MARKET":
-                order_data["limit_px"] = str(token_price)  # Для маркет ордеров нужен limit_px
+                # Для маркет ордеров не передаем limit_px
                 order_data["order_type"] = {"market": {}}
                 self.browser.log_message(
-                    f"🔍 DEBUG: MARKET order - limit_px: {order_data['limit_px']}, order_type: {order_data['order_type']}",
+                    f"🔍 DEBUG: MARKET order - order_type: {order_data['order_type']}",
                     level="DEBUG"
                 )
             elif order_type == "STOP_MARKET":
