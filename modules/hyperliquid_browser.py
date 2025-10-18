@@ -749,13 +749,9 @@ class HyperliquidBrowser:
             # Using only the main exchange endpoint for spot trading
             endpoint_url = f"{self.BASE_URL}/exchange"
             
-            # Форматируем размер до 5 знаков после запятой
+            # Форматируем размер как в рабочем примере
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = f"{sz_value:.5f}"  # строка, напр. "0.00116"
-            
-            # Форматируем числовые поля с правильной точностью
-            sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки
+            sz_str = f"{sz_value:.5f}"  # Простое форматирование как в рабочем примере
             
             px_value = float(order_data.get("limit_px", 108000))
             px_str = f"{px_value:.2f}"  # Простое форматирование как в рабочем примере
@@ -765,7 +761,7 @@ class HyperliquidBrowser:
             
             # Создаем правильную структуру ордера с EIP-712 подписью
             order = {
-                "a": coin,  # Используем строковое имя актива вместо числового ID
+                "a": asset_id,  # Используем числовой asset ID как в рабочем примере
                 "b": order_data.get("is_buy", True),  # true для покупки
                 "s": sz_str,  # размер как строка
                 "r": order_data.get("reduce_only", False),  # reduceOnly
