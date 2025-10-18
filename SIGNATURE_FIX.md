@@ -25,20 +25,20 @@ API возвращал ошибку "User or API Wallet 0x... does not exist" с
 ```
 
 ### 2. Исправили формат `connectionId`
-**Было:**
+**Было (первая попытка):**
 ```python
 msg["message"] = {
     "source": "a",
-    "connectionId": action_hash,  # ❌ сырые байты
-    "nonce": nonce               # ❌ nonce в message
+    "connectionId": "0x" + action_hash.hex()  # ❌ hex string не работает с eth_account
+    "nonce": nonce                             # ❌ nonce в message
 }
 ```
 
-**Стало:**
+**Стало (правильно):**
 ```python
 msg["message"] = {
     "source": "a",
-    "connectionId": "0x" + action_hash.hex()  # ✅ hex string для bytes32
+    "connectionId": action_hash  # ✅ сырые байты для bytes32
     # ✅ nonce НЕ включается в message
 }
 ```

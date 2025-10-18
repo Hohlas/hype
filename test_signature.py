@@ -66,6 +66,7 @@ async def test_signature():
         print("💡 Ожидаемый результат: успешное создание ордера")
         print("💡 Если все еще получаете ошибку 'User or API Wallet does not exist',")
         print("   проверьте правильность приватного ключа и адреса кошелька")
+        print("\n🔧 ИСПРАВЛЕНИЕ: Теперь используется action_hash (сырые байты) вместо hex строки")
         
     except Exception as e:
         print(f"❌ Ошибка при тестировании: {e}")

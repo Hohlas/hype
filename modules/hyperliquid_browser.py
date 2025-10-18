@@ -268,7 +268,7 @@ class HyperliquidBrowser:
                 msg = eip712_data.copy()
                 msg["message"] = {
                     "source": "a",
-                    "connectionId": "0x" + action_hash.hex()  # hex string формат для bytes32
+                    "connectionId": action_hash  # сырые байты для bytes32
                 }
                 encoded = encode_structured_data(msg)
                 signature = self.account.sign_message(encoded)
