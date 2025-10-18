@@ -478,7 +478,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_price = float(await client.browser.get_token_price(token_name))
                 
                 # Получаем все открытые ордера
-                open_orders = await client.browser.get_open_orders(token_name)
+                open_orders_response = await client.browser.get_account_orders()
+                open_orders = open_orders_response.get("orders", [])
                 buy_orders = [order for order in open_orders if order.get("side") == "BUY"]
                 
                 # Рассчитываем размер ордера
