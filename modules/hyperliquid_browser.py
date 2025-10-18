@@ -1241,7 +1241,19 @@ class HyperliquidBrowser:
                 "endTime": int(time.time() * 1000),  # Текущее время
             }
             
-            response = await self.send_request("POST", url, data=data)
+            # Добавляем правильные заголовки для JSON
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            response = await self.send_request("POST", url, data=data, headers=headers)
+            
+            # Проверяем Content-Type ответа
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' not in content_type:
+                self.log_message(f"⚠️ Unexpected content type: {content_type}", level="WARNING")
+                return []
+                
             result = await response.json()
             
             if response.status != 200:
@@ -1256,7 +1268,8 @@ class HyperliquidBrowser:
             return filtered_orders[:limit]
             
         except Exception as e:
-            logger.error(f"Failed to get orders history: {e}")
+            # Логируем ошибку, но не прерываем работу бота
+            self.log_message(f"Failed to get orders history: {e}", level="ERROR")
             return []
             
     async def diagnose_api_structure(self):
