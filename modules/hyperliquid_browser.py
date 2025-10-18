@@ -773,16 +773,15 @@ class HyperliquidBrowser:
             order_type = order_data.get("order_type", {"limit": {"tif": "Gtc"}})
             
             if "trigger" in order_type:
-                # Для trigger ордеров добавляем поле p с ценой
-                # Цена определяется через triggerPx в структуре trigger
+                # Для trigger ордеров НЕ добавляем поле p (цена)
+                # Цена определяется только через triggerPx в структуре trigger
                 # Убеждаемся, что triggerPx остается числом в структуре
                 order_type_copy = order_type.copy()
                 trigger_data = order_type_copy["trigger"]
                 trigger_price = float(trigger_data["triggerPx"])
                 order_type_copy["trigger"]["triggerPx"] = int(trigger_price)
-                order["p"] = px_str  # Добавляем поле p с ценой
                 order["t"] = order_type_copy
-                self.log_message(f"🔍 DEBUG: Creating trigger order with price field, triggerPx: {int(trigger_price)}, price: {px_str}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: Creating trigger order without price field, triggerPx: {int(trigger_price)}", level="DEBUG")
             else:
                 # Для обычных ордеров используем limit_px
                 order["p"] = px_str  # цена уже отформатирована
