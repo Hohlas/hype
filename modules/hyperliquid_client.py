@@ -187,7 +187,7 @@ class HyperliquidClient:
                 order_data["limit_px"] = str(stop_price)
                 order_data["order_type"] = {"limit": {"tif": "Gtc"}}
             elif order_type == "STOP_LIMIT":
-                # Стоп-лимит ордер согласно Perplexity
+                # Стоп-лимит ордер точно как в примере Perplexity
                 if stop_price is None:
                     raise ValueError("stop_price is required for STOP_LIMIT orders")
                 order_data["order_type"] = {
@@ -197,7 +197,9 @@ class HyperliquidClient:
                         "tpsl": "sl"
                     }
                 }
-                order_data["limit_px"] = str(price) if price else str(stop_price)
+                # Убираем limit_px для trigger ордеров
+                if "limit_px" in order_data:
+                    del order_data["limit_px"]
             else:
                 raise ValueError(f"Unsupported order type: {order_type}")
             
