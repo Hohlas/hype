@@ -484,18 +484,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Логируем сырой ответ API
                 client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
                 
-                buy_orders = [order for order in open_orders if order.get("side") == "BUY"]
-                sell_orders = [order for order in open_orders if order.get("side") == "SELL"]
+                buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
+                sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S"]]
                 
                 # Логируем все открытые ордера
                 client.browser.log_message(f"📋 Open Orders ({len(open_orders)} total):", level="INFO")
                 for i, order in enumerate(open_orders):
-                    side = order.get("side", "UNKNOWN")
+                    side_raw = order.get("side", "UNKNOWN")
+                    side_display = "BUY" if side_raw in ["BUY", "B"] else "SELL" if side_raw in ["SELL", "S"] else side_raw
                     price = order.get("limitPx", "N/A")
                     size = order.get("sz", "N/A")
                     coin = order.get("coin", "N/A")
                     client.browser.log_message(
-                        f"  {i+1}. {side} {coin} | Price: ${price} | Size: {size}",
+                        f"  {i+1}. {side_display} {coin} | Price: ${price} | Size: {size}",
                         level="INFO"
                     )
                 
