@@ -811,7 +811,7 @@ class HyperliquidBrowser:
             }
             
             # Логируем полный payload для отладки
-            self.log_message(f"🔍 DEBUG: Full payload: {payload}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: Full payload: {json.dumps(payload, indent=2)}", level="DEBUG")
             
             payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
@@ -835,8 +835,12 @@ class HyperliquidBrowser:
                 
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
                 
-                # Читаем ответ только при ошибках
+                # Логируем ответ API для отладки
                 response_text = await response.text()
+                self.log_message(f"🔍 DEBUG: API Response Status: {response.status}", level="DEBUG")
+                self.log_message(f"🔍 DEBUG: API Response Text: {response_text}", level="DEBUG")
+                
+                # Читаем ответ только при ошибках
                 
                 try:
                     result = json.loads(response_text)
@@ -876,6 +880,13 @@ class HyperliquidBrowser:
                     raise Exception(f'Failed to create spot order: {error_text}')
                         
             except Exception as e:
+                # Логируем детали ошибки
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        error_text = await e.response.text()
+                        self.log_message(f"🔍 DEBUG: API Error Response: {error_text}", level="DEBUG")
+                    except:
+                        pass
                 self.log_message(f"❌ Spot order error: {str(e)}", level="ERROR")
                 raise
 
