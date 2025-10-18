@@ -162,6 +162,9 @@ class HyperliquidBrowser:
             # Форматируем с правильным количеством знаков после точки
             # Для tick_size = 0.5 нужен 1 знак после точки
             rounded = f"{x:.1f}"
+            # Убираем trailing zero если он есть (106971.0 -> 106971)
+            if rounded.endswith('.0'):
+                rounded = rounded[:-2]
         else:
             # Для остальных чисел (размер ордера и т.д.) используем прежнюю логику
             rounded = "{:.8f}".format(x)
