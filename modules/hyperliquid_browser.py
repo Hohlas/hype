@@ -807,7 +807,8 @@ class HyperliquidBrowser:
                 "action": action,
                 "nonce": nonce,
                 "signature": signature,
-                "vaultAddress": None  # Для основного кошелька используем None
+                "vaultAddress": None,  # Для основного кошелька используем None
+                "walletAddress": self.wallet_address  # Явно указываем основной адрес кошелька
             }
             
             # Логируем только при ошибках
