@@ -497,14 +497,30 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     min_tp_price = min(tp_prices)
                     max_tp_price = max(tp_prices)
                 
+                # Отладочная информация
+                client.browser.log_message(
+                    f"🔍 DEBUG: Current=${current_price:.2f}, has_order_below={has_order_below}, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
+                    level="DEBUG"
+                )
+                
                 # 1. Лимитный ордер снизу на усреднение
                 # Условие: нет лимитных ордеров ниже текущей цены
-                if not has_order_below and min_tp_price > 0:
-                    price_below = min_tp_price - float(step) * 2
-                    client.browser.log_message(
-                        f"🔍 Averaging: min_TP=${min_tp_price:.2f}, creating BUY limit at ${price_below:.2f}",
-                        level="INFO"
-                    )
+                if not has_order_below:
+                    if min_tp_price > 0:
+                        # Усреднение: используем min_TP_price - STEP*2
+                        price_below = min_tp_price - float(step) * 2
+                        client.browser.log_message(
+                            f"🔍 Averaging: min_TP=${min_tp_price:.2f}, creating BUY limit at ${price_below:.2f}",
+                            level="INFO"
+                        )
+                    else:
+                        # Первый запуск: используем current_price - STEP
+                        price_below = current_price - float(step)
+                        client.browser.log_message(
+                            f"🔍 First Position: creating BUY limit at ${price_below:.2f} (current: ${current_price:.2f})",
+                            level="INFO"
+                        )
+                    
                     await client.place_order(
                         token=token_name,
                         side="BUY",
