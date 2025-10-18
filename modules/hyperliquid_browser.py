@@ -771,6 +771,9 @@ class HyperliquidBrowser:
                 "t": order_data.get("order_type", {"limit": {"tif": "Gtc"}})  # тип ордера
             }
             
+            # Логируем финальную структуру ордера
+            self.log_message(f"🔍 DEBUG: Final order structure: {order}", level="DEBUG")
+            
             # Формируем action
             action = {
                 "type": "order",

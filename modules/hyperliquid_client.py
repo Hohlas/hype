@@ -168,9 +168,18 @@ class HyperliquidClient:
             if order_type == "LIMIT":
                 order_data["limit_px"] = str(price) if price else str(token_price)
                 order_data["order_type"] = {"limit": {"tif": "Gtc"}}
+                # Логируем параметры лимитного ордера
+                self.browser.log_message(
+                    f"🔍 DEBUG: LIMIT order - price: {price}, limit_px: {order_data['limit_px']}, order_type: {order_data['order_type']}",
+                    level="DEBUG"
+                )
             elif order_type == "MARKET":
                 order_data["limit_px"] = str(token_price)  # Для маркет ордеров нужен limit_px
                 order_data["order_type"] = {"market": {}}
+                self.browser.log_message(
+                    f"🔍 DEBUG: MARKET order - limit_px: {order_data['limit_px']}, order_type: {order_data['order_type']}",
+                    level="DEBUG"
+                )
             elif order_type == "STOP_MARKET":
                 # Временно используем лимитные ордера вместо стоп-маркет
                 if stop_price is None:
