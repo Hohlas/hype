@@ -807,8 +807,8 @@ class HyperliquidBrowser:
                     # SELL: цена на 3% ниже текущей для агрессивного исполнения
                     max_price = current_price * 0.97
                 
-                # Округляем цену по tick size (для UBTC tick_size = 0.5)
-                tick_size = 0.5  # Для UBTC
+                # Округляем цену по tick size (для UBTC tick_size = 1 - целые доллары)
+                tick_size = 1  # Для UBTC реальный tick size = 1 (целые доллары)
                 final_price = round_to_tick_size(max_price, tick_size)
                 
                 order["p"] = final_price
@@ -816,7 +816,7 @@ class HyperliquidBrowser:
                 self.log_message(f"🔍 DEBUG: Market order as IOC limit: current={current_price}, max={max_price}, tick_size={tick_size}, final={final_price}", level="DEBUG")
             else:
                 # Для лимитных ордеров добавляем цену с округлением по tick size
-                tick_size = 0.5  # Для UBTC
+                tick_size = 1  # Для UBTC реальный tick size = 1 (целые доллары)
                 final_price = round_to_tick_size(px_value, tick_size)
                 order["p"] = final_price
                 order["t"] = order_type  # тип ордера
