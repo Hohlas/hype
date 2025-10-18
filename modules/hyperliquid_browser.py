@@ -713,18 +713,15 @@ class HyperliquidBrowser:
             sz_value = float(order_data.get("sz", "0.001"))
             sz_str = f"{sz_value:.5f}"  # строка, напр. "0.00116"
             
-            # Берем цену из данных ордера
-            px_value = float(order_data.get("limit_px", 108000))
-            # Округление до тика теперь происходит в float_to_wire
-            px_str = self.float_to_wire(px_value, is_price=True)  # строка с правильным форматированием
-            
-            # Используем ту же правильную структуру payload, что и для futures
             # Форматируем числовые поля с правильной точностью
             sz_value = float(order_data.get("sz", "0.001"))
             sz_str = f"{sz_value:.5f}"  # минимум 5 знаков после точки
             
             px_value = float(order_data.get("limit_px", 108000))
-            px_str = f"{px_value:.2f}"  # минимум 1-2 знака после точки для цены
+            px_str = self.float_to_wire(px_value, is_price=True)  # правильное округление до тика
+            
+            # Отладочная информация для проверки округления
+            self.log_message(f"🔧 Price formatting: {px_value} -> {px_str} (tick_size: {self.btc_tick_size})", level="DEBUG")
             
             # Создаем правильную структуру ордера с EIP-712 подписью
             order = {
