@@ -462,7 +462,7 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
 async def trade_delayed_orders_strategy(client, token_name: str):
     """
     Новая стратегия:
-    - Лимитные ордера снизу на усреднение (min_TP_price - STEP*2)
+    - Маркет ордера на усреднение при current_price < min_TP_price - STEP*2
     - Маркет ордера сверху при подходе к уровню (current_price > max_TP_price - STEP/2)
     - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
     """
@@ -485,13 +485,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
                 
                 buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
-                sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S"]]
+                sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S", "A"]]
                 
                 # Логируем все открытые ордера
                 client.browser.log_message(f"📋 Open Orders ({len(open_orders)} total):", level="INFO")
                 for i, order in enumerate(open_orders):
                     side_raw = order.get("side", "UNKNOWN")
-                    side_display = "BUY" if side_raw in ["BUY", "B"] else "SELL" if side_raw in ["SELL", "S"] else side_raw
+                    side_display = "BUY" if side_raw in ["BUY", "B"] else "SELL" if side_raw in ["SELL", "S", "A"] else side_raw
                     price = order.get("limitPx", "N/A")
                     size = order.get("sz", "N/A")
                     coin = order.get("coin", "N/A")
@@ -533,24 +533,47 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 else:
                     client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
                 
-                # 1. Лимитный ордер снизу на усреднение
-                # Условие: нет лимитных ордеров ниже текущей цены
-                if not has_order_below:
-                    if min_tp_price > 0:
-                        # Усреднение: используем min_TP_price - STEP*2
-                        price_below = min_tp_price - float(step) * 2
+                # 1. Маркет ордер на усреднение
+                # Условие: current_price < min_TP_price - STEP*2
+                if min_tp_price > 0:
+                    trigger_level = min_tp_price - float(step) * 2
+                    if current_price < trigger_level:
                         client.browser.log_message(
-                            f"🔍 Averaging: min_TP=${min_tp_price:.2f}, creating BUY limit at ${price_below:.2f}",
+                            f"🔍 Averaging: current ${current_price:.2f} < trigger ${trigger_level:.2f}, creating MARKET BUY",
                             level="INFO"
+                        )
+                        await client.place_order(
+                            token=token_name,
+                            side="BUY",
+                            order_type="MARKET",
+                            usdc_amount=usdc_amount
+                        )
+                        
+                        # Сразу ставим TP ордер на продажу
+                        tp_price = current_price + float(step)
+                        client.browser.log_message(
+                            f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                            level="INFO"
+                        )
+                        await client.place_order(
+                            token=token_name,
+                            side="SELL",
+                            order_type="LIMIT",
+                            price=tp_price,
+                            usdc_amount=usdc_amount
                         )
                     else:
-                        # Первый запуск: используем current_price - STEP
-                        price_below = current_price - float(step)
                         client.browser.log_message(
-                            f"🔍 First Position: creating BUY limit at ${price_below:.2f} (current: ${current_price:.2f})",
-                            level="INFO"
+                            f"⚠️ No averaging needed - current ${current_price:.2f} >= trigger ${trigger_level:.2f}",
+                            level="DEBUG"
                         )
-                    
+                elif not has_order_below:
+                    # Первый запуск: создаем лимитный ордер на покупку
+                    price_below = current_price - float(step)
+                    client.browser.log_message(
+                        f"🔍 First Position: creating BUY limit at ${price_below:.2f} (current: ${current_price:.2f})",
+                        level="INFO"
+                    )
                     await client.place_order(
                         token=token_name,
                         side="BUY",
