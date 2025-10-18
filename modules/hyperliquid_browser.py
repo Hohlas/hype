@@ -778,7 +778,10 @@ class HyperliquidBrowser:
                 trigger_price = float(trigger_data["triggerPx"])
                 px_str = str(int(trigger_price))  # Убираем десятичную часть
                 order["p"] = px_str
-                order["t"] = order_type
+                # Убеждаемся, что triggerPx остается числом в структуре
+                order_type_copy = order_type.copy()
+                order_type_copy["trigger"]["triggerPx"] = int(trigger_price)
+                order["t"] = order_type_copy
                 self.log_message(f"🔍 DEBUG: Creating trigger order with triggerPx: {px_str}", level="DEBUG")
             else:
                 # Для обычных ордеров используем limit_px
