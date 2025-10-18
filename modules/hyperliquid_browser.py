@@ -236,7 +236,7 @@ class HyperliquidBrowser:
             self.log_message(f"🔍 DEBUG: Action hash: 0x{action_hash.hex()}", level="DEBUG")
             self.log_message(f"🔍 DEBUG: Action string: {json.dumps(action)}", level="DEBUG")
             
-            # Базовая структура EIP-712
+            # Базовая структура EIP-712 (БЕЗ nonce в Agent согласно официальной документации)
             eip712_data = {
                 "domain": {
                     "chainId": 1337,
@@ -253,8 +253,7 @@ class HyperliquidBrowser:
                     ],
                     "Agent": [
                         {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"},
-                        {"name": "nonce", "type": "uint256"}
+                        {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
                 "primaryType": "Agent"
@@ -264,59 +263,23 @@ class HyperliquidBrowser:
             last_error = None
             signature = None
             
-            # Вариант 1: Сырые байты
+            # Правильная подпись БЕЗ nonce в Agent (согласно официальной документации)
             try:
                 msg = eip712_data.copy()
                 msg["message"] = {
                     "source": "a",
-                    "connectionId": action_hash,
-                    "nonce": nonce
+                    "connectionId": "0x" + action_hash.hex()  # hex string формат для bytes32
                 }
                 encoded = encode_structured_data(msg)
                 signature = self.account.sign_message(encoded)
                 success = True
-                self.log_message("✅ Вариант 1 (сырые байты) успешен", level="DEBUG")
+                self.log_message("✅ EIP-712 подпись успешна (исправленная структура)", level="DEBUG")
             except Exception as e:
                 last_error = e
-                self.log_message(f"❌ Вариант 1 failed: {e}", level="DEBUG")
-
-            # Вариант 2: Hex строка
-            if not success:
-                try:
-                    msg = eip712_data.copy()
-                    msg["message"] = {
-                        "source": "a",
-                        "connectionId": action_hash.hex(),
-                        "nonce": nonce
-                    }
-                    encoded = encode_structured_data(msg)
-                    signature = self.account.sign_message(encoded)
-                    success = True
-                    self.log_message("✅ Вариант 2 (hex) успешен", level="DEBUG")
-                except Exception as e:
-                    last_error = e
-                    self.log_message(f"❌ Вариант 2 failed: {e}", level="DEBUG")
-
-            # Вариант 3: eth_utils
-            if not success:
-                try:
-                    from eth_utils import to_bytes
-                    msg = eip712_data.copy()
-                    msg["message"] = {
-                        "source": "a",
-                        "connectionId": to_bytes(hexstr=action_hash.hex()),
-                        "nonce": nonce
-                    }
-                    encoded = encode_structured_data(msg)
-                    signature = self.account.sign_message(encoded)
-                    success = True
-                    self.log_message("✅ Вариант 3 (eth_utils) успешен", level="DEBUG")
-                except Exception as e:
-                    last_error = e
-                    self.log_message(f"❌ Вариант 3 failed: {e}", level="DEBUG")
+                self.log_message(f"❌ EIP-712 подпись failed: {e}", level="DEBUG")
 
             if not success:
-                raise Exception(f"Все варианты подписи failed. Последняя ошибка: {last_error}")
+                raise Exception(f"EIP-712 подпись failed. Ошибка: {last_error}")
 
             # Возвращаем подпись в нужном формате
             return {
