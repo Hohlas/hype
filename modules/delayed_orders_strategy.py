@@ -467,6 +467,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # min_qty, min_notional = await client.get_token_limits(token_name)
         min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
         
+        # Кэш для отслеживания изменений в ордерах и балансах
+        previous_orders_state = None
+        previous_balance_state = None
+        
         while True:
             try:
                 # DEBUG лог отключен для чистоты логов
@@ -575,22 +579,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     }
                     return asset_mapping.get(coin_id, coin_id)
                 
-                # Подготавливаем информацию об ордерах и балансах
-                orders_info = []
-                orders_info.append(f"📋 Open Orders ({len(open_orders)} total):")
-                
-                for i, order in enumerate(open_orders):
+                # Создаем текущее состояние ордеров для сравнения
+                current_orders_state = []
+                for order in open_orders:
                     side_raw = order.get("side", "UNKNOWN")
                     side_display = "BUY" if side_raw in ["BUY", "B"] else "SELL" if side_raw in ["SELL", "S", "A"] else side_raw
                     price = order.get("limitPx", "N/A")
                     size = order.get("sz", "N/A")
                     coin = order.get("coin", "N/A")
                     readable_coin = get_readable_coin_name(coin)
-                    orders_info.append(f"  {i+1}. {side_display} {readable_coin} | Price: ${price} | Size: {size}")
+                    current_orders_state.append(f"{side_display} {readable_coin} | Price: ${price} | Size: {size}")
                 
-                # Отображаем балансы всех токенов (уже получены выше)
+                # Создаем текущее состояние балансов для сравнения (только количества токенов, без общей стоимости)
                 try:
-                    # Собираем балансы всех токенов и считаем общую стоимость
+                    # Собираем только балансы токенов без расчета общей стоимости
                     token_balances = []
                     total_usd_value = 0.0
                     
@@ -609,14 +611,41 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     # Формируем строку балансов
                     balance_str = " + ".join(token_balances)
-                    orders_info.append(f"Balance: {balance_str} = ${total_usd_value:.2f}")
+                    # Для сравнения используем только балансы токенов, без общей стоимости
+                    current_balance_state = f"Balance: {balance_str}"
+                    
+                except Exception as e:
+                    current_balance_state = f"Failed to get balances: {e}"
+                
+                # Проверяем, изменились ли ордера или балансы
+                orders_changed = (previous_orders_state is None or 
+                                previous_orders_state != current_orders_state or 
+                                len(previous_orders_state) != len(current_orders_state))
+                
+                balance_changed = (previous_balance_state is None or 
+                                 previous_balance_state != current_balance_state)
+                
+                # Выводим логи только при изменении
+                if orders_changed or balance_changed:
+                    orders_info = []
+                    orders_info.append(f"📋 Open Orders ({len(open_orders)} total):")
+                    
+                    for i, order_info in enumerate(current_orders_state):
+                        orders_info.append(f"  {i+1}. {order_info}")
+                    
+                    # Добавляем баланс с общей стоимостью для отображения (но не для сравнения)
+                    try:
+                        balance_str = " + ".join(token_balances)
+                        orders_info.append(f"Balance: {balance_str} = ${total_usd_value:.2f}")
+                    except:
+                        orders_info.append(current_balance_state)
                     
                     # Отправляем все в одном сообщении
                     client.browser.log_message("\n".join(orders_info), level="INFO")
                     
-                except Exception as e:
-                    orders_info.append(f"Failed to get balances: {e}")
-                    client.browser.log_message("\n".join(orders_info), level="ERROR")
+                    # Обновляем кэш
+                    previous_orders_state = current_orders_state.copy()
+                    previous_balance_state = current_balance_state
                 
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
