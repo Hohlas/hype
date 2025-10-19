@@ -329,32 +329,58 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
     Проверяет, сработал ли какой-то TP ордер
     """
     try:
-        current_price = float(await client.browser.get_token_price(token_name))
-        balance = float(await client.browser.get_balance())
+        # Получаем историю ордеров для проверки исполненных TP
+        trade_history = await client.browser.get_all_orders_history(token_name, limit=20)
         
-        for tp_order in tp_orders:
-            if tp_order.get("status") == "FILLED":
-                # TP ордер сработал
-                filled_qty = float(tp_order.get("sz", 0))
-                tp_price = float(tp_order.get("px", 0))
+        if not trade_history:
+            return False, None
+            
+        # Получаем текущие балансы
+        usdc_balance = float(await client.browser.get_balance())
+        
+        # Получаем BTC баланс из позиций
+        positions = await client.browser.get_account_positions()
+        btc_balance = 0.0
+        for pos in positions:
+            if pos.get("position", {}).get("coin") == token_name:
+                btc_balance = float(pos.get("position", {}).get("szi", 0))
+                break
+        
+        # Инициализируем кэш для отслеживания уже обработанных TP ордеров
+        if not hasattr(client, '_processed_tp_orders'):
+            client._processed_tp_orders = set()
+        
+        # Проверяем последние исполненные SELL ордера (TP)
+        for trade in trade_history:
+            side = trade.get("side", "")
+            status = trade.get("status", "")
+            order_id = trade.get("oid", "")
+            
+            # Ищем исполненные SELL ордера (TP), которые еще не обрабатывались
+            if side == "SELL" and status == "FILLED" and order_id not in client._processed_tp_orders:
+                filled_qty = float(trade.get("sz", 0))
+                tp_price = float(trade.get("px", 0))
                 
-                # Рассчитываем прибыль
-                profit = (tp_price - current_price) * filled_qty
+                # Рассчитываем прибыль (примерно)
+                profit = filled_qty * tp_price
+                
+                # Добавляем в кэш обработанных ордеров
+                client._processed_tp_orders.add(order_id)
                 
                 # Формируем сообщение согласно требованиям
                 client.browser.log_message(
-                    f"✅ Take Profit +${profit:.2f} | Eq=${balance:.1f}",
+                    f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC",
                     level="INFO"
                 )
                 
                 # Отправляем уведомление в Telegram согласно требованиям
                 await send_tg_notification(
                     client,
-                    text=f'🎯 Take Profit +${profit:.2f} | Eq=${balance:.1f}',
+                    text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC',
                     save_to_report=False
                 )
                 
-                return True, tp_order
+                return True, trade
         
         return False, None
         
@@ -482,6 +508,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Получаем все открытые ордера
                 open_orders = await client.browser.get_account_orders()
+                
+                # Проверяем исполненные TP ордера
+                tp_orders = await get_active_tp_orders(client, token_name)
+                tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
                 
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
