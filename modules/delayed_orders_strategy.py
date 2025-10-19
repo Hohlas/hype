@@ -482,8 +482,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Получаем все открытые ордера
                 open_orders = await client.browser.get_account_orders()
                 
-                # Логируем сырой ответ API
-                client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
+                # Логируем сырой ответ API (отключено для чистоты логов)
+                # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
                 
                 # Получаем историю сделок для анализа
                 trade_history = await client.browser.get_all_orders_history(token_name, limit=10)
@@ -529,11 +529,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     min_tp_price = min(tp_prices)
                     max_tp_price = max(tp_prices)
                 
-                # Отладочная информация
-                client.browser.log_message(
-                    f"🔍 DEBUG: Current=${current_price:.2f}, has_order_below={has_order_below}, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
-                    level="DEBUG"
-                )
+                # Отладочная информация (отключено для чистоты логов)
+                # client.browser.log_message(
+                #     f"🔍 DEBUG: Current=${current_price:.2f}, has_order_below={has_order_below}, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
+                #     level="DEBUG"
+                # )
                 
                 # Анализ текущей ситуации
                 if min_tp_price > 0:
@@ -549,18 +549,18 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 else:
                     client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
                 
-                # Детальная информация о BUY ордерах
-                if buy_orders:
-                    client.browser.log_message(f"🔍 BUY Orders Analysis:", level="DEBUG")
-                    for order in buy_orders:
-                        order_price = float(order.get("limitPx", 0))
-                        is_below = order_price < current_price
-                        client.browser.log_message(
-                            f"  BUY ${order_price:.2f} {'BELOW' if is_below else 'ABOVE'} current ${current_price:.2f}",
-                            level="DEBUG"
-                        )
-                else:
-                    client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
+                # Детальная информация о BUY ордерах (отключено для чистоты логов)
+                # if buy_orders:
+                #     client.browser.log_message(f"🔍 BUY Orders Analysis:", level="DEBUG")
+                #     for order in buy_orders:
+                #         order_price = float(order.get("limitPx", 0))
+                #         is_below = order_price < current_price
+                #         client.browser.log_message(
+                #             f"  BUY ${order_price:.2f} {'BELOW' if is_below else 'ABOVE'} current ${current_price:.2f}",
+                #             level="DEBUG"
+                #         )
+                # else:
+                #     client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
                 
                 # 1. При отсутствии TP ордеров: маркет покупка + TP ордер
                 if min_tp_price == 0 and max_tp_price == 0:

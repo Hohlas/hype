@@ -51,13 +51,13 @@ class HyperliquidClient:
             # Для spot торговли кредитное плечо всегда 1
             leverage = 1
             
-            # Логируем расчет для отладки
-            self.browser.log_message(
-                f"💸 Order calculation: Available=${balance:.2f}, Percent={percent}%, "
-                f"MinQty=${min_usdc_for_qty:.2f}, MinNotional=${min_notional:.2f}, "
-                f"Final Amount=${usdc_amount:.2f}",
-                level="DEBUG"
-            )
+            # Логируем расчет для отладки (отключено для чистоты логов)
+            # self.browser.log_message(
+            #     f"💸 Order calculation: Available=${balance:.2f}, Percent={percent}%, "
+            #     f"MinQty=${min_usdc_for_qty:.2f}, MinNotional=${min_notional:.2f}, "
+            #     f"Final Amount=${usdc_amount:.2f}",
+            #     level="DEBUG"
+            # )
             
             return usdc_amount, leverage
             

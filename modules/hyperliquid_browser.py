@@ -449,7 +449,7 @@ class HyperliquidBrowser:
             
             # Если не нашли, показываем доступные токены
             available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key or 'PERP' in key or 'SPOT' in key]
-            self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens[:10]}...", level="DEBUG")
+            # self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens[:10]}...", level="DEBUG")
             
             raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens[:10]}...')
                 
@@ -703,7 +703,7 @@ class HyperliquidBrowser:
             }
             
             self.log_message(f"🔄 Transferring ${amount} {'to futures' if to_perp else 'to spot'}...", level="INFO")
-            self.log_message(f"🔍 DEBUG: Transfer payload: {transfer_payload}", level="DEBUG")
+            # self.log_message(f"🔍 DEBUG: Transfer payload: {transfer_payload}", level="DEBUG")
             
             # Проверяем, что у нас есть приватный ключ для подписи
             if not self.private_key:
@@ -882,7 +882,7 @@ class HyperliquidBrowser:
                         if not has_errors:
                             self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
                             # Логируем полный ответ API для отладки
-                            self.log_message(f"🔍 DEBUG: API response: {result}", level="DEBUG")
+                            # self.log_message(f"🔍 DEBUG: API response: {result}", level="DEBUG")
                             return result
                         else:
                             # Показываем ошибки из statuses
@@ -906,7 +906,7 @@ class HyperliquidBrowser:
                 if hasattr(e, 'response') and e.response:
                     try:
                         error_text = await e.response.text()
-                        self.log_message(f"🔍 DEBUG: API Error Response: {error_text}", level="DEBUG")
+                        # self.log_message(f"🔍 DEBUG: API Error Response: {error_text}", level="DEBUG")
                     except:
                         pass
                 self.log_message(f"❌ Spot order error: {str(e)}", level="ERROR")
@@ -1007,7 +1007,7 @@ class HyperliquidBrowser:
             # Диагностика: проверим баланс и права доступа
             usdc_balance = None  # Инициализируем переменную
             try:
-                self.log_message("🔍 DEBUG: Checking account balance and permissions...", level="DEBUG")
+                # self.log_message("🔍 DEBUG: Checking account balance and permissions...", level="DEBUG")
                 
                 # Проверим, есть ли средства на futures аккаунте
                 account_info = await self.get_account_info()
@@ -1018,7 +1018,7 @@ class HyperliquidBrowser:
                     
                     # Сначала проверим spot баланс
                     spot_balance = await self.get_balance()
-                    self.log_message(f"🔍 DEBUG: Spot USDC balance: ${spot_balance}", level="DEBUG")
+                    # self.log_message(f"🔍 DEBUG: Spot USDC balance: ${spot_balance}", level="DEBUG")
                     
                     if spot_balance > 0:
                         # Попробуем перевести USDC с spot на futures
@@ -1035,11 +1035,11 @@ class HyperliquidBrowser:
                         self.log_message("💡 SOLUTION: Transfer USDC to your spot account before trading.", level="INFO")
                         raise Exception("No USDC balance in spot account")
                 account_info = await self.get_account_info()
-                self.log_message(f"🔍 DEBUG: Account info: {account_info}", level="DEBUG")
+                # self.log_message(f"🔍 DEBUG: Account info: {account_info}", level="DEBUG")
                 
                 # Проверим, есть ли spot баланс
                 spot_balance = account_info.get("spotBalances", [])
-                self.log_message(f"🔍 DEBUG: Spot balances: {spot_balance}", level="DEBUG")
+                # self.log_message(f"🔍 DEBUG: Spot balances: {spot_balance}", level="DEBUG")
                 
                 # Попробуем получить spot данные через другой endpoint
                 try:
@@ -1354,6 +1354,11 @@ class HyperliquidBrowser:
 
     def log_message(self, message: str, level: str = "INFO"):
         """
-        Логирование сообщений
+        Логирование сообщений с упрощенным форматом
         """
+        # Пропускаем DEBUG сообщения если они отключены
+        if level == "DEBUG" and not getattr(settings, 'ENABLE_DEBUG_LOGS', False):
+            return
+            
+        # Упрощенный формат логов
         logger.log(level, f'[{self.label}] {message}')
