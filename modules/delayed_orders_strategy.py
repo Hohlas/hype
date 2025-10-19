@@ -288,10 +288,10 @@ async def get_active_tp_orders(client, token_name: str):
         tp_orders = []
         for order in orders:
             coin = order.get("coin", "")
-            is_buy = order.get("isBuy", True)
+            side = order.get("side", "")
             
             # Проверяем, что это SELL ордер для нашего токена
-            if coin == token_name and not is_buy:
+            if coin == token_name and side in ["SELL", "S", "A"]:
                 tp_orders.append(order)
         
         return tp_orders
@@ -763,13 +763,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
                     trigger_level = max_tp_price - float(step) / 2
-                    client.browser.log_message(
-                        f"🔍 Pyramiding check: current=${current_price:.2f}, max_TP=${max_tp_price:.2f}, trigger=${trigger_level:.2f}",
-                        level="INFO"
-                    )
+                    # Лог "Pyramiding check" убран для чистоты логов
                     if current_price > trigger_level:
+                        # Получаем баланс для отображения
+                        balance = await client.browser.get_balance()
+                        
+                        # Объединенный лог для пирамидинга
                         client.browser.log_message(
-                            f"🚀 Pyramiding: current ${current_price:.2f} > trigger ${trigger_level:.2f}, creating MARKET BUY",
+                            f"🚀 Pyramiding at ${current_price:.2f} | Balance ${balance:.2f}",
                             level="INFO"
                         )
                         
