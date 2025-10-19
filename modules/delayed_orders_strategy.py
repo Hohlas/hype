@@ -503,9 +503,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # Получаем лимиты токена (отключено для чистоты логов)
-        # min_qty, min_notional = await client.get_token_limits(token_name)
-        min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
+                # Получаем лимиты токена (отключено для чистоты логов)
+                # min_qty, min_notional = await client.get_token_limits(token_name)
+                min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
         
         while True:
             try:
@@ -574,19 +574,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
                 
-                # Получаем историю сделок для анализа
-                trade_history = await client.browser.get_all_orders_history(token_name, limit=10)
-                if trade_history:
-                    client.browser.log_message(f"📈 Recent Trade History ({len(trade_history)} trades):", level="INFO")
-                    for i, trade in enumerate(trade_history[-4:]):  # Показываем последние 4 сделки
-                        side = trade.get("side", "UNKNOWN")
-                        price = trade.get("px", "N/A")
-                        size = trade.get("sz", "N/A")
-                        timestamp = trade.get("time", "N/A")
-                        client.browser.log_message(
-                            f"  {i+1}. {side} | Price: ${price} | Size: {size} | Time: {timestamp}",
-                            level="INFO"
-                        )
+        # Получаем историю сделок для анализа (отключено для чистоты логов)
+        # trade_history = await client.browser.get_all_orders_history(token_name, limit=10)
+        # if trade_history:
+        #     client.browser.log_message(f"📈 Recent Trade History ({len(trade_history)} trades):", level="INFO")
+        #     for i, trade in enumerate(trade_history[-4:]):  # Показываем последние 4 сделки
+        #         side = trade.get("side", "UNKNOWN")
+        #         price = trade.get("px", "N/A")
+        #         size = trade.get("sz", "N/A")
+        #         timestamp = trade.get("time", "N/A")
+        #         client.browser.log_message(
+        #             f"  {i+1}. {side} | Price: ${price} | Size: {size} | Time: {timestamp}",
+        #             level="INFO"
+        #         )
                 
                 buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
                 sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S", "A"]]
@@ -635,7 +635,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Лог "AVERAGING TRIGGERED" убран - будет показан в объединенном логе
                         pass
                     else:
-                        client.browser.log_message("⏳ Waiting for averaging trigger...", level="INFO")
+                        # Лог "Waiting for averaging trigger" убран для чистоты логов
+                        pass
                 else:
                     client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
                 

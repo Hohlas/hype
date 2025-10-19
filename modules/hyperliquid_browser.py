@@ -1375,22 +1375,23 @@ class HyperliquidBrowser:
         if level == "DEBUG" and not getattr(settings, 'ENABLE_DEBUG_LOGS', False):
             return
         
-        # Кэширование для частых сообщений (раз в минуту)
-        if not hasattr(self, '_log_cache'):
-            self._log_cache = {}
-        
-        current_time = time.time()
-        cache_key = f"{level}_{message}"
-        
-        # Проверяем, нужно ли логировать это сообщение
-        if cache_key in self._log_cache:
-            last_log_time = self._log_cache[cache_key]
-            # Если прошло меньше 60 секунд, пропускаем
-            if current_time - last_log_time < 60:
-                return
-        
-        # Обновляем время последнего логирования
-        self._log_cache[cache_key] = current_time
+        # Кэширование для частых сообщений (раз в минуту) - НЕ применяется к DEBUG
+        if level != "DEBUG":
+            if not hasattr(self, '_log_cache'):
+                self._log_cache = {}
+            
+            current_time = time.time()
+            cache_key = f"{level}_{message}"
+            
+            # Проверяем, нужно ли логировать это сообщение
+            if cache_key in self._log_cache:
+                last_log_time = self._log_cache[cache_key]
+                # Если прошло меньше 60 секунд, пропускаем
+                if current_time - last_log_time < 60:
+                    return
+            
+            # Обновляем время последнего логирования
+            self._log_cache[cache_key] = current_time
             
         # Упрощенный формат логов
         logger.log(level, f'[{self.label}] {message}')
