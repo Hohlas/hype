@@ -556,6 +556,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем позиции для других токенов
                     positions = await client.browser.get_account_positions()
                     
+                    # Отладочная информация для позиций
+                    client.browser.log_message(f"🔍 DEBUG: Found {len(positions)} positions", level="INFO")
+                    for pos in positions:
+                        position = pos.get("position", {})
+                        coin = position.get("coin", "")
+                        size = float(position.get("szi", 0))
+                        client.browser.log_message(f"🔍 DEBUG: Position - {coin}: {size}", level="INFO")
+                    
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
                     total_usd_value = usdc_balance
