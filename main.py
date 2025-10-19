@@ -3,12 +3,21 @@ from random import randint
 from loguru import logger
 from time import sleep
 import asyncio
+import sys
 
 from modules.retry import DataBaseError
 from modules.utils import async_sleep, send_warning_notification
 from modules.utils.modes import choose_mode
 from modules import *
 import settings
+
+# Настройка упрощенного формата логов
+logger.remove()  # Удаляем стандартный обработчик
+logger.add(
+    sys.stdout,
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
+    level=settings.LOG_LEVEL
+)
 
 
 def initialize_account(module_data: dict, group_data: dict = None):
