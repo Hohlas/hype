@@ -30,11 +30,11 @@ def choose_mode() -> Mode:
     ]
     
     print("\n" + "="*60)
-    print("HYPERLIQUID BOT - Выбор режима торговли")
+    print("🚀 HYPERLIQUID BOT - Выбор режима торговли")
     print("="*60)
     
     for i, mode in enumerate(modes, 1):
-        status = "[OK]" if mode.type == "module" and mode.soft_id in [0, 4, 5] else "[X]" if mode.type == "module" else "[DB]"
+        status = "✅" if mode.type == "module" and mode.soft_id in [0, 4, 5] else "❌" if mode.type == "module" else "📊"
         print(f"{i:2d}. {status} {mode.name}")
         print(f"    {mode.description}")
         print()
@@ -50,18 +50,18 @@ def choose_mode() -> Mode:
             
             if 1 <= choice_num <= len(modes):
                 selected_mode = modes[choice_num - 1]
-                print(f"\n[OK] Выбран режим: {selected_mode.name}")
+                print(f"\n✅ Выбран режим: {selected_mode.name}")
                 return selected_mode
             else:
-                print("[X] Неверный номер режима. Попробуйте снова.")
+                print("❌ Неверный номер режима. Попробуйте снова.")
                 
         except ValueError:
-            print("[X] Введите корректный номер режима.")
+            print("❌ Введите корректный номер режима.")
         except KeyboardInterrupt:
-            print("\nДо свидания!")
+            print("\n👋 До свидания!")
             return Mode("exit", 0, "Exit", "Выход из программы")
         except Exception as e:
-            print(f"[X] Ошибка: {e}")
+            print(f"❌ Ошибка: {e}")
 
 
 def get_mode_info(mode_id: int) -> Dict[str, Any]:

@@ -575,8 +575,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     }
                     return asset_mapping.get(coin_id, coin_id)
                 
-                # Логируем все открытые ордера
-                client.browser.log_message(f"📋 Open Orders ({len(open_orders)} total):", level="INFO")
+                # Подготавливаем информацию об ордерах и балансах
+                orders_info = []
+                orders_info.append(f"📋 Open Orders ({len(open_orders)} total):")
+                
                 for i, order in enumerate(open_orders):
                     side_raw = order.get("side", "UNKNOWN")
                     side_display = "BUY" if side_raw in ["BUY", "B"] else "SELL" if side_raw in ["SELL", "S", "A"] else side_raw
@@ -584,18 +586,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     size = order.get("sz", "N/A")
                     coin = order.get("coin", "N/A")
                     readable_coin = get_readable_coin_name(coin)
-                    client.browser.log_message(
-                        f"  {i+1}. {side_display} {readable_coin} | Price: ${price} | Size: {size}",
-                        level="INFO"
-                    )
+                    orders_info.append(f"  {i+1}. {side_display} {readable_coin} | Price: ${price} | Size: {size}")
                 
                 # Отображаем балансы всех токенов (уже получены выше)
                 try:
-                    
-                    # Отладочная информация (отключено для чистоты логов)
-                    # client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
-                    # client.browser.log_message(f"🔍 DEBUG: Looking for token_name: {token_name}", level="INFO")
-                    
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
                     total_usd_value = 0.0
@@ -610,24 +604,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 usd_value = balance * current_price
                                 total_usd_value += usd_value
                                 token_balances.append(f"{balance:.6f}BTC")
-                                # client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${current_price:.2f} = ${usd_value:.2f}", level="INFO")
                             except Exception as e:
                                 token_balances.append(f"{balance:.6f}BTC")
-                                # client.browser.log_message(f"🔍 DEBUG: Failed to calculate {coin} value: {e}", level="INFO")
-                        # else:
-                        #     # Отладочная информация для других токенов
-                        #     client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
                     
                     # Формируем строку балансов
                     balance_str = " + ".join(token_balances)
+                    orders_info.append(f"Balance: {balance_str} = ${total_usd_value:.2f}")
                     
-                    client.browser.log_message(
-                        f"Balance: {balance_str} = ${total_usd_value:.2f}",
-                        level="INFO"
-                    )
+                    # Отправляем все в одном сообщении
+                    client.browser.log_message("\n".join(orders_info), level="INFO")
                     
                 except Exception as e:
-                    client.browser.log_message(f"Failed to get balances: {e}", level="ERROR")
+                    orders_info.append(f"Failed to get balances: {e}")
+                    client.browser.log_message("\n".join(orders_info), level="ERROR")
                 
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
