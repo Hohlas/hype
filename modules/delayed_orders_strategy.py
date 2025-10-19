@@ -548,6 +548,46 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="INFO"
                     )
                 
+                # Получаем и отображаем балансы всех токенов
+                try:
+                    # Получаем USDC баланс
+                    usdc_balance = float(await client.browser.get_balance())
+                    
+                    # Получаем позиции для других токенов
+                    positions = await client.browser.get_account_positions()
+                    
+                    # Собираем балансы всех токенов и считаем общую стоимость
+                    token_balances = []
+                    total_usd_value = usdc_balance
+                    
+                    for pos in positions:
+                        position = pos.get("position", {})
+                        coin = position.get("coin", "")
+                        size = float(position.get("szi", 0))
+                        
+                        if size > 0 and coin == token_name:  # Только BTC баланс
+                            # Получаем цену токена
+                            try:
+                                token_price = float(await client.browser.get_token_price(coin))
+                                usd_value = size * token_price
+                                total_usd_value += usd_value
+                                token_balances.append(f"{size:.6f}BTC")
+                            except:
+                                token_balances.append(f"{size:.6f}BTC")
+                    
+                    # Формируем строку балансов
+                    balance_parts = [f"{usdc_balance:.2f}USD"]
+                    balance_parts.extend(token_balances)
+                    balance_str = " | ".join(balance_parts)
+                    
+                    client.browser.log_message(
+                        f"Balance: {balance_str} (${total_usd_value:.2f})",
+                        level="INFO"
+                    )
+                    
+                except Exception as e:
+                    client.browser.log_message(f"Failed to get balances: {e}", level="ERROR")
+                
                 # Рассчитываем размер ордера
                 usdc_amount, leverage = await client.calculate_usdc_amount_for_order(token_name)
                 
