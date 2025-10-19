@@ -375,6 +375,27 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to get spot balance: {e}", level="ERROR")
             return 0.0
             
+    async def get_token_balance(self, token_name: str):
+        """
+        Получение баланса конкретного токена
+        """
+        try:
+            spot_info = await self.get_spot_account_info()
+            balances = spot_info.get("balances", [])
+            
+            for balance in balances:
+                coin = balance.get("coin", "")
+                total = float(balance.get("total", 0))
+                
+                if coin == token_name:
+                    return total
+            
+            return 0.0
+            
+        except Exception as e:
+            self.log_message(f"Failed to get {token_name} balance: {e}", level="ERROR")
+            return 0.0
+            
     async def get_available_balance(self):
         """
         Получение доступного баланса USDC с учетом зарезервированных средств в открытых ордерах

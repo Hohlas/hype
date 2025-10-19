@@ -553,58 +553,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем USDC баланс
                     usdc_balance = float(await client.browser.get_balance())
                     
-                    # Получаем позиции для других токенов
-                    positions = await client.browser.get_account_positions()
-                    
-                    # Отладочная информация для позиций
-                    client.browser.log_message(f"🔍 DEBUG: Found {len(positions)} positions", level="INFO")
-                    for pos in positions:
-                        position = pos.get("position", {})
-                        coin = position.get("coin", "")
-                        size = float(position.get("szi", 0))
-                        client.browser.log_message(f"🔍 DEBUG: Position - {coin}: {size}", level="INFO")
+                    # Получаем BTC баланс напрямую из spot аккаунта
+                    btc_balance = float(await client.browser.get_token_balance(token_name))
                     
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
                     total_usd_value = usdc_balance
                     
-                    # Пробуем получить BTC баланс из открытых ордеров (альтернативный способ)
-                    btc_balance = 0.0
-                    try:
-                        # Получаем все ордера и ищем BUY ордера для расчета примерного BTC баланса
-                        all_orders = await client.browser.get_account_orders()
-                        buy_orders_btc = [order for order in all_orders if order.get("side") in ["BUY", "B"] and order.get("coin") == token_name]
-                        
-                        # Примерный расчет BTC баланса на основе исполненных BUY ордеров
-                        # Это приблизительная оценка, так как точный баланс сложно получить
-                        if buy_orders_btc:
-                            # Берем средний размер BUY ордеров как примерный баланс
-                            avg_size = sum(float(order.get("sz", 0)) for order in buy_orders_btc) / len(buy_orders_btc)
-                            btc_balance = avg_size * len(buy_orders_btc)  # Примерная оценка
-                            
-                            if btc_balance > 0:
-                                token_price = float(await client.browser.get_token_price(token_name))
-                                usd_value = btc_balance * token_price
-                                total_usd_value += usd_value
-                                token_balances.append(f"{btc_balance:.6f}BTC")
-                    except Exception as e:
-                        client.browser.log_message(f"Failed to estimate BTC balance: {e}", level="ERROR")
-                    
-                    # Старый способ через позиции (если работает)
-                    for pos in positions:
-                        position = pos.get("position", {})
-                        coin = position.get("coin", "")
-                        size = float(position.get("szi", 0))
-                        
-                        if size > 0 and coin == token_name:  # Только BTC баланс
-                            # Получаем цену токена
-                            try:
-                                token_price = float(await client.browser.get_token_price(coin))
-                                usd_value = size * token_price
-                                total_usd_value += usd_value
-                                token_balances.append(f"{size:.6f}BTC")
-                            except:
-                                token_balances.append(f"{size:.6f}BTC")
+                    if btc_balance > 0:
+                        # Получаем цену токена для расчета USD стоимости
+                        try:
+                            token_price = float(await client.browser.get_token_price(token_name))
+                            usd_value = btc_balance * token_price
+                            total_usd_value += usd_value
+                            token_balances.append(f"{btc_balance:.6f}BTC")
+                        except:
+                            token_balances.append(f"{btc_balance:.6f}BTC")
                     
                     # Формируем строку балансов
                     balance_parts = [f"{usdc_balance:.2f}USD"]
