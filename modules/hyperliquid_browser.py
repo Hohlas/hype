@@ -401,20 +401,20 @@ class HyperliquidBrowser:
             spot_info = await self.get_spot_account_info()
             balances = spot_info.get("balances", [])
             
-            # Отладочная информация
-            self.log_message(f"🔍 DEBUG: Spot account balances: {balances}", level="INFO")
+            # Отладочная информация (отключено для чистоты логов)
+            # self.log_message(f"🔍 DEBUG: Spot account balances: {balances}", level="INFO")
             
             for balance in balances:
                 coin = balance.get("coin", "")
                 total = float(balance.get("total", 0))
                 
-                self.log_message(f"🔍 DEBUG: Found balance - {coin}: {total}", level="INFO")
+                # self.log_message(f"🔍 DEBUG: Found balance - {coin}: {total}", level="INFO")
                 
                 if coin == token_name:
-                    self.log_message(f"🔍 DEBUG: Matched token {token_name}, returning {total}", level="INFO")
+                    # self.log_message(f"🔍 DEBUG: Matched token {token_name}, returning {total}", level="INFO")
                     return total
             
-            self.log_message(f"🔍 DEBUG: Token {token_name} not found in balances", level="INFO")
+            # self.log_message(f"🔍 DEBUG: Token {token_name} not found in balances", level="INFO")
             return 0.0
             
         except Exception as e:
