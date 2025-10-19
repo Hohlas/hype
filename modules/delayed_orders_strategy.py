@@ -509,6 +509,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         while True:
             try:
+                # DEBUG лог для проверки работы цикла
+                client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="DEBUG")
+                
                 # Получаем текущую цену
                 current_price = float(await client.browser.get_token_price(token_name))
                 

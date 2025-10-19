@@ -125,10 +125,10 @@ class HyperliquidClient:
                         
                         min_notional = float(meta.get("minNotional", "5.0"))  # Минимальная номинальная стоимость
                         
-                        self.browser.log_message(
-                            f"📏 Token limits from API: {token_name_from_api} - MinQty={min_qty}, MinNotional=${min_notional}",
-                            level="INFO"
-                        )
+                        # self.browser.log_message(
+                        #     f"📏 Token limits from API: {token_name_from_api} - MinQty={min_qty}, MinNotional=${min_notional}",
+                        #     level="INFO"
+                        # )
                         
                         return min_qty, min_notional
             
