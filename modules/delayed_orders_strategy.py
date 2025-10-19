@@ -787,8 +787,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
                     trigger_level = max_tp_price - float(step) / 2
-                    # Лог "Pyramiding check" убран для чистоты логов
+                    
+                    # Отладочная информация для пирамидинга
+                    client.browser.log_message(f"🔍 DEBUG: Pyramiding check - current: ${current_price:.2f}, max_TP: ${max_tp_price:.2f}, trigger: ${trigger_level:.2f}", level="INFO")
+                    
                     if current_price > trigger_level:
+                        client.browser.log_message(f"🔍 DEBUG: Pyramiding triggered! current ${current_price:.2f} > trigger ${trigger_level:.2f}", level="INFO")
                         # Получаем баланс для отображения
                         balance = await client.browser.get_balance()
                         
