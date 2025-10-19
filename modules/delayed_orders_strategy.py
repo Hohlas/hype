@@ -565,9 +565,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         if coin == "USDC":
                             token_balances.append(f"{balance:.2f}USD")
                             total_usd_value += balance
-                        elif coin == token_name:  # BTC токен (UBTC)
+                        elif coin == token_name or coin == "UBTC":  # BTC токен (может быть BTC или UBTC)
                             try:
-                                token_price = float(await client.browser.get_token_price(token_name))
+                                # Используем правильное имя токена для получения цены
+                                price_token_name = coin if coin == "UBTC" else token_name
+                                token_price = float(await client.browser.get_token_price(price_token_name))
                                 usd_value = balance * token_price
                                 total_usd_value += usd_value
                                 token_balances.append(f"{balance:.6f}BTC")
