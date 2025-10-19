@@ -1372,8 +1372,14 @@ class HyperliquidBrowser:
         Логирование сообщений с упрощенным форматом и кэшированием частых сообщений
         """
         # Пропускаем DEBUG сообщения если они отключены
-        if level == "DEBUG" and not getattr(settings, 'ENABLE_DEBUG_LOGS', False):
-            return
+        if level == "DEBUG":
+            try:
+                enable_debug = getattr(settings, 'ENABLE_DEBUG_LOGS', False)
+                if not enable_debug:
+                    return
+            except:
+                # Если не можем получить настройку, пропускаем DEBUG
+                return
         
         # Кэширование для частых сообщений (раз в минуту) - НЕ применяется к DEBUG
         if level != "DEBUG":
