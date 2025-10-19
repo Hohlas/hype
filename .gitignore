@@ -42,8 +42,7 @@ Thumbs.db
 *.orig
 
 # Bot specific (НЕ коммитить!)
-settings.py
-input_data/
+#settings.py
 *.db
 *.sqlite
 *.log
@@ -52,7 +51,7 @@ logs/
 *.key
 apikeys.txt
 proxies.txt
-wallets.txt
+#wallets.txt
 
 # Hyperliquid specific
 private_keys.txt
