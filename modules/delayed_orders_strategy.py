@@ -503,9 +503,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-                # Получаем лимиты токена (отключено для чистоты логов)
-                # min_qty, min_notional = await client.get_token_limits(token_name)
-                min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
+        # Получаем лимиты токена (отключено для чистоты логов)
+        # min_qty, min_notional = await client.get_token_limits(token_name)
+        min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
         
         while True:
             try:
