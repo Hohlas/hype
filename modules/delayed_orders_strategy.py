@@ -553,9 +553,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем все балансы из spot аккаунта
                     all_balances = await client.browser.get_all_balances()
                     
-                    # Отладочная информация
-                    client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
-                    client.browser.log_message(f"🔍 DEBUG: Looking for token_name: {token_name}", level="INFO")
+                    # Отладочная информация (отключено для чистоты логов)
+                    # client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
+                    # client.browser.log_message(f"🔍 DEBUG: Looking for token_name: {token_name}", level="INFO")
                     
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
@@ -573,13 +573,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 usd_value = balance * token_price
                                 total_usd_value += usd_value
                                 token_balances.append(f"{balance:.6f}BTC")
-                                client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${token_price:.2f} = ${usd_value:.2f}", level="INFO")
+                                # client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${token_price:.2f} = ${usd_value:.2f}", level="INFO")
                             except Exception as e:
                                 token_balances.append(f"{balance:.6f}BTC")
                                 client.browser.log_message(f"🔍 DEBUG: Failed to get {coin} price: {e}", level="INFO")
-                        else:
-                            # Отладочная информация для других токенов
-                            client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
+                        # else:
+                        #     # Отладочная информация для других токенов
+                        #     client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
                     
                     # Формируем строку балансов
                     balance_str = " | ".join(token_balances)
