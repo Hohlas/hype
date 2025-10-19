@@ -349,7 +349,7 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
     """
     # Эта функция больше не используется, так как мы используем альтернативный метод
     # отслеживания через сравнение состояний активных ордеров
-    return False, None
+        return False, None
 
 
 async def create_stop_market_order(client, token_name: str, stop_price: float, usdc_amount: float, min_qty: float, min_notional: float, step: Decimal):
@@ -532,14 +532,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Формируем сообщение согласно требованиям
                         client.browser.log_message(
-                            f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC | ${total_usd_value:.2f}",
+                            f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
                             level="INFO"
                         )
                         
                         # Отправляем уведомление в Telegram согласно требованиям
                         await send_tg_notification(
                             client,
-                            text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC | ${total_usd_value:.2f}',
+                            text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}',
                             save_to_report=False
                         )
                 
@@ -624,10 +624,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         #     client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
                     
                     # Формируем строку балансов
-                    balance_str = " | ".join(token_balances)
+                    balance_str = " + ".join(token_balances)
                     
                     client.browser.log_message(
-                        f"Balance: {balance_str} (${total_usd_value:.2f})",
+                        f"Balance: {balance_str} = ${total_usd_value:.2f}",
                         level="INFO"
                     )
                     
