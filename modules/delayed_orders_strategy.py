@@ -555,6 +555,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     # Отладочная информация
                     client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
+                    client.browser.log_message(f"🔍 DEBUG: Looking for token_name: {token_name}", level="INFO")
                     
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
@@ -564,7 +565,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         if coin == "USDC":
                             token_balances.append(f"{balance:.2f}USD")
                             total_usd_value += balance
-                        elif coin == token_name:  # BTC токен
+                        elif coin == token_name:  # BTC токен (UBTC)
                             try:
                                 token_price = float(await client.browser.get_token_price(token_name))
                                 usd_value = balance * token_price
@@ -574,6 +575,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             except Exception as e:
                                 token_balances.append(f"{balance:.6f}BTC")
                                 client.browser.log_message(f"🔍 DEBUG: Failed to get {coin} price: {e}", level="INFO")
+                        else:
+                            # Отладочная информация для других токенов
+                            client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
                     
                     # Формируем строку балансов
                     balance_str = " | ".join(token_balances)
