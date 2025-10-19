@@ -540,6 +540,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
                 sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S", "A"]]
                 
+                # Функция для преобразования asset ID в читаемое название
+                def get_readable_coin_name(coin_id):
+                    asset_mapping = {
+                        "@142": "BTC",
+                        "@1": "USDC", 
+                        "@197": "UBTC",
+                        "@2": "ETH"
+                    }
+                    return asset_mapping.get(coin_id, coin_id)
+                
                 # Логируем все открытые ордера
                 client.browser.log_message(f"📋 Open Orders ({len(open_orders)} total):", level="INFO")
                 for i, order in enumerate(open_orders):
@@ -548,8 +558,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     price = order.get("limitPx", "N/A")
                     size = order.get("sz", "N/A")
                     coin = order.get("coin", "N/A")
+                    readable_coin = get_readable_coin_name(coin)
                     client.browser.log_message(
-                        f"  {i+1}. {side_display} {coin} | Price: ${price} | Size: {size}",
+                        f"  {i+1}. {side_display} {readable_coin} | Price: ${price} | Size: {size}",
                         level="INFO"
                     )
                 
