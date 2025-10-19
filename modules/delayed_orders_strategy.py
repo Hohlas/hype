@@ -568,6 +568,29 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     token_balances = []
                     total_usd_value = usdc_balance
                     
+                    # Пробуем получить BTC баланс из открытых ордеров (альтернативный способ)
+                    btc_balance = 0.0
+                    try:
+                        # Получаем все ордера и ищем BUY ордера для расчета примерного BTC баланса
+                        all_orders = await client.browser.get_account_orders()
+                        buy_orders_btc = [order for order in all_orders if order.get("side") in ["BUY", "B"] and order.get("coin") == token_name]
+                        
+                        # Примерный расчет BTC баланса на основе исполненных BUY ордеров
+                        # Это приблизительная оценка, так как точный баланс сложно получить
+                        if buy_orders_btc:
+                            # Берем средний размер BUY ордеров как примерный баланс
+                            avg_size = sum(float(order.get("sz", 0)) for order in buy_orders_btc) / len(buy_orders_btc)
+                            btc_balance = avg_size * len(buy_orders_btc)  # Примерная оценка
+                            
+                            if btc_balance > 0:
+                                token_price = float(await client.browser.get_token_price(token_name))
+                                usd_value = btc_balance * token_price
+                                total_usd_value += usd_value
+                                token_balances.append(f"{btc_balance:.6f}BTC")
+                    except Exception as e:
+                        client.browser.log_message(f"Failed to estimate BTC balance: {e}", level="ERROR")
+                    
+                    # Старый способ через позиции (если работает)
                     for pos in positions:
                         position = pos.get("position", {})
                         coin = position.get("coin", "")
