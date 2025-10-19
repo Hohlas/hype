@@ -351,7 +351,7 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
             client._processed_tp_orders = set()
         
         # Отладочная информация для проверки TP уведомлений
-        client.browser.log_message(f"🔍 DEBUG: Checking {len(trade_history)} trades for TP execution", level="DEBUG")
+        client.browser.log_message(f"🔍 DEBUG: Checking {len(trade_history)} trades for TP execution", level="INFO")
         
         # Проверяем последние исполненные SELL ордера (TP)
         for trade in trade_history:
@@ -360,7 +360,7 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
             order_id = trade.get("oid", "")
             
             # Отладочная информация для каждого трейда
-            client.browser.log_message(f"🔍 DEBUG: Trade - Side: {side}, Status: {status}, OID: {order_id}", level="DEBUG")
+            client.browser.log_message(f"🔍 DEBUG: Trade - Side: {side}, Status: {status}, OID: {order_id}", level="INFO")
             
             # Ищем исполненные SELL ордера (TP), которые еще не обрабатывались
             if side == "SELL" and status == "FILLED" and order_id not in client._processed_tp_orders:
@@ -504,7 +504,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
         # Тест DEBUG лога
-        client.browser.log_message("🔍 DEBUG: Strategy function started", level="DEBUG")
+        client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
         # Получаем лимиты токена (отключено для чистоты логов)
         # min_qty, min_notional = await client.get_token_limits(token_name)
@@ -513,7 +513,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         while True:
             try:
                 # DEBUG лог для проверки работы цикла
-                client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="DEBUG")
+                client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
                 # Получаем текущую цену
                 current_price = float(await client.browser.get_token_price(token_name))
@@ -533,13 +533,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 previous_tp_order_ids = set(client._previous_tp_orders.keys())
                 
                 # Отладочная информация для альтернативного метода
-                client.browser.log_message(f"🔍 DEBUG: Current TP orders: {current_tp_order_ids}", level="DEBUG")
-                client.browser.log_message(f"🔍 DEBUG: Previous TP orders: {previous_tp_order_ids}", level="DEBUG")
+                client.browser.log_message(f"🔍 DEBUG: Current TP orders: {current_tp_order_ids}", level="INFO")
+                client.browser.log_message(f"🔍 DEBUG: Previous TP orders: {previous_tp_order_ids}", level="INFO")
                 
                 # Если TP ордер исчез из списка активных, значит он исполнился
                 executed_tp_ids = previous_tp_order_ids - current_tp_order_ids
                 if executed_tp_ids:
-                    client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {executed_tp_ids}", level="DEBUG")
+                    client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {executed_tp_ids}", level="INFO")
                     
                     # Получаем информацию об исполненном ордере из предыдущего состояния
                     for executed_id in executed_tp_ids:
@@ -623,6 +623,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_prices = [float(order.get("limitPx", 0)) for order in sell_orders]
                     min_tp_price = min(tp_prices)
                     max_tp_price = max(tp_prices)
+                    client.browser.log_message(
+                        f"🔍 TP Analysis: {len(sell_orders)} orders, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
+                        level="INFO"
+                    )
                 
                 # Отладочная информация (отключено для чистоты логов)
                 # client.browser.log_message(
@@ -703,7 +707,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     )
                 
                 # 2. Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
-                elif min_tp_price > 0:
+                if min_tp_price > 0:
                     trigger_level = min_tp_price - float(step) * 2
                     if current_price < trigger_level:
                         # Получаем баланс для отображения
@@ -759,6 +763,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
                     trigger_level = max_tp_price - float(step) / 2
+                    client.browser.log_message(
+                        f"🔍 Pyramiding check: current=${current_price:.2f}, max_TP=${max_tp_price:.2f}, trigger=${trigger_level:.2f}",
+                        level="INFO"
+                    )
                     if current_price > trigger_level:
                         client.browser.log_message(
                             f"🚀 Pyramiding: current ${current_price:.2f} > trigger ${trigger_level:.2f}, creating MARKET BUY",
