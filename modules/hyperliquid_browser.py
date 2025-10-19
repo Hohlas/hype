@@ -1221,7 +1221,7 @@ class HyperliquidBrowser:
         try:
             url = f"{self.BASE_URL}/info"
             data = {
-                "type": "userFills",  # Используем userFills вместо userTrades
+                "type": "userTrades",  # Используем userTrades для получения истории ордеров
                 "user": self.wallet_address
             }
             

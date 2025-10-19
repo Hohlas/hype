@@ -350,11 +350,17 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
         if not hasattr(client, '_processed_tp_orders'):
             client._processed_tp_orders = set()
         
+        # Отладочная информация (временно включена)
+        client.browser.log_message(f"🔍 DEBUG: Checking {len(trade_history)} trades for TP execution", level="DEBUG")
+        
         # Проверяем последние исполненные SELL ордера (TP)
         for trade in trade_history:
             side = trade.get("side", "")
             status = trade.get("status", "")
             order_id = trade.get("oid", "")
+            
+            # Отладочная информация для каждого трейда
+            client.browser.log_message(f"🔍 DEBUG: Trade - Side: {side}, Status: {status}, OID: {order_id}", level="DEBUG")
             
             # Ищем исполненные SELL ордера (TP), которые еще не обрабатывались
             if side == "SELL" and status == "FILLED" and order_id not in client._processed_tp_orders:
@@ -512,6 +518,54 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Проверяем исполненные TP ордера
                 tp_orders = await get_active_tp_orders(client, token_name)
                 tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
+                
+                # Альтернативная проверка через сравнение с предыдущим состоянием
+                if not hasattr(client, '_previous_tp_orders'):
+                    client._previous_tp_orders = {}
+                
+                current_tp_order_ids = {order.get("oid") for order in tp_orders if order.get("oid")}
+                previous_tp_order_ids = set(client._previous_tp_orders.keys())
+                
+                # Если TP ордер исчез из списка активных, значит он исполнился
+                executed_tp_ids = previous_tp_order_ids - current_tp_order_ids
+                if executed_tp_ids:
+                    client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {executed_tp_ids}", level="DEBUG")
+                    
+                    # Получаем информацию об исполненном ордере из предыдущего состояния
+                    for executed_id in executed_tp_ids:
+                        executed_order = client._previous_tp_orders.get(executed_id)
+                        
+                        if executed_order:
+                            # Получаем текущие балансы
+                            usdc_balance = float(await client.browser.get_balance())
+                            
+                            # Получаем BTC баланс из позиций
+                            positions = await client.browser.get_account_positions()
+                            btc_balance = 0.0
+                            for pos in positions:
+                                if pos.get("position", {}).get("coin") == token_name:
+                                    btc_balance = float(pos.get("position", {}).get("szi", 0))
+                                    break
+                            
+                            filled_qty = float(executed_order.get("sz", 0))
+                            tp_price = float(executed_order.get("limitPx", 0))
+                            profit = filled_qty * tp_price
+                            
+                            # Формируем сообщение согласно требованиям
+                            client.browser.log_message(
+                                f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC",
+                                level="INFO"
+                            )
+                            
+                            # Отправляем уведомление в Telegram согласно требованиям
+                            await send_tg_notification(
+                                client,
+                                text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC',
+                                save_to_report=False
+                            )
+                
+                # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
+                client._previous_tp_orders = {order.get("oid"): order for order in tp_orders if order.get("oid")}
                 
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
