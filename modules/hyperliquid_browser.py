@@ -617,7 +617,7 @@ class HyperliquidBrowser:
                 # Проверяем, содержит ли этот актив наш токен
                 if btc_token_index in asset_tokens:
                     asset_id = 10000 + asset_index
-                    self.log_message(f"✅ Found {symbol_base} spot asset: {asset_name} (asset_id: {asset_id})", level="INFO")
+                    # self.log_message(f"✅ Found {symbol_base} spot asset: {asset_name} (asset_id: {asset_id})", level="INFO")
                     return asset_id
             
             # Если ничего не нашли, показываем все доступные активы
