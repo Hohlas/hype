@@ -24,7 +24,7 @@ def choose_mode() -> Mode:
     modes = [
         Mode("module", 0, "Averaging Market", "Spot торговля с усреднением позиций"),
         Mode("module", 4, "Cancel Orders", "Отмена всех ордеров"),
-        Mode("module", 5, "Parse", "Парсинг данных"),
+        Mode("module", 5, "Parse", "Диагностика: просмотр баланса, позиций и ордеров"),
         Mode("database", 0, "Create Database", "Создание базы данных"),
         Mode("exit", 0, "Exit", "Выход из программы"),
     ]

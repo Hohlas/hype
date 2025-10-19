@@ -149,6 +149,15 @@ async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
 
 async def runner(mode: int):
     sem = asyncio.Semaphore(settings.THREADS)
+    
+    # Отправляем уведомление о старте
+    mode_names = {
+        0: "Averaging Market",
+        4: "Cancel Orders", 
+        5: "Parse"
+    }
+    mode_name = mode_names.get(mode, f"Mode {mode}")
+    await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nMode: {mode_name}")
 
     if mode in [3]:
         all_groups = db.get_all_groups()
@@ -197,26 +206,25 @@ if __name__ == '__main__':
                 case "module":
                     # Отправляем уведомление о старте
                     mode_names = {
-                        0: "New Strategy (Limit Below + Market Above)",
-                        1: "Grid Strategy (Legacy)", 
-                        2: "Averaging Market (Legacy)",
-                        3: "Pair Futures Limits",
+                        0: "Averaging Market",
                         4: "Cancel Orders",
                         5: "Parse"
                     }
                     mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
                     
-                    async def send_start_notification():
-                        await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nMode: {mode_name}")
-                    
-                    asyncio.run(send_start_notification())
                     logger.success(f'[•] Bot started in mode: {mode_name}')
                     
                     if asyncio.run(runner(mode=mode.soft_id)) == 'Ended': break
                     print('')
                 
+                case "exit":
+                    # Выход из программы
+                    logger.info(f'[•] Bot | Exiting...')
+                    break
+                
                 case _:
-                    # Exit или неизвестный режим
+                    # Неизвестный режим
+                    logger.warning(f'[•] Unknown mode type: {mode.type}')
                     continue
 
         sleep(0.1)

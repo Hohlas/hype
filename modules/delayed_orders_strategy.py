@@ -568,6 +568,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🚀 No TP Orders: creating MARKET BUY at current price ${current_price:.2f}",
                         level="INFO"
                     )
+                    
+                    # Отправляем уведомление о первой позиции
+                    await send_tg_notification(
+                        client,
+                        f"🚀 <b>First Position</b>\nBUY {token_name} at ${current_price:.2f}",
+                        save_to_report=False
+                    )
+                    
                     await client.place_order(
                         token=token_name,
                         side="BUY",
@@ -581,6 +589,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🎯 Setting TP: SELL at ${tp_price:.2f}",
                         level="INFO"
                     )
+                    
+                    # Отправляем уведомление о TP ордере
+                    await send_tg_notification(
+                        client,
+                        f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                        save_to_report=False
+                    )
+                    
                     await client.place_order(
                         token=token_name,
                         side="SELL",
@@ -597,6 +613,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"🔍 Averaging: current ${current_price:.2f} < trigger ${trigger_level:.2f}, creating MARKET BUY",
                             level="INFO"
                         )
+                        
+                        # Отправляем уведомление об усреднении
+                        await send_tg_notification(
+                            client,
+                            f"📉 <b>Averaging</b>\nBUY {token_name} at ${current_price:.2f}",
+                            save_to_report=False
+                        )
+                        
                         await client.place_order(
                             token=token_name,
                             side="BUY",
@@ -610,6 +634,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"🎯 Setting TP: SELL at ${tp_price:.2f}",
                             level="INFO"
                         )
+                        
+                        # Отправляем уведомление о TP ордере
+                        await send_tg_notification(
+                            client,
+                            f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                            save_to_report=False
+                        )
+                        
                         await client.place_order(
                             token=token_name,
                             side="SELL",
@@ -631,6 +663,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"🚀 Pyramiding: current ${current_price:.2f} > trigger ${trigger_level:.2f}, creating MARKET BUY",
                             level="INFO"
                         )
+                        
+                        # Отправляем уведомление о пирамидинге
+                        await send_tg_notification(
+                            client,
+                            f"📈 <b>Pyramiding</b>\nBUY {token_name} at ${current_price:.2f}",
+                            save_to_report=False
+                        )
+                        
                         await client.place_order(
                             token=token_name,
                             side="BUY",
@@ -644,6 +684,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"🎯 Setting TP: SELL at ${tp_price:.2f}",
                             level="INFO"
                         )
+                        
+                        # Отправляем уведомление о TP ордере
+                        await send_tg_notification(
+                            client,
+                            f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                            save_to_report=False
+                        )
+                        
                         await client.place_order(
                             token=token_name,
                             side="SELL",

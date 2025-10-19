@@ -38,17 +38,26 @@ class TgReport:
         try:
             import aiohttp
             
+            # Проверяем, что logs не пустой и содержит корректный текст
+            if not logs or not isinstance(logs, str) or logs.strip() == "":
+                logger.warning("Empty or invalid logs text, skipping Telegram notification")
+                return
+            
+            # Очищаем текст от потенциально проблемных символов
+            clean_logs = logs.strip()
+            
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             data = {
                 "chat_id": self.chat_id,
-                "text": logs,
+                "text": clean_logs,
                 "parse_mode": "HTML"
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data) as response:
                     if response.status != 200:
-                        logger.error(f"Failed to send Telegram message: {response.status}")
+                        response_text = await response.text()
+                        logger.error(f"Failed to send Telegram message: {response.status} - {response_text}")
                         
         except Exception as e:
             logger.error(f"Failed to send Telegram notification: {e}")

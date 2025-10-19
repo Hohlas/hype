@@ -287,18 +287,6 @@ class HyperliquidClient:
                 # Delayed Orders Strategy для spot торговли
                 from modules.delayed_orders_strategy import trade_delayed_orders_strategy
                 return await trade_delayed_orders_strategy(self, "BTC")
-            elif mode == 1:
-                # Grid Strategy для spot торговли (legacy)
-                from modules.grid_strategy import trade_grid_strategy
-                return await trade_grid_strategy(self, "BTC")
-            elif mode == 2:
-                # Averaging Market для spot торговли (legacy)
-                from modules.averaging_market import trade_averaging_market
-                return await trade_averaging_market(self, "BTC", "BUY")
-            elif mode == 3:
-                # Pair trading (не поддерживается для spot)
-                self.browser.log_message("Pair trading not supported in spot mode", level="WARNING")
-                return False
             elif mode == 4:
                 # Cancel Orders
                 from modules.cancel_orders import cancel_all_orders
