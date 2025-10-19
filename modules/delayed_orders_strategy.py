@@ -526,6 +526,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_tp_order_ids = {order.get("oid") for order in tp_orders if order.get("oid")}
                 previous_tp_order_ids = set(client._previous_tp_orders.keys())
                 
+                # Отладочная информация для альтернативного метода
+                client.browser.log_message(f"🔍 DEBUG: Current TP orders: {current_tp_order_ids}", level="DEBUG")
+                client.browser.log_message(f"🔍 DEBUG: Previous TP orders: {previous_tp_order_ids}", level="DEBUG")
+                
                 # Если TP ордер исчез из списка активных, значит он исполнился
                 executed_tp_ids = previous_tp_order_ids - current_tp_order_ids
                 if executed_tp_ids:

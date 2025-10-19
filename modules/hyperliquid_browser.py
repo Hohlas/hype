@@ -1236,6 +1236,12 @@ class HyperliquidBrowser:
             except Exception as json_error:
                 # Если не удалось парсить как JSON, пробуем как текст
                 response_text = await response.text()
+                
+                # Если ответ пустой, возвращаем пустой список
+                if not response_text.strip():
+                    self.log_message(f"Empty response from userTrades API", level="DEBUG")
+                    return []
+                
                 if 'application/json' not in content_type:
                     # Логируем только если это действительно неожиданный тип
                     self.log_message(f"⚠️ Unexpected content type: {content_type}, trying to parse as JSON", level="WARNING")
