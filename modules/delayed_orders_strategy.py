@@ -284,9 +284,9 @@ async def get_active_tp_orders(client, token_name: str):
     try:
         orders = await client.browser.get_account_orders()
         
-        # Отладочная информация
-        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - token_name: {token_name}", level="INFO")
-        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - total orders: {len(orders)}", level="INFO")
+        # Отладочная информация отключена для чистоты логов
+        # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - token_name: {token_name}", level="INFO")
+        # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - total orders: {len(orders)}", level="INFO")
         
         # Маппинг токенов для поиска ордеров
         token_mapping = {
@@ -297,7 +297,7 @@ async def get_active_tp_orders(client, token_name: str):
         
         # Получаем asset ID для токена
         asset_id = token_mapping.get(token_name, token_name)
-        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - looking for asset_id: {asset_id}", level="INFO")
+        # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - looking for asset_id: {asset_id}", level="INFO")
         
         # Фильтруем только SELL ордера для данного токена
         tp_orders = []
@@ -305,14 +305,14 @@ async def get_active_tp_orders(client, token_name: str):
             coin = order.get("coin", "")
             side = order.get("side", "")
             
-            client.browser.log_message(f"🔍 DEBUG: Order - coin: {coin}, side: {side}", level="INFO")
+            # client.browser.log_message(f"🔍 DEBUG: Order - coin: {coin}, side: {side}", level="INFO")
             
             # Проверяем, что это SELL ордер для нашего токена (по asset ID)
             if coin == asset_id and side in ["SELL", "S", "A"]:
                 tp_orders.append(order)
-                client.browser.log_message(f"🔍 DEBUG: Added TP order: {order}", level="INFO")
+                # client.browser.log_message(f"🔍 DEBUG: Added TP order: {order}", level="INFO")
         
-        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - found {len(tp_orders)} TP orders", level="INFO")
+        # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - found {len(tp_orders)} TP orders", level="INFO")
         return tp_orders
         
     except Exception as e:
@@ -460,8 +460,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # Тест DEBUG лога
-        client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
+        # Тест DEBUG лога отключен для чистоты логов
+        # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
         # Получаем лимиты токена (отключено для чистоты логов)
         # min_qty, min_notional = await client.get_token_limits(token_name)
@@ -469,8 +469,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         while True:
             try:
-                # DEBUG лог для проверки работы цикла
-                client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
+                # DEBUG лог отключен для чистоты логов
+                # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
                 # Получаем данные параллельно для оптимизации
                 import asyncio
@@ -483,11 +483,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
                 current_price = float(current_price_raw)
                 
-                # Отладочная информация для понимания проблемы
-                client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
-                if tp_orders:
-                    for tp_order in tp_orders:
-                        client.browser.log_message(f"🔍 DEBUG: TP order: {tp_order}", level="INFO")
+                # Отладочная информация отключена для чистоты логов
+                # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
+                # if tp_orders:
+                #     for tp_order in tp_orders:
+                #         client.browser.log_message(f"🔍 DEBUG: TP order: {tp_order}", level="INFO")
                 
                 tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
                 
@@ -498,14 +498,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_tp_order_ids = {order.get("oid") for order in tp_orders if order.get("oid")}
                 previous_tp_order_ids = set(client._previous_tp_orders.keys())
                 
-                # Отладочная информация для альтернативного метода
-                client.browser.log_message(f"🔍 DEBUG: Current TP orders: {current_tp_order_ids}", level="INFO")
-                client.browser.log_message(f"🔍 DEBUG: Previous TP orders: {previous_tp_order_ids}", level="INFO")
+                # Отладочная информация отключена для чистоты логов
+                # client.browser.log_message(f"🔍 DEBUG: Current TP orders: {current_tp_order_ids}", level="INFO")
+                # client.browser.log_message(f"🔍 DEBUG: Previous TP orders: {previous_tp_order_ids}", level="INFO")
                 
                 # Если TP ордер исчез из списка активных, значит он исполнился
                 executed_tp_ids = previous_tp_order_ids - current_tp_order_ids
                 if executed_tp_ids:
-                    client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {executed_tp_ids}", level="INFO")
+                    # client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {executed_tp_ids}", level="INFO")
                     
                     # Получаем информацию об исполненном ордере из предыдущего состояния
                     for executed_id in executed_tp_ids:
@@ -613,7 +613,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 # client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${current_price:.2f} = ${usd_value:.2f}", level="INFO")
                             except Exception as e:
                                 token_balances.append(f"{balance:.6f}BTC")
-                                client.browser.log_message(f"🔍 DEBUG: Failed to calculate {coin} value: {e}", level="INFO")
+                                # client.browser.log_message(f"🔍 DEBUG: Failed to calculate {coin} value: {e}", level="INFO")
                         # else:
                         #     # Отладочная информация для других токенов
                         #     client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
@@ -642,10 +642,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_prices = [float(order.get("limitPx", 0)) for order in sell_orders]
                     min_tp_price = min(tp_prices)
                     max_tp_price = max(tp_prices)
-                    client.browser.log_message(
-                        f"🔍 TP Analysis: {len(sell_orders)} orders, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
-                        level="INFO"
-                    )
+                    # client.browser.log_message(
+                    #     f"🔍 TP Analysis: {len(sell_orders)} orders, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
+                    #     level="INFO"
+                    # )
                 
                 # Отладочная информация (отключено для чистоты логов)
                 # client.browser.log_message(
@@ -783,11 +783,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if max_tp_price > 0:
                     trigger_level = max_tp_price - float(step) / 2
                     
-                    # Отладочная информация для пирамидинга
-                    client.browser.log_message(f"🔍 DEBUG: Pyramiding check - current: ${current_price:.2f}, max_TP: ${max_tp_price:.2f}, trigger: ${trigger_level:.2f}", level="INFO")
+                    # Отладочная информация для пирамидинга отключена для чистоты логов
+                    # client.browser.log_message(f"🔍 DEBUG: Pyramiding check - current: ${current_price:.2f}, max_TP: ${max_tp_price:.2f}, trigger: ${trigger_level:.2f}", level="INFO")
                     
                     if current_price > trigger_level:
-                        client.browser.log_message(f"🔍 DEBUG: Pyramiding triggered! current ${current_price:.2f} > trigger ${trigger_level:.2f}", level="INFO")
+                        # client.browser.log_message(f"🔍 DEBUG: Pyramiding triggered! current ${current_price:.2f} > trigger ${trigger_level:.2f}", level="INFO")
                         # Используем уже полученный баланс USDC из all_balances
                         usdc_balance = all_balances.get("USDC", 0.0)
                         
