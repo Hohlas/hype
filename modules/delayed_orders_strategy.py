@@ -471,8 +471,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # Получаем лимиты токена
-        min_qty, min_notional = await client.get_token_limits(token_name)
+        # Получаем лимиты токена (отключено для чистоты логов)
+        # min_qty, min_notional = await client.get_token_limits(token_name)
+        min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
         
         while True:
             try:
@@ -538,10 +539,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Анализ текущей ситуации
                 if min_tp_price > 0:
                     trigger_level = min_tp_price - float(step) * 2
-                    client.browser.log_message(
-                        f"📊 Strategy Analysis: min_TP=${min_tp_price:.2f}, trigger_level=${trigger_level:.2f}, current=${current_price:.2f}",
-                        level="INFO"
-                    )
+                    # client.browser.log_message(
+                    #     f"📊 Strategy Analysis: min_TP=${min_tp_price:.2f}, trigger_level=${trigger_level:.2f}, current=${current_price:.2f}",
+                    #     level="INFO"
+                    # )
                     if current_price < trigger_level:
                         client.browser.log_message("🚀 AVERAGING TRIGGERED: Price below trigger level!", level="INFO")
                     else:
