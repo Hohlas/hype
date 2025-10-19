@@ -838,7 +838,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             usdc_amount=usdc_amount
                         )
                 
-                await async_sleep(15)
+                await async_sleep(10)
                 
             except Exception as e:
                 client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
