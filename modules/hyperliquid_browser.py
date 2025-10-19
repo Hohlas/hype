@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_structured_data
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -261,9 +261,10 @@ class HyperliquidBrowser:
                 msg = eip712_data.copy()
                 msg["message"] = {
                     "source": "a",
-                    "connectionId": "0x" + action_hash.hex()  # Преобразуем bytes в hex-строку для JSON
+                    "connectionId": action_hash  # Используем сырые байты для EIP-712
                 }
-                encoded = encode_defunct(json.dumps(msg).encode())
+                # Используем правильную EIP-712 подпись вместо encode_defunct
+                encoded = encode_structured_data(msg)
                 signature = self.account.sign_message(encoded)
                 success = True
             except Exception as e:
