@@ -550,30 +550,33 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Получаем и отображаем балансы всех токенов
                 try:
-                    # Получаем USDC баланс
-                    usdc_balance = float(await client.browser.get_balance())
+                    # Получаем все балансы из spot аккаунта
+                    all_balances = await client.browser.get_all_balances()
                     
-                    # Получаем BTC баланс напрямую из spot аккаунта
-                    btc_balance = float(await client.browser.get_token_balance(token_name))
+                    # Отладочная информация
+                    client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
                     
                     # Собираем балансы всех токенов и считаем общую стоимость
                     token_balances = []
-                    total_usd_value = usdc_balance
+                    total_usd_value = 0.0
                     
-                    if btc_balance > 0:
-                        # Получаем цену токена для расчета USD стоимости
-                        try:
-                            token_price = float(await client.browser.get_token_price(token_name))
-                            usd_value = btc_balance * token_price
-                            total_usd_value += usd_value
-                            token_balances.append(f"{btc_balance:.6f}BTC")
-                        except:
-                            token_balances.append(f"{btc_balance:.6f}BTC")
+                    for coin, balance in all_balances.items():
+                        if coin == "USDC":
+                            token_balances.append(f"{balance:.2f}USD")
+                            total_usd_value += balance
+                        elif coin == token_name:  # BTC токен
+                            try:
+                                token_price = float(await client.browser.get_token_price(token_name))
+                                usd_value = balance * token_price
+                                total_usd_value += usd_value
+                                token_balances.append(f"{balance:.6f}BTC")
+                                client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${token_price:.2f} = ${usd_value:.2f}", level="INFO")
+                            except Exception as e:
+                                token_balances.append(f"{balance:.6f}BTC")
+                                client.browser.log_message(f"🔍 DEBUG: Failed to get {coin} price: {e}", level="INFO")
                     
                     # Формируем строку балансов
-                    balance_parts = [f"{usdc_balance:.2f}USD"]
-                    balance_parts.extend(token_balances)
-                    balance_str = " | ".join(balance_parts)
+                    balance_str = " | ".join(token_balances)
                     
                     client.browser.log_message(
                         f"Balance: {balance_str} (${total_usd_value:.2f})",
