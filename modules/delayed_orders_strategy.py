@@ -349,7 +349,7 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
     """
     # Эта функция больше не используется, так как мы используем альтернативный метод
     # отслеживания через сравнение состояний активных ордеров
-        return False, None
+    return False, None
 
 
 async def create_stop_market_order(client, token_name: str, stop_price: float, usdc_amount: float, min_qty: float, min_notional: float, step: Decimal):
