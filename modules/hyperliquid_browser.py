@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct, encode_structured_data
+from eth_account.messages import encode_defunct
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -263,7 +263,7 @@ class HyperliquidBrowser:
                     "source": "a",
                     "connectionId": action_hash  # сырые байты для bytes32
                 }
-                encoded = encode_structured_data(msg)
+                encoded = encode_defunct(json.dumps(msg).encode())
                 signature = self.account.sign_message(encoded)
                 success = True
             except Exception as e:

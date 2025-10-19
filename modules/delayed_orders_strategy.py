@@ -472,14 +472,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # DEBUG лог для проверки работы цикла
                 client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
-                # Получаем текущую цену
-                current_price = float(await client.browser.get_token_price(token_name))
-                
-                # Получаем все открытые ордера
-                open_orders = await client.browser.get_account_orders()
-                
-                # Проверяем исполненные TP ордера
-                tp_orders = await get_active_tp_orders(client, token_name)
+                # Получаем данные параллельно для оптимизации
+                import asyncio
+                tasks = [
+                    client.browser.get_token_price(token_name),
+                    client.browser.get_account_orders(),
+                    get_active_tp_orders(client, token_name),
+                    client.browser.get_all_balances()
+                ]
+                current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
+                current_price = float(current_price_raw)
                 
                 # Отладочная информация для понимания проблемы
                 client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
@@ -510,8 +512,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         executed_order = client._previous_tp_orders.get(executed_id)
                         
                     if executed_order:
-                        # Получаем актуальные балансы из текущего цикла
-                        all_balances = await client.browser.get_all_balances()
+                        # Используем уже полученные балансы из основного цикла
+                        # all_balances уже получены выше в цикле
                         
                         # Извлекаем балансы
                         usdc_balance = all_balances.get("USDC", 0.0)
@@ -520,11 +522,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Рассчитываем общую стоимость
                         total_usd_value = usdc_balance
                         if btc_balance > 0:
-                            try:
-                                token_price = float(await client.browser.get_token_price("BTC"))
-                                total_usd_value += btc_balance * token_price
-                            except:
-                                pass
+                            # Используем уже полученную цену current_price для расчета стоимости BTC
+                            total_usd_value += btc_balance * current_price
                         
                         filled_qty = float(executed_order.get("sz", 0))
                         tp_price = float(executed_order.get("limitPx", 0))
@@ -590,10 +589,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="INFO"
                     )
                 
-                # Получаем и отображаем балансы всех токенов
+                # Отображаем балансы всех токенов (уже получены выше)
                 try:
-                    # Получаем все балансы из spot аккаунта
-                    all_balances = await client.browser.get_all_balances()
                     
                     # Отладочная информация (отключено для чистоты логов)
                     # client.browser.log_message(f"🔍 DEBUG: All balances: {all_balances}", level="INFO")
@@ -609,16 +606,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             total_usd_value += balance
                         elif coin == token_name or coin == "UBTC":  # BTC токен (может быть BTC или UBTC)
                             try:
-                                # Для UBTC используем BTC для получения цены
-                                price_token_name = "BTC" if coin == "UBTC" else token_name
-                                token_price = float(await client.browser.get_token_price(price_token_name))
-                                usd_value = balance * token_price
+                                # Используем уже полученную цену current_price для расчета стоимости BTC
+                                usd_value = balance * current_price
                                 total_usd_value += usd_value
                                 token_balances.append(f"{balance:.6f}BTC")
-                                # client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${token_price:.2f} = ${usd_value:.2f}", level="INFO")
+                                # client.browser.log_message(f"🔍 DEBUG: {coin} value: {balance:.6f} * ${current_price:.2f} = ${usd_value:.2f}", level="INFO")
                             except Exception as e:
                                 token_balances.append(f"{balance:.6f}BTC")
-                                client.browser.log_message(f"🔍 DEBUG: Failed to get {coin} price: {e}", level="INFO")
+                                client.browser.log_message(f"🔍 DEBUG: Failed to calculate {coin} value: {e}", level="INFO")
                         # else:
                         #     # Отладочная информация для других токенов
                         #     client.browser.log_message(f"🔍 DEBUG: Found other token: {coin} = {balance}", level="INFO")
@@ -734,12 +729,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if min_tp_price > 0:
                     trigger_level = min_tp_price - float(step) * 2
                     if current_price < trigger_level:
-                        # Получаем баланс для отображения
-                        balance = await client.browser.get_balance()
+                        # Используем уже полученный баланс USDC из all_balances
+                        usdc_balance = all_balances.get("USDC", 0.0)
                         
                         # Объединенный лог для усреднения
                         client.browser.log_message(
-                            f"🔍 Averaging at ${current_price:.2f} | Balance ${balance:.2f}",
+                            f"🔍 Averaging at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
                             level="INFO"
                         )
                         
@@ -793,12 +788,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     if current_price > trigger_level:
                         client.browser.log_message(f"🔍 DEBUG: Pyramiding triggered! current ${current_price:.2f} > trigger ${trigger_level:.2f}", level="INFO")
-                        # Получаем баланс для отображения
-                        balance = await client.browser.get_balance()
+                        # Используем уже полученный баланс USDC из all_balances
+                        usdc_balance = all_balances.get("USDC", 0.0)
                         
                         # Объединенный лог для пирамидинга
                         client.browser.log_message(
-                            f"🚀 Pyramiding at ${current_price:.2f} | Balance ${balance:.2f}",
+                            f"🚀 Pyramiding at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
                             level="INFO"
                         )
                         
