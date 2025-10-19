@@ -284,16 +284,35 @@ async def get_active_tp_orders(client, token_name: str):
     try:
         orders = await client.browser.get_account_orders()
         
+        # Отладочная информация
+        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - token_name: {token_name}", level="INFO")
+        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - total orders: {len(orders)}", level="INFO")
+        
+        # Маппинг токенов для поиска ордеров
+        token_mapping = {
+            "BTC": "@142",
+            "ETH": "@2", 
+            "USDC": "@1"
+        }
+        
+        # Получаем asset ID для токена
+        asset_id = token_mapping.get(token_name, token_name)
+        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - looking for asset_id: {asset_id}", level="INFO")
+        
         # Фильтруем только SELL ордера для данного токена
         tp_orders = []
         for order in orders:
             coin = order.get("coin", "")
             side = order.get("side", "")
             
-            # Проверяем, что это SELL ордер для нашего токена
-            if coin == token_name and side in ["SELL", "S", "A"]:
+            client.browser.log_message(f"🔍 DEBUG: Order - coin: {coin}, side: {side}", level="INFO")
+            
+            # Проверяем, что это SELL ордер для нашего токена (по asset ID)
+            if coin == asset_id and side in ["SELL", "S", "A"]:
                 tp_orders.append(order)
+                client.browser.log_message(f"🔍 DEBUG: Added TP order: {order}", level="INFO")
         
+        client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders - found {len(tp_orders)} TP orders", level="INFO")
         return tp_orders
         
     except Exception as e:
@@ -461,6 +480,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Проверяем исполненные TP ордера
                 tp_orders = await get_active_tp_orders(client, token_name)
+                
+                # Отладочная информация для понимания проблемы
+                client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
+                if tp_orders:
+                    for tp_order in tp_orders:
+                        client.browser.log_message(f"🔍 DEBUG: TP order: {tp_order}", level="INFO")
+                
                 tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
                 
                 # Альтернативная проверка через сравнение с предыдущим состоянием
