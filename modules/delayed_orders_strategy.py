@@ -483,34 +483,39 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     for executed_id in executed_tp_ids:
                         executed_order = client._previous_tp_orders.get(executed_id)
                         
-                        if executed_order:
-                            # Получаем текущие балансы
-                            usdc_balance = float(await client.browser.get_balance())
-                            
-                            # Получаем BTC баланс из позиций
-                            positions = await client.browser.get_account_positions()
-                            btc_balance = 0.0
-                            for pos in positions:
-                                if pos.get("position", {}).get("coin") == token_name:
-                                    btc_balance = float(pos.get("position", {}).get("szi", 0))
-                                    break
-                            
-                            filled_qty = float(executed_order.get("sz", 0))
-                            tp_price = float(executed_order.get("limitPx", 0))
-                            profit = filled_qty * tp_price
-                            
-                            # Формируем сообщение согласно требованиям
-                            client.browser.log_message(
-                                f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC",
-                                level="INFO"
-                            )
-                            
-                            # Отправляем уведомление в Telegram согласно требованиям
-                            await send_tg_notification(
-                                client,
-                                text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC',
-                                save_to_report=False
-                            )
+                    if executed_order:
+                        # Получаем актуальные балансы из текущего цикла
+                        all_balances = await client.browser.get_all_balances()
+                        
+                        # Извлекаем балансы
+                        usdc_balance = all_balances.get("USDC", 0.0)
+                        btc_balance = all_balances.get("UBTC", 0.0)
+                        
+                        # Рассчитываем общую стоимость
+                        total_usd_value = usdc_balance
+                        if btc_balance > 0:
+                            try:
+                                token_price = float(await client.browser.get_token_price("BTC"))
+                                total_usd_value += btc_balance * token_price
+                            except:
+                                pass
+                        
+                        filled_qty = float(executed_order.get("sz", 0))
+                        tp_price = float(executed_order.get("limitPx", 0))
+                        profit = filled_qty * tp_price
+                        
+                        # Формируем сообщение согласно требованиям
+                        client.browser.log_message(
+                            f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC | ${total_usd_value:.2f}",
+                            level="INFO"
+                        )
+                        
+                        # Отправляем уведомление в Telegram согласно требованиям
+                        await send_tg_notification(
+                            client,
+                            text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USD | {btc_balance:.6f}BTC | ${total_usd_value:.2f}',
+                            save_to_report=False
+                        )
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
                 client._previous_tp_orders = {order.get("oid"): order for order in tp_orders if order.get("oid")}
