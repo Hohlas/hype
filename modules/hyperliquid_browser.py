@@ -1230,13 +1230,22 @@ class HyperliquidBrowser:
             # Проверяем content-type перед парсингом
             content_type = response.headers.get('Content-Type', '')
             
-            if 'application/json' not in content_type:
-                self.log_message(f"⚠️ Unexpected content type: {content_type}", level="WARNING")
+            # Пытаемся парсить JSON независимо от content-type
+            try:
+                result = await response.json()
+            except Exception as json_error:
+                # Если не удалось парсить как JSON, пробуем как текст
                 response_text = await response.text()
-                self.log_message(f"Response text: {response_text[:200]}", level="DEBUG")
-                return []
-            
-            result = await response.json()
+                if 'application/json' not in content_type:
+                    # Логируем только если это действительно неожиданный тип
+                    self.log_message(f"⚠️ Unexpected content type: {content_type}, trying to parse as JSON", level="WARNING")
+                
+                try:
+                    import json
+                    result = json.loads(response_text)
+                except Exception as parse_error:
+                    self.log_message(f"Failed to parse response as JSON: {parse_error}", level="ERROR")
+                    return []
             
             if response.status != 200:
                 raise Exception(f'Failed to get orders history: {result}')

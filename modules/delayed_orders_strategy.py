@@ -350,7 +350,7 @@ async def check_take_profit_execution(client, token_name: str, tp_orders: list):
         if not hasattr(client, '_processed_tp_orders'):
             client._processed_tp_orders = set()
         
-        # Отладочная информация (временно включена)
+        # Отладочная информация для проверки TP уведомлений
         client.browser.log_message(f"🔍 DEBUG: Checking {len(trade_history)} trades for TP execution", level="DEBUG")
         
         # Проверяем последние исполненные SELL ордера (TP)
