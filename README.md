@@ -109,10 +109,12 @@ hype/
 ├── modules/
 │   ├── hyperliquid_browser.py  # Клиент для Hyperliquid API
 │   ├── hyperliquid_client.py   # Основной клиент
-│   ├── averaging_market.py     # Логика торговли
-│   ├── database.py            # Работа с БД
-│   ├── retry.py               # Повторные попытки
-│   └── utils/                 # Утилиты
+│   ├── delayed_orders_strategy.py  # Основная стратегия торговли
+│   ├── cancel_orders.py         # Отмена ордеров
+│   ├── parse_mode.py            # Диагностика аккаунта
+│   ├── database.py              # Работа с БД
+│   ├── retry.py                 # Повторные попытки
+│   └── utils/                   # Утилиты
 └── input_data/             # Данные для ввода
 ```
 

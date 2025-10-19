@@ -4,7 +4,6 @@ Hyperliquid Bot Modules Package
 
 from .hyperliquid_browser import HyperliquidBrowser
 from .hyperliquid_client import HyperliquidClient
-from .averaging_market import trade_averaging_market
 from .database import DataBase
 from .retry import DataBaseError, CustomError, retry_async, retry_sync
 from .utils import (
@@ -82,7 +81,6 @@ class MultiLock:
 __all__ = [
     'HyperliquidBrowser',
     'HyperliquidClient', 
-    'trade_averaging_market',
     'DataBase',
     'DataBaseError',
     'CustomError',
