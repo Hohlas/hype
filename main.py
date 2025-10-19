@@ -94,7 +94,8 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
                         last_module=last_module,
                         mode=mode,
                     )
-                    await TgReport().send_log(logs=reports)
+                    if reports:
+                        await TgReport().send_log(logs="\n".join(reports))
 
                     if module_data["module_info"]["status"] is True:
                         await async_sleep(randint(*settings.SLEEP_AFTER_ACC))
@@ -148,7 +149,8 @@ async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
                         last_module=last_module,
                         mode=mode,
                     )
-                    await TgReport().send_log(logs=reports)
+                    if reports:
+                        await TgReport().send_log(logs="\n".join(reports))
 
                     if group_data["module_info"]["status"] is True:
                         await async_sleep(randint(*settings.SLEEP_AFTER_ACC))
@@ -166,7 +168,7 @@ async def runner(mode: int):
         5: "Parse"
     }
     mode_name = mode_names.get(mode, f"Mode {mode}")
-    await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nMode: {mode_name}")
+    await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nMode: {mode_name}\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
 
     if mode in [3]:
         all_groups = db.get_all_groups()
