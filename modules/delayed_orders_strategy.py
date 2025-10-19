@@ -544,7 +544,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     #     level="INFO"
                     # )
                     if current_price < trigger_level:
-                        client.browser.log_message("🚀 AVERAGING TRIGGERED: Price below trigger level!", level="INFO")
+                        # Лог "AVERAGING TRIGGERED" убран - будет показан в объединенном логе
+                        pass
                     else:
                         client.browser.log_message("⏳ Waiting for averaging trigger...", level="INFO")
                 else:
@@ -587,7 +588,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Сразу ставим TP ордер на продажу
                     tp_price = current_price + float(step)
                     client.browser.log_message(
-                        f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                        f"🎯 Set TP ${tp_price:.2f}",
                         level="INFO"
                     )
                     
@@ -610,8 +611,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 elif min_tp_price > 0:
                     trigger_level = min_tp_price - float(step) * 2
                     if current_price < trigger_level:
+                        # Получаем баланс для отображения
+                        balance = await client.browser.get_balance()
+                        
+                        # Объединенный лог для усреднения
                         client.browser.log_message(
-                            f"🔍 Averaging: current ${current_price:.2f} < trigger ${trigger_level:.2f}, creating MARKET BUY",
+                            f"🔍 Averaging at ${current_price:.2f} | Balance ${balance:.2f}",
                             level="INFO"
                         )
                         
@@ -632,7 +637,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Сразу ставим TP ордер на продажу
                         tp_price = current_price + float(step)
                         client.browser.log_message(
-                            f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                            f"🎯 Set TP ${tp_price:.2f}",
                             level="INFO"
                         )
                         
@@ -682,7 +687,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Сразу ставим TP ордер на продажу
                         tp_price = current_price + float(step)
                         client.browser.log_message(
-                            f"🎯 Setting TP: SELL at ${tp_price:.2f}",
+                            f"🎯 Set TP ${tp_price:.2f}",
                             level="INFO"
                         )
                         

@@ -602,7 +602,7 @@ class HyperliquidBrowser:
                     token_name = token.get("name", "")
                     if "BTC" in token_name.upper() or token_name.upper() == "BTC":
                         btc_token_index = token.get("index", -1)
-                        self.log_message(f"✅ Found BTC token: {token_name}", level="INFO")
+                        # self.log_message(f"✅ Found BTC token: {token_name}", level="INFO")
                         break
                 
                 if btc_token_index is None:
@@ -880,7 +880,7 @@ class HyperliquidBrowser:
                         has_errors = any('error' in status for status in statuses)
                         
                         if not has_errors:
-                            self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                            # self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
                             # Логируем полный ответ API для отладки
                             # self.log_message(f"🔍 DEBUG: API response: {result}", level="DEBUG")
                             return result
