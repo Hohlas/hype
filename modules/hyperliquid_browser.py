@@ -261,7 +261,7 @@ class HyperliquidBrowser:
                 msg = eip712_data.copy()
                 msg["message"] = {
                     "source": "a",
-                    "connectionId": action_hash  # сырые байты для bytes32
+                    "connectionId": "0x" + action_hash.hex()  # Преобразуем bytes в hex-строку для JSON
                 }
                 encoded = encode_defunct(json.dumps(msg).encode())
                 signature = self.account.sign_message(encoded)
