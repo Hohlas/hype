@@ -73,6 +73,7 @@ POSITION_SIZE_PERCENT = 10  # Размер открываемой позиции
 MAX_POSITION_SIZE_PERCENT = 90  # Максимальный размер всех открытых позиций в % от баланса
 STEP = 200  # Шаг сетки (TP) в долларах для усреднения
 MAX_GRID_ORDERS = 50  # Максимальное количество ордеров в сетке
+AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
 
 # Logging
 LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
