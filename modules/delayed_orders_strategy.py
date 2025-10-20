@@ -832,7 +832,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Отправляем уведомление о TP ордере
                     await send_tg_notification(
                         client,
-                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                         save_to_report=False
                     )
                     
@@ -868,12 +868,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Используем уже полученный баланс USDC из all_balances
                         usdc_balance = all_balances.get("USDC", 0.0)
                         
-                        # Объединенный лог для усреднения
-                        client.browser.log_message(
-                            f"🔍 Averaging at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
-                            level="INFO"
-                        )
-                        
                         order_result = await client.place_order(
                             token=token_name,
                             side="BUY",
@@ -884,21 +878,70 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
                         
-                        # Обновляем лог с точным количеством токенов
+                        # Логируем полный ответ API для отладки
                         client.browser.log_message(
-                            f"🔍 Averaging {token_amount:.6f}{token_name} / ${current_price:.2f} | Bal: ${usdc_balance:.2f}",
+                            f"🔍 DEBUG: Order result keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'Not a dict'}", 
+                            level="DEBUG"
+                        )
+                        if isinstance(order_result, dict):
+                            client.browser.log_message(
+                                f"🔍 DEBUG: Order result: {order_result}", 
+                                level="DEBUG"
+                            )
+                        
+                        # Получаем фактическую цену исполнения из результата ордера
+                        # Для маркет ордеров API может не возвращать avgFillPrice сразу
+                        actual_price = order_result.get('avgFillPrice', current_price)
+                        if actual_price is None or actual_price == 0:
+                            actual_price = current_price
+                            client.browser.log_message(
+                                f"⚠️ API не вернул avgFillPrice, используем цену принятия решения: ${current_price:.2f}", 
+                                level="INFO"
+                            )
+                        else:
+                            client.browser.log_message(
+                                f"✅ API вернул фактическую цену исполнения: ${actual_price:.2f}", 
+                                level="INFO"
+                            )
+                        
+                        # Логируем разницу между ожидаемой и фактической ценой
+                        if actual_price != current_price:
+                            client.browser.log_message(
+                                f"📊 Price difference: Expected ${current_price:.2f}, Actual ${actual_price:.2f}", 
+                                level="INFO"
+                            )
+                        
+                        # Лог с фактической ценой исполнения
+                        client.browser.log_message(
+                            f"🔍 Averaging {token_amount:.6f}{token_name} / ${actual_price:.2f} | Bal: ${usdc_balance:.2f}",
                             level="INFO"
                         )
                         
-                        # Обновляем уведомление с точным количеством токенов
+                        # Обновляем уведомление с фактической ценой исполнения
                         await send_tg_notification(
                             client,
-                            f"📉 <b>Averaging</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            f"📉 <b>Averaging</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
                         
-                        # Сразу ставим TP ордер на продажу
-                        tp_price = current_price + float(step)
+                        # Записываем статистику операции Averaging с фактической ценой
+                        try:
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            total_value = usdc_balance + (btc_balance * actual_price)
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Averaging",
+                                btc_amount=token_amount,
+                                price=actual_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
+                                total_value=total_value
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                        
+                        # Сразу ставим TP ордер на продажу с расчетом от фактической цены
+                        tp_price = actual_price + float(step)
                         client.browser.log_message(
                             f"🎯 Set TP ${tp_price:.2f}",
                             level="INFO"
@@ -907,7 +950,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
                         
@@ -994,7 +1037,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
                         
