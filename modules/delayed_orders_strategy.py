@@ -31,12 +31,67 @@ from loguru import logger
 import pandas as pd
 from datetime import datetime
 import os
+import asyncio
 from .utils import round_cut, async_sleep, TgReport, send_warning_notification
 from .retry import CustomError
 import settings
 
 # Кэш для ограничения частоты предупреждающих сообщений
 _order_skipped_cache = {}
+
+
+async def get_actual_fill_price_from_history(client, token_name: str, order_time: float, timeout: int = 10):
+    """
+    Получает фактическую цену исполнения из истории сделок
+    
+    Args:
+        client: HyperliquidClient instance
+        token_name: Название токена (например, "BTC")
+        order_time: Время размещения ордера (timestamp)
+        timeout: Таймаут ожидания в секундах
+    
+    Returns:
+        tuple: (actual_price, actual_quantity) или (None, None) если не найдено
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            # Получаем историю сделок
+            trades_history = await client.browser.get_all_orders_history(token_name, limit=10)
+            
+            if trades_history:
+                # Ищем самую свежую сделку BUY после времени размещения ордера
+                for trade in trades_history:
+                    trade_time = trade.get('time', 0) / 1000  # Конвертируем из миллисекунд
+                    
+                    # Проверяем, что это сделка после нашего ордера
+                    if trade_time > order_time:
+                        side = trade.get('side', '').upper()
+                        if side in ['BUY', 'B']:
+                            actual_price = float(trade.get('px', 0))
+                            actual_quantity = float(trade.get('sz', 0))
+                            
+                            if actual_price > 0 and actual_quantity > 0:
+                                client.browser.log_message(
+                                    f"✅ Found actual fill price from history: ${actual_price:.2f}, qty: {actual_quantity:.6f}", 
+                                    level="INFO"
+                                )
+                                return actual_price, actual_quantity
+            
+            # Ждем 1 секунду перед следующей попыткой
+            await asyncio.sleep(1)
+        
+        client.browser.log_message(
+            f"⚠️ Could not find actual fill price in history after {timeout}s timeout", 
+            level="INFO"
+        )
+        return None, None
+        
+    except Exception as e:
+        client.browser.log_message(f"Failed to get actual fill price from history: {e}", level="ERROR")
+        return None, None
 
 
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
@@ -878,6 +933,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
                         
+                        # Логируем детали размещенного ордера
+                        client.browser.log_message(
+                            f"🔍 DEBUG: Placed BUY order - Token: {token_name}, Amount: ${usdc_amount:.2f}, Type: MARKET", 
+                            level="DEBUG"
+                        )
+                        
                         # Логируем полный ответ API для отладки
                         client.browser.log_message(
                             f"🔍 DEBUG: Order result keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'Not a dict'}", 
@@ -889,18 +950,33 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 level="DEBUG"
                             )
                         
-                        # Получаем фактическую цену исполнения из результата ордера
-                        # Для маркет ордеров API может не возвращать avgFillPrice сразу
-                        actual_price = order_result.get('avgFillPrice', current_price)
-                        if actual_price is None or actual_price == 0:
-                            actual_price = current_price
+                        # Получаем фактическую цену исполнения из истории сделок
+                        import time
+                        order_timestamp = time.time()
+                        
+                        # Сначала пробуем получить из API ответа
+                        api_price = order_result.get('avgFillPrice', current_price)
+                        if api_price is None or api_price == 0:
+                            api_price = current_price
+                        
+                        # Затем получаем реальную цену из истории сделок
+                        actual_price, actual_quantity = await get_actual_fill_price_from_history(
+                            client, token_name, order_timestamp, timeout=5
+                        )
+                        
+                        # Используем цену из истории, если получили, иначе из API
+                        if actual_price is not None:
                             client.browser.log_message(
-                                f"⚠️ API не вернул avgFillPrice, используем цену принятия решения: ${current_price:.2f}", 
+                                f"✅ Используем фактическую цену из истории: ${actual_price:.2f}", 
                                 level="INFO"
                             )
+                            # Обновляем количество токенов из истории, если получили
+                            if actual_quantity is not None:
+                                token_amount = actual_quantity
                         else:
+                            actual_price = api_price
                             client.browser.log_message(
-                                f"✅ API вернул фактическую цену исполнения: ${actual_price:.2f}", 
+                                f"⚠️ Используем цену из API: ${actual_price:.2f}", 
                                 level="INFO"
                             )
                         
