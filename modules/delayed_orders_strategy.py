@@ -57,9 +57,19 @@ async def calculate_real_profit(client, token_name: str, sold_amount: float, sel
         # Получаем историю сделок для поиска цены покупки
         trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
         
+        # Отладочная информация
+        client.browser.log_message(f"🔍 DEBUG: Retrieved {len(trades_history) if trades_history else 0} trades from history", level="DEBUG")
+        if trades_history:
+            client.browser.log_message(f"🔍 DEBUG: First trade sample: {trades_history[0] if trades_history else 'None'}", level="DEBUG")
+        
         if not trades_history:
             client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
-            return 0.0
+            # Используем упрощенный расчет на основе STEP
+            step_profit = sold_amount * float(settings.STEP)
+            commission = sold_amount * sell_price * 0.0002  # 0.02% комиссия
+            estimated_profit = step_profit - commission
+            client.browser.log_message(f"💰 Using STEP-based profit estimation: ${estimated_profit:.2f}", level="INFO")
+            return estimated_profit
         
         # Ищем последние BUY сделки для расчета средней цены покупки
         buy_trades = []

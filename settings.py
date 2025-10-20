@@ -81,4 +81,4 @@ LOG_FILE = "hyperliquid_bot.log"
 LOG_ROTATION = "1 day"
 LOG_RETENTION = "7 days"
 # Упрощенный формат логов (без DEBUG сообщений)
-ENABLE_DEBUG_LOGS = False  # Отключено для чистоты логов 
+ENABLE_DEBUG_LOGS = True  # Временно включено для отладки истории сделок 
