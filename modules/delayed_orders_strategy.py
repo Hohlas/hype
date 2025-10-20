@@ -888,7 +888,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Отправляем уведомление о TP ордере
                     await send_tg_notification(
                         client,
-                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
+                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
                         save_to_report=False
                     )
                     
@@ -1015,7 +1015,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
                             save_to_report=False
                         )
                         
@@ -1102,7 +1102,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
                             save_to_report=False
                         )
                         
