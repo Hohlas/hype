@@ -673,6 +673,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
+        # Тестируем функцию расчета прибыли при запуске
+        client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
+        test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
+        client.browser.log_message(f"🔍 Test profit calculation result: ${test_profit:.2f}", level="INFO")
+        
         # Тест DEBUG лога отключен для чистоты логов
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
