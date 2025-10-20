@@ -141,8 +141,9 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                 'Operation Price', 'USDC Balance', 'BTC Balance', 'Total Value'
             ])
         
-        # Добавляем новую строку
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        # Добавляем новую строку (исправлено для избежания предупреждения pandas)
+        new_df = pd.DataFrame([new_row])
+        df = pd.concat([df, new_df], ignore_index=True)
         
         # Сохраняем в Excel файл
         df.to_excel(stats_file, index=False)
