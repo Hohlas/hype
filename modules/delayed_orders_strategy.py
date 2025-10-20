@@ -28,13 +28,74 @@ Hyperliquid Delayed Orders Strategy Module
 from random import uniform, randint
 from decimal import Decimal
 from loguru import logger
-
+import pandas as pd
+from datetime import datetime
+import os
 from .utils import round_cut, async_sleep, TgReport, send_warning_notification
 from .retry import CustomError
 import settings
 
 # Кэш для ограничения частоты предупреждающих сообщений
 _order_skipped_cache = {}
+
+
+async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
+                                 usdc_balance: float, btc_balance: float, total_value: float):
+    """
+    Записывает статистику операции в Excel файл hype_stat.xlsx
+    
+    Args:
+        client: HyperliquidClient instance
+        operation: Тип операции (Averaging/Pyramiding/set TP/Take Profit)
+        btc_amount: Объем BTC операции
+        price: Цена по которой проводилась операция
+        usdc_balance: Баланс USDC
+        btc_balance: Баланс BTC
+        total_value: Суммарная стоимость всех активов
+    """
+    try:
+        # Получаем текущую цену BTC
+        current_btc_price = float(await client.browser.get_token_price("BTC"))
+        
+        # Создаем запись статистики
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Подготавливаем данные для записи
+        new_row = {
+            'Timestamp': timestamp,
+            'Current BTC Price': current_btc_price,
+            'Operation': operation,
+            'BTC Amount': btc_amount,
+            'Operation Price': price,
+            'USDC Balance': usdc_balance,
+            'BTC Balance': btc_balance,
+            'Total Value': total_value
+        }
+        
+        # Путь к файлу статистики
+        stats_file = "hype_stat.xlsx"
+        
+        # Проверяем, существует ли файл
+        if os.path.exists(stats_file):
+            # Читаем существующий файл
+            df = pd.read_excel(stats_file)
+        else:
+            # Создаем новый DataFrame с заголовками
+            df = pd.DataFrame(columns=[
+                'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
+                'Operation Price', 'USDC Balance', 'BTC Balance', 'Total Value'
+            ])
+        
+        # Добавляем новую строку
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        
+        # Сохраняем в Excel файл
+        df.to_excel(stats_file, index=False)
+        
+        client.browser.log_message(f"📊 Statistics logged: {operation} | {btc_amount:.6f}BTC @ ${price:.2f}", level="DEBUG")
+        
+    except Exception as e:
+        client.browser.log_message(f"Failed to log statistics: {e}", level="ERROR")
 
 
 def can_log_warning_message(account_label: str, message_type: str, cooldown_minutes: int = 5) -> bool:
@@ -533,6 +594,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         tp_price = float(executed_order.get("limitPx", 0))
                         profit = filled_qty * tp_price
                         
+                        # Записываем статистику операции Take Profit
+                        try:
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Take Profit",
+                                btc_amount=filled_qty,
+                                price=tp_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
+                                total_value=total_usd_value
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
+                        
                         # Формируем сообщение согласно требованиям
                         client.browser.log_message(
                             f"✅ Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
@@ -724,6 +799,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем количество токенов из результата ордера
                     token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
+                    # Записываем статистику операции Averaging
+                    try:
+                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                        total_value = usdc_balance + (btc_balance * current_price)
+                        await log_statistics_to_excel(
+                            client=client,
+                            operation="Averaging",
+                            btc_amount=token_amount,
+                            price=current_price,
+                            usdc_balance=usdc_balance,
+                            btc_balance=btc_balance,
+                            total_value=total_value
+                        )
+                    except Exception as e:
+                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                    
                     # Сразу ставим TP ордер на продажу
                     tp_price = current_price + float(step)
                     client.browser.log_message(
@@ -737,6 +828,23 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
                         save_to_report=False
                     )
+                    
+                    # Записываем статистику операции Set TP
+                    try:
+                        usdc_balance = all_balances.get("USDC", 0.0)
+                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                        total_value = usdc_balance + (btc_balance * current_price)
+                        await log_statistics_to_excel(
+                            client=client,
+                            operation="set TP",
+                            btc_amount=token_amount,
+                            price=tp_price,
+                            usdc_balance=usdc_balance,
+                            btc_balance=btc_balance,
+                            total_value=total_value
+                        )
+                    except Exception as e:
+                        client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                     
                     await client.place_order(
                         token=token_name,
@@ -850,6 +958,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
+                        
+                        # Записываем статистику операции Pyramiding
+                        try:
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            total_value = usdc_balance + (btc_balance * current_price)
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Pyramiding",
+                                btc_amount=token_amount,
+                                price=current_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
+                                total_value=total_value
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Pyramiding statistics: {e}", level="ERROR")
                         
                         # Обновляем лог с точным количеством токенов
                         client.browser.log_message(
