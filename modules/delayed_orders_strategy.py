@@ -46,7 +46,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
     
     Args:
         client: HyperliquidClient instance
-        operation: Тип операции (Averaging/Pyramiding/set TP/Take Profit)
+        operation: Тип операции (First Position/Averaging/Pyramiding/set TP/Take Profit)
         btc_amount: Объем BTC операции
         price: Цена по которой проводилась операция
         usdc_balance: Баланс USDC
@@ -735,6 +735,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_prices = [float(order.get("limitPx", 0)) for order in sell_orders]
                     min_tp_price = min(tp_prices)
                     max_tp_price = max(tp_prices)
+                    # Сбрасываем флаг, если есть TP ордера
+                    if hasattr(client, '_no_tp_logged'):
+                        client._no_tp_logged = False
                     # client.browser.log_message(
                     #     f"🔍 TP Analysis: {len(sell_orders)} orders, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
                     #     level="INFO"
@@ -760,7 +763,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Лог "Waiting for averaging trigger" убран для чистоты логов
                         pass
                 else:
-                    client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
+                    # Выводим сообщение только один раз, если нет TP ордеров
+                    if not hasattr(client, '_no_tp_logged') or not client._no_tp_logged:
+                        client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
+                        client._no_tp_logged = True
                 
                 # Детальная информация о BUY ордерах (отключено для чистоты логов)
                 # if buy_orders:
@@ -799,13 +805,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем количество токенов из результата ордера
                     token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
-                    # Записываем статистику операции Averaging
+                    # Записываем статистику операции First Position
                     try:
+                        usdc_balance = all_balances.get("USDC", 0.0)
                         btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                         total_value = usdc_balance + (btc_balance * current_price)
                         await log_statistics_to_excel(
                             client=client,
-                            operation="Averaging",
+                            operation="First Position",
                             btc_amount=token_amount,
                             price=current_price,
                             usdc_balance=usdc_balance,
@@ -813,7 +820,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             total_value=total_value
                         )
                     except Exception as e:
-                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                        client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
                     
                     # Сразу ставим TP ордер на продажу
                     tp_price = current_price + float(step)
@@ -865,13 +872,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client.browser.log_message(
                             f"🔍 Averaging at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
                             level="INFO"
-                        )
-                        
-                        # Отправляем уведомление об усреднении
-                        await send_tg_notification(
-                            client,
-                            f"📉 <b>Averaging</b>\nBUY {token_name} at ${current_price:.2f}",
-                            save_to_report=False
                         )
                         
                         order_result = await client.place_order(
@@ -940,13 +940,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client.browser.log_message(
                             f"🚀 Pyramiding at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
                             level="INFO"
-                        )
-                        
-                        # Отправляем уведомление о пирамидинге
-                        await send_tg_notification(
-                            client,
-                            f"📈 <b>Pyramiding</b>\nBUY {token_name} at ${current_price:.2f}",
-                            save_to_report=False
                         )
                         
                         order_result = await client.place_order(
