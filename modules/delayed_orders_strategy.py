@@ -954,10 +954,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         import time
                         order_timestamp = time.time()
                         
-                        # Сначала пробуем получить из API ответа
-                        api_price = order_result.get('avgFillPrice', current_price)
-                        if api_price is None or api_price == 0:
-                            api_price = current_price
+                        # Извлекаем фактическую цену исполнения из API ответа
+                        api_price = current_price  # fallback
+                        try:
+                            response_data = order_result.get('response', {})
+                            statuses = response_data.get('data', {}).get('statuses', [])
+                            if statuses and len(statuses) > 0:
+                                first_status = statuses[0]
+                                if 'filled' in first_status:
+                                    filled_data = first_status['filled']
+                                    api_price = float(filled_data.get('avgPx', current_price))
+                                    client.browser.log_message(
+                                        f"✅ Found actual fill price in API: ${api_price:.2f}", 
+                                        level="INFO"
+                                    )
+                                else:
+                                    client.browser.log_message(
+                                        f"⚠️ Order not filled yet, using current price: ${current_price:.2f}", 
+                                        level="INFO"
+                                    )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to extract fill price from API: {e}", level="ERROR")
                         
                         # Затем получаем реальную цену из истории сделок
                         actual_price, actual_quantity = await get_actual_fill_price_from_history(
@@ -976,7 +993,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         else:
                             actual_price = api_price
                             client.browser.log_message(
-                                f"⚠️ Используем цену из API: ${actual_price:.2f}", 
+                                f"✅ Используем фактическую цену из API: ${actual_price:.2f}", 
                                 level="INFO"
                             )
                         
