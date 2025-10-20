@@ -76,7 +76,7 @@ MAX_GRID_ORDERS = 50  # Максимальное количество ордер
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
 
 # Logging
-LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
 LOG_FILE = "hyperliquid_bot.log"
 LOG_ROTATION = "1 day"
 LOG_RETENTION = "7 days"
