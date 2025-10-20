@@ -927,9 +927,11 @@ class HyperliquidBrowser:
                         has_errors = any('error' in status for status in statuses)
                         
                         if not has_errors:
-                            # self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
+                            self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
                             # Логируем полный ответ API для отладки
-                            # self.log_message(f"🔍 DEBUG: API response: {result}", level="DEBUG")
+                            self.log_message(f"🔍 DEBUG: API response type: {type(result)}", level="DEBUG")
+                            self.log_message(f"🔍 DEBUG: API response keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}", level="DEBUG")
+                            self.log_message(f"🔍 DEBUG: Full API response: {result}", level="DEBUG")
                             return result
                         else:
                             # Показываем ошибки из statuses

@@ -1133,3 +1133,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
     except Exception as e:
         client.browser.log_message(f"❌ Strategy error: {e}", level="ERROR")
+        return False
+    
+    # Функция должна работать бесконечно, но если по какой-то причине завершилась
+    return True
