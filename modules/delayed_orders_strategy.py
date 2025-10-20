@@ -40,6 +40,90 @@ import settings
 _order_skipped_cache = {}
 
 
+async def calculate_real_profit(client, token_name: str, sold_amount: float, sell_price: float) -> float:
+    """
+    Рассчитывает реальную прибыль от сделки с учетом комиссии
+    
+    Args:
+        client: HyperliquidClient instance
+        token_name: Название токена (например, "BTC")
+        sold_amount: Количество проданных токенов
+        sell_price: Цена продажи
+    
+    Returns:
+        float: Реальная прибыль в USDC
+    """
+    try:
+        # Получаем историю сделок для поиска цены покупки
+        trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
+        
+        if not trades_history:
+            client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
+            return 0.0
+        
+        # Ищем последние BUY сделки для расчета средней цены покупки
+        buy_trades = []
+        total_bought = 0.0
+        
+        for trade in trades_history:
+            side = trade.get('side', '').upper()
+            if side in ['BUY', 'B']:
+                trade_amount = float(trade.get('sz', 0))
+                trade_price = float(trade.get('px', 0))
+                
+                buy_trades.append({
+                    'amount': trade_amount,
+                    'price': trade_price,
+                    'value': trade_amount * trade_price
+                })
+                total_bought += trade_amount
+                
+                # Если набрали достаточно для покрытия проданного количества
+                if total_bought >= sold_amount:
+                    break
+        
+        if not buy_trades or total_bought < sold_amount:
+            client.browser.log_message("⚠️ Insufficient buy history for profit calculation", level="INFO")
+            return 0.0
+        
+        # Рассчитываем средневзвешенную цену покупки
+        weighted_price = 0.0
+        remaining_to_cover = sold_amount
+        
+        for trade in reversed(buy_trades):  # Берем последние сделки
+            if remaining_to_cover <= 0:
+                break
+                
+            amount_to_use = min(trade['amount'], remaining_to_cover)
+            weighted_price += amount_to_use * trade['price']
+            remaining_to_cover -= amount_to_use
+        
+        avg_buy_price = weighted_price / sold_amount
+        
+        # Рассчитываем прибыль
+        sell_value = sold_amount * sell_price
+        buy_value = sold_amount * avg_buy_price
+        
+        # Примерная комиссия (обычно 0.02% на Hyperliquid)
+        commission_rate = 0.0002  # 0.02%
+        commission = sell_value * commission_rate
+        
+        real_profit = sell_value - buy_value - commission
+        
+        client.browser.log_message(
+            f"💰 Profit calculation: Sold {sold_amount:.6f}BTC @ ${sell_price:.2f} = ${sell_value:.2f}, "
+            f"Bought @ ${avg_buy_price:.2f} = ${buy_value:.2f}, Commission ${commission:.2f}, "
+            f"Net profit: ${real_profit:.2f}", 
+            level="INFO"
+        )
+        
+        return real_profit
+        
+    except Exception as e:
+        client.browser.log_message(f"Failed to calculate real profit: {e}", level="ERROR")
+        return 0.0
+
+
 async def get_actual_fill_price_from_history(client, token_name: str, order_time: float, timeout: int = 10):
     """
     Получает фактическую цену исполнения из истории сделок
@@ -648,7 +732,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         filled_qty = float(executed_order.get("sz", 0))
                         tp_price = float(executed_order.get("limitPx", 0))
-                        profit = filled_qty * tp_price
+                        
+                        # Рассчитываем реальную прибыль от сделки
+                        real_profit = await calculate_real_profit(client, token_name, filled_qty, tp_price)
+                        
+                        # Используем реальную прибыль, если удалось рассчитать, иначе сумму продажи
+                        profit = real_profit if real_profit != 0.0 else filled_qty * tp_price
                         
                         # Записываем статистику операции Take Profit
                         try:
