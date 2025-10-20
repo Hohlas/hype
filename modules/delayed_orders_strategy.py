@@ -535,14 +535,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Формируем сообщение согласно требованиям
                         client.browser.log_message(
-                            f"✅ Take Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
+                            f"✅ Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
                             level="INFO"
                         )
                         
                         # Отправляем уведомление в Telegram согласно требованиям
                         await send_tg_notification(
                             client,
-                            text=f'🎯 Take Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}',
+                            text=f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}',
                             save_to_report=False
                         )
                 
@@ -714,12 +714,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         save_to_report=False
                     )
                     
-                    await client.place_order(
+                    order_result = await client.place_order(
                         token=token_name,
                         side="BUY",
                         order_type="MARKET",
                         usdc_amount=usdc_amount
                     )
+                    
+                    # Получаем количество токенов из результата ордера
+                    token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
                     # Сразу ставим TP ордер на продажу
                     tp_price = current_price + float(step)
@@ -731,7 +734,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Отправляем уведомление о TP ордере
                     await send_tg_notification(
                         client,
-                        f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
                         save_to_report=False
                     )
                     
@@ -763,11 +766,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             save_to_report=False
                         )
                         
-                        await client.place_order(
+                        order_result = await client.place_order(
                             token=token_name,
                             side="BUY",
                             order_type="MARKET",
                             usdc_amount=usdc_amount
+                        )
+                        
+                        # Получаем количество токенов из результата ордера
+                        token_amount = order_result.get('quantity', usdc_amount / current_price)
+                        
+                        # Обновляем лог с точным количеством токенов
+                        client.browser.log_message(
+                            f"🔍 Averaging {token_amount:.6f}{token_name} / ${current_price:.2f} | Bal: ${usdc_balance:.2f}",
+                            level="INFO"
+                        )
+                        
+                        # Обновляем уведомление с точным количеством токенов
+                        await send_tg_notification(
+                            client,
+                            f"📉 <b>Averaging</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            save_to_report=False
                         )
                         
                         # Сразу ставим TP ордер на продажу
@@ -780,7 +799,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
                             save_to_report=False
                         )
                         
@@ -822,11 +841,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             save_to_report=False
                         )
                         
-                        await client.place_order(
+                        order_result = await client.place_order(
                             token=token_name,
                             side="BUY",
                             order_type="MARKET",
                             usdc_amount=usdc_amount
+                        )
+                        
+                        # Получаем количество токенов из результата ордера
+                        token_amount = order_result.get('quantity', usdc_amount / current_price)
+                        
+                        # Обновляем лог с точным количеством токенов
+                        client.browser.log_message(
+                            f"🚀 Pyramiding {token_amount:.6f}{token_name} / ${current_price:.2f} | Bal: ${usdc_balance:.2f}",
+                            level="INFO"
+                        )
+                        
+                        # Обновляем уведомление с точным количеством токенов
+                        await send_tg_notification(
+                            client,
+                            f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            save_to_report=False
                         )
                         
                         # Сразу ставим TP ордер на продажу
@@ -839,7 +874,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Отправляем уведомление о TP ордере
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Take Profit Set</b>\nSELL {token_name} at ${tp_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
                             save_to_report=False
                         )
                         

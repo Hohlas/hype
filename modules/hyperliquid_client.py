@@ -198,6 +198,9 @@ class HyperliquidClient:
             # Создание ордера
             result = await self.browser.create_order(order_data)
             
+            # Добавляем количество токенов в результат для использования в уведомлениях
+            result['quantity'] = quantity
+            
             return result
             
         except Exception as e:
