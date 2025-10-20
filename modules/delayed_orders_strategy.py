@@ -514,7 +514,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
     Новая стратегия:
     - При отсутствии TP ордеров: маркет покупка по текущей цене + TP ордер
     - Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
-    - Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
+    - Пирамидинг: маркет покупка при current_price > max_TP_price - STEP*AGGR (AGGR по умолчанию 0.5)
     - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
     """
     try:
@@ -926,7 +926,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
-                    trigger_level = max_tp_price - float(step) / 2
+                    # Агрессивность пирамидинга: current_price > max_TP_price - STEP * AGGR
+                    # По умолчанию AGGR=0.5, если нет в settings
+                    aggr = getattr(settings, 'AGGR', 0.5)
+                    trigger_level = max_tp_price - float(step) * float(aggr)
                     
                     # Отладочная информация для пирамидинга отключена для чистоты логов
                     # client.browser.log_message(f"🔍 DEBUG: Pyramiding check - current: ${current_price:.2f}, max_TP: ${max_tp_price:.2f}, trigger: ${trigger_level:.2f}", level="INFO")
