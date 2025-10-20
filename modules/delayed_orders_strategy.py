@@ -933,22 +933,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
                         
-                        # Логируем детали размещенного ордера
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Placed BUY order - Token: {token_name}, Amount: ${usdc_amount:.2f}, Type: MARKET", 
-                            level="DEBUG"
-                        )
-                        
-                        # Логируем полный ответ API для отладки
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Order result keys: {list(order_result.keys()) if isinstance(order_result, dict) else 'Not a dict'}", 
-                            level="DEBUG"
-                        )
-                        if isinstance(order_result, dict):
-                            client.browser.log_message(
-                                f"🔍 DEBUG: Order result: {order_result}", 
-                                level="DEBUG"
-                            )
+                        # Логируем детали размещенного ордера (убрано для чистоты логов)
                         
                         # Получаем фактическую цену исполнения из истории сделок
                         import time
@@ -976,26 +961,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         except Exception as e:
                             client.browser.log_message(f"Failed to extract fill price from API: {e}", level="ERROR")
                         
-                        # Затем получаем реальную цену из истории сделок
-                        actual_price, actual_quantity = await get_actual_fill_price_from_history(
-                            client, token_name, order_timestamp, timeout=5
+                        # Используем фактическую цену из API (история сделок не нужна)
+                        actual_price = api_price
+                        client.browser.log_message(
+                            f"✅ Используем фактическую цену из API: ${actual_price:.2f}", 
+                            level="INFO"
                         )
-                        
-                        # Используем цену из истории, если получили, иначе из API
-                        if actual_price is not None:
-                            client.browser.log_message(
-                                f"✅ Используем фактическую цену из истории: ${actual_price:.2f}", 
-                                level="INFO"
-                            )
-                            # Обновляем количество токенов из истории, если получили
-                            if actual_quantity is not None:
-                                token_amount = actual_quantity
-                        else:
-                            actual_price = api_price
-                            client.browser.log_message(
-                                f"✅ Используем фактическую цену из API: ${actual_price:.2f}", 
-                                level="INFO"
-                            )
                         
                         # Логируем разницу между ожидаемой и фактической ценой
                         if actual_price != current_price:

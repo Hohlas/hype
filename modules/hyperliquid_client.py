@@ -198,11 +198,7 @@ class HyperliquidClient:
             # Создание ордера
             result = await self.browser.create_order(order_data)
             
-            # Детальное логирование ответа API
-            self.browser.log_message(f"🔍 DEBUG: Order placed successfully", level="DEBUG")
-            self.browser.log_message(f"🔍 DEBUG: Order result type: {type(result)}", level="DEBUG")
-            self.browser.log_message(f"🔍 DEBUG: Order result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}", level="DEBUG")
-            self.browser.log_message(f"🔍 DEBUG: Full order result: {result}", level="DEBUG")
+            # Детальное логирование ответа API (убрано для чистоты логов)
             
             # Добавляем количество токенов в результат для использования в уведомлениях
             result['quantity'] = quantity
