@@ -1266,9 +1266,17 @@ class HyperliquidBrowser:
         """
         try:
             url = f"{self.BASE_URL}/info"
+            
+            # Используем правильный endpoint согласно документации
+            import time
+            current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
+            start_time = current_time - (30 * 24 * 60 * 60 * 1000)  # 30 дней назад
+            
             data = {
-                "type": "userTrades",  # Используем userTrades для получения истории ордеров
-                "user": self.wallet_address
+                "type": "userFillsByTime",  # Правильный тип согласно документации
+                "user": self.wallet_address,
+                "startTime": start_time,
+                "endTime": current_time
             }
             
             response = await self.send_request("POST", url, data=data)
@@ -1297,13 +1305,22 @@ class HyperliquidBrowser:
             
             if response.status != 200:
                 raise Exception(f'Failed to get orders history: {result}')
+            
+            # Отладочная информация
+            self.log_message(f"🔍 DEBUG: API response type: {type(result)}", level="DEBUG")
+            self.log_message(f"🔍 DEBUG: API response length: {len(result) if isinstance(result, list) else 'Not a list'}", level="DEBUG")
+            if isinstance(result, list) and len(result) > 0:
+                self.log_message(f"🔍 DEBUG: First trade structure: {result[0]}", level="DEBUG")
                 
             # Фильтруем ордера по токену
             filtered_orders = []
             for trade in result:
-                if trade.get("coin") == token_name:
+                # Проверяем разные возможные поля для токена
+                coin = trade.get("coin") or trade.get("asset") or trade.get("symbol")
+                if coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
                     
+            self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
             return filtered_orders[:limit]
             
         except Exception as e:
