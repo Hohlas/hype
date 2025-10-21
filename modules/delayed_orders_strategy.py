@@ -956,7 +956,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         )
                         continue  # Пропускаем этот цикл
                     
-                    # Отправляем уведомление о первой позиции
+                    # Отправляем уведомление о первой позиции (обновим после получения фактической цены)
                     await send_tg_notification(
                         client,
                         f"🚀 <b>First Position</b>\nBUY {token_name} at ${current_price:.2f}",
@@ -973,16 +973,46 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Получаем количество токенов из результата ордера
                     token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
-                    # Записываем статистику операции First Position
+                    # Получаем фактическую цену исполнения из API ответа
+                    actual_price = current_price  # fallback
+                    try:
+                        response_data = order_result.get('response', {})
+                        statuses = response_data.get('data', {}).get('statuses', [])
+                        if statuses and len(statuses) > 0:
+                            first_status = statuses[0]
+                            if 'filled' in first_status:
+                                filled_data = first_status['filled']
+                                actual_price = float(filled_data.get('avgPx', current_price))
+                                client.browser.log_message(
+                                    f"✅ First Position: Actual fill price ${actual_price:.2f} (expected ${current_price:.2f})", 
+                                    level="INFO"
+                                )
+                            else:
+                                client.browser.log_message(
+                                    f"⚠️ First Position: Order not filled yet, using current price: ${current_price:.2f}", 
+                                    level="INFO"
+                                )
+                    except Exception as e:
+                        client.browser.log_message(f"Failed to extract First Position fill price from API: {e}", level="ERROR")
+                    
+                    # Отправляем дополнительное уведомление с фактической ценой исполнения
+                    if actual_price != current_price:
+                        await send_tg_notification(
+                            client,
+                            f"✅ <b>First Position Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
+                            save_to_report=False
+                        )
+                    
+                    # Записываем статистику операции First Position с фактической ценой
                     try:
                         usdc_balance = all_balances.get("USDC", 0.0)
                         btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                        total_value = usdc_balance + (btc_balance * current_price)
+                        total_value = usdc_balance + (btc_balance * actual_price)
                         await log_statistics_to_excel(
                             client=client,
                             operation="First Position",
                             btc_amount=token_amount,
-                            price=current_price,
+                            price=actual_price,
                             usdc_balance=usdc_balance,
                             btc_balance=btc_balance,
                             total_value=total_value
@@ -990,17 +1020,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
                     
-                    # Сразу ставим TP ордер на продажу
-                    tp_price = current_price + float(step)
+                    # Сразу ставим TP ордер на продажу с расчетом от фактической цены
+                    tp_price = actual_price + float(step)
                     client.browser.log_message(
                         f"🎯 Set TP ${tp_price:.2f}",
                         level="INFO"
                     )
                     
-                    # Отправляем уведомление о TP ордере
+                    # Отправляем уведомление о TP ордере с фактической ценой исполнения
                     await send_tg_notification(
                         client,
-                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
+                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f} (filled at ${actual_price:.2f})",
                         save_to_report=False
                     )
                     
@@ -1102,6 +1132,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             level="INFO"
                         )
                         
+                        # Отправляем дополнительное уведомление с фактической ценой исполнения
+                        if actual_price != current_price:
+                            await send_tg_notification(
+                                client,
+                                f"✅ <b>Averaging Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
+                                save_to_report=False
+                            )
+                        
                         # Обновляем уведомление с фактической ценой исполнения
                         await send_tg_notification(
                             client,
@@ -1132,10 +1170,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             level="INFO"
                         )
                         
-                        # Отправляем уведомление о TP ордере
+                        # Отправляем уведомление о TP ордере с фактической ценой исполнения
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f} (filled at ${actual_price:.2f})",
                             save_to_report=False
                         )
                         
@@ -1191,15 +1229,37 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
                         
-                        # Записываем статистику операции Pyramiding
+                        # Получаем фактическую цену исполнения из API ответа
+                        actual_price = current_price  # fallback
+                        try:
+                            response_data = order_result.get('response', {})
+                            statuses = response_data.get('data', {}).get('statuses', [])
+                            if statuses and len(statuses) > 0:
+                                first_status = statuses[0]
+                                if 'filled' in first_status:
+                                    filled_data = first_status['filled']
+                                    actual_price = float(filled_data.get('avgPx', current_price))
+                                    client.browser.log_message(
+                                        f"✅ Pyramiding: Actual fill price ${actual_price:.2f} (expected ${current_price:.2f})", 
+                                        level="INFO"
+                                    )
+                                else:
+                                    client.browser.log_message(
+                                        f"⚠️ Pyramiding: Order not filled yet, using current price: ${current_price:.2f}", 
+                                        level="INFO"
+                                    )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to extract Pyramiding fill price from API: {e}", level="ERROR")
+                        
+                        # Записываем статистику операции Pyramiding с фактической ценой
                         try:
                             btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                            total_value = usdc_balance + (btc_balance * current_price)
+                            total_value = usdc_balance + (btc_balance * actual_price)
                             await log_statistics_to_excel(
                                 client=client,
                                 operation="Pyramiding",
                                 btc_amount=token_amount,
-                                price=current_price,
+                                price=actual_price,
                                 usdc_balance=usdc_balance,
                                 btc_balance=btc_balance,
                                 total_value=total_value
@@ -1207,30 +1267,38 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         except Exception as e:
                             client.browser.log_message(f"Failed to log Pyramiding statistics: {e}", level="ERROR")
                         
-                        # Обновляем лог с точным количеством токенов
+                        # Обновляем лог с фактической ценой исполнения
                         client.browser.log_message(
-                            f"🚀 Pyramiding {token_amount:.6f}{token_name} / ${current_price:.2f} | Bal: ${usdc_balance:.2f}",
+                            f"🚀 Pyramiding {token_amount:.6f}{token_name} / ${actual_price:.2f} | Bal: ${usdc_balance:.2f}",
                             level="INFO"
                         )
                         
-                        # Обновляем уведомление с точным количеством токенов
+                        # Отправляем дополнительное уведомление с фактической ценой исполнения
+                        if actual_price != current_price:
+                            await send_tg_notification(
+                                client,
+                                f"✅ <b>Pyramiding Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
+                                save_to_report=False
+                            )
+                        
+                        # Обновляем уведомление с фактической ценой исполнения
                         await send_tg_notification(
                             client,
-                            f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${current_price:.2f}",
+                            f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
                         
-                        # Сразу ставим TP ордер на продажу
-                        tp_price = current_price + float(step)
+                        # Сразу ставим TP ордер на продажу с расчетом от фактической цены
+                        tp_price = actual_price + float(step)
                         client.browser.log_message(
                             f"🎯 Set TP ${tp_price:.2f}",
                             level="INFO"
                         )
                         
-                        # Отправляем уведомление о TP ордере
+                        # Отправляем уведомление о TP ордере с фактической ценой исполнения
                         await send_tg_notification(
                             client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
+                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f} (filled at ${actual_price:.2f})",
                             save_to_report=False
                         )
                         
