@@ -945,6 +945,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="INFO"
                     )
                     
+                    # Проверяем достаточность средств перед размещением ордера
+                    if usdc_balance < usdc_amount:
+                        client.browser.log_message(
+                            f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for first position",
+                            level="WARNING"
+                        )
+                        continue  # Пропускаем этот цикл
+                    
                     # Отправляем уведомление о первой позиции
                     await send_tg_notification(
                         client,
@@ -1024,6 +1032,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if current_price < trigger_level:
                         # Используем уже полученный баланс USDC из all_balances
                         usdc_balance = all_balances.get("USDC", 0.0)
+                        
+                        # Проверяем достаточность средств перед размещением ордера
+                        if usdc_balance < usdc_amount:
+                            client.browser.log_message(
+                                f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
+                                level="WARNING"
+                            )
+                            continue  # Пропускаем этот цикл
                         
                         order_result = await client.place_order(
                             token=token_name,
@@ -1147,6 +1163,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # client.browser.log_message(f"🔍 DEBUG: Pyramiding triggered! current ${current_price:.2f} > trigger ${trigger_level:.2f}", level="INFO")
                         # Используем уже полученный баланс USDC из all_balances
                         usdc_balance = all_balances.get("USDC", 0.0)
+                        
+                        # Проверяем достаточность средств перед размещением ордера
+                        if usdc_balance < usdc_amount:
+                            client.browser.log_message(
+                                f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for pyramiding",
+                                level="WARNING"
+                            )
+                            continue  # Пропускаем этот цикл
                         
                         # Объединенный лог для пирамидинга
                         client.browser.log_message(
