@@ -1306,11 +1306,7 @@ class HyperliquidBrowser:
             if response.status != 200:
                 raise Exception(f'Failed to get orders history: {result}')
             
-            # Отладочная информация
-            self.log_message(f"🔍 DEBUG: API response type: {type(result)}", level="DEBUG")
-            self.log_message(f"🔍 DEBUG: API response length: {len(result) if isinstance(result, list) else 'Not a list'}", level="DEBUG")
-            if isinstance(result, list) and len(result) > 0:
-                self.log_message(f"🔍 DEBUG: First trade structure: {result[0]}", level="DEBUG")
+            # Отладочная информация (убрано для чистоты логов)
                 
             # Фильтруем ордера по токену
             filtered_orders = []
@@ -1332,7 +1328,7 @@ class HyperliquidBrowser:
                 if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
                     
-            self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
+            # self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
             return filtered_orders[:limit]
             
         except Exception as e:

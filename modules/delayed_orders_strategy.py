@@ -57,12 +57,7 @@ async def calculate_real_profit(client, token_name: str, sold_amount: float, sel
         # Получаем историю сделок для поиска цены покупки
         trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
         
-        # Отладочная информация
-        client.browser.log_message(f"🔍 DEBUG: Retrieved {len(trades_history) if trades_history else 0} trades from history", level="DEBUG")
-        client.browser.log_message(f"🔍 INFO: Retrieved {len(trades_history) if trades_history else 0} trades from history", level="INFO")
-        if trades_history:
-            client.browser.log_message(f"🔍 DEBUG: First trade sample: {trades_history[0] if trades_history else 'None'}", level="DEBUG")
-            client.browser.log_message(f"🔍 INFO: First trade sample: {trades_history[0] if trades_history else 'None'}", level="INFO")
+        # Отладочная информация (убрано для чистоты логов)
         
         if not trades_history:
             client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
