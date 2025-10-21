@@ -945,6 +945,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="INFO"
                     )
                     
+                    # Получаем баланс USDC для проверки
+                    usdc_balance = all_balances.get("USDC", 0.0)
+                    
                     # Проверяем достаточность средств перед размещением ордера
                     if usdc_balance < usdc_amount:
                         client.browser.log_message(
