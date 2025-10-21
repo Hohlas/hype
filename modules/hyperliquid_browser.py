@@ -1314,10 +1314,22 @@ class HyperliquidBrowser:
                 
             # Фильтруем ордера по токену
             filtered_orders = []
+            
+            # Маппинг токенов для поиска ордеров
+            token_mapping = {
+                "BTC": "@142",
+                "ETH": "@2", 
+                "USDC": "@1",
+                "UBTC": "@142"  # UBTC тоже использует @142
+            }
+            
+            # Получаем asset ID для токена
+            asset_id = token_mapping.get(token_name, token_name)
+            
             for trade in result:
                 # Проверяем разные возможные поля для токена
                 coin = trade.get("coin") or trade.get("asset") or trade.get("symbol")
-                if coin == token_name or coin == f"{token_name}-SPOT":
+                if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
                     
             self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
