@@ -990,14 +990,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         tp_order_id = executed_order.get("oid")
                         
                         # Получаем время выставления TP ордера из saved order
-                        # Пробуем разные возможные поля для времени создания
-                        tp_order_time = (
-                            executed_order.get('time') or
-                            executed_order.get('timestamp') or
-                            executed_order.get('createdTime') or
-                            executed_order.get('_saved_time') or
-                            None
-                        )
+                        # В Open Orders ордерах есть поле "timestamp" - время создания ордера
+                        tp_order_time = executed_order.get('timestamp')
                         
                         if tp_order_time:
                             client.browser.log_message(
@@ -1006,7 +1000,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             )
                         else:
                             client.browser.log_message(
-                                f"⚠️ No creation time found in TP order, will use sell_time from trade history",
+                                f"⚠️ No timestamp found in TP order, will use sell_time from trade history",
                                 level="WARNING"
                             )
                         
@@ -1061,29 +1055,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client._skip_orders_log_after_profit = True
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
-                # ВРЕМЕННО: Логируем структуру TP ордера для проверки наличия времени создания
-                if tp_orders and not hasattr(client, '_tp_order_structure_logged'):
-                    import json
-                    client.browser.log_message("=" * 80, level="INFO")
-                    client.browser.log_message("🔍 TEMPORARY: TP Order Structure from Open Orders", level="INFO")
-                    client.browser.log_message("=" * 80, level="INFO")
-                    sample_order = tp_orders[0]
-                    client.browser.log_message("Sample TP order structure:", level="INFO")
-                    client.browser.log_message(json.dumps(sample_order, indent=2, ensure_ascii=False, default=str), level="INFO")
-                    client.browser.log_message("=" * 80, level="INFO")
-                    client._tp_order_structure_logged = True
-                
-                # Сохраняем TP ордера с добавлением времени создания (если доступно)
-                import time
-                current_timestamp = int(time.time() * 1000)  # Текущее время в миллисекундах
-                
+                # В TP ордерах из Open Orders есть поле "timestamp" - время создания ордера
                 for order in tp_orders:
                     oid = order.get("oid")
                     if oid:
-                        # Если в ордере нет времени создания, добавляем текущее время как fallback
-                        # (это будет время последнего обновления, но лучше чем ничего)
-                        if 'time' not in order and 'timestamp' not in order and 'createdTime' not in order:
-                            order['_saved_time'] = current_timestamp  # Сохраняем время сохранения в кэше
                         client._previous_tp_orders[oid] = order
                 
                 # Логируем сырой ответ API (отключено для чистоты логов)
