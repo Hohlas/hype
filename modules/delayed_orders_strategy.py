@@ -213,21 +213,31 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
     """
     try:
         # Получаем историю сделок (от новых к старым)
-        trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+        # Увеличиваем limit до 500, чтобы гарантированно найти покупку
+        trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
         
         if not trades_history:
             client.browser.log_message("⚠️ No trade history found for matching buy trade", level="INFO")
             return None
         
+        # Логируем общее количество сделок для отладки
+        client.browser.log_message(
+            f"📊 Total trades in history: {len(trades_history)}",
+            level="INFO"
+        )
+        
         # Определяем верхнюю границу времени для поиска покупки
-        # Приоритет: время выставления TP ордера > время исполнения продажи
+        # ИСПРАВЛЕНИЕ: Используем время СОЗДАНИЯ TP ордера из Open Orders,
+        # потому что TP ордер создается СРАЗУ ПОСЛЕ покупки.
+        # Покупка должна быть ДО времени создания TP ордера (её время < tp_order_time)
+        # Время исполнения TP ордера может быть намного позже и не имеет значения для поиска покупки
         time_limit = None
         
         if tp_order_time:
-            # Используем время выставления TP ордера из Open Orders
+            # Используем время СОЗДАНИЯ TP ордера из Open Orders - это правильная верхняя граница
             time_limit = tp_order_time
         else:
-            # Fallback: используем время исполнения продажи из Trade History
+            # Fallback: если время создания TP ордера не найдено, используем время исполнения продажи
             sell_trade = None
             for trade in trades_history:
                 trade_oid = trade.get('oid')
@@ -236,6 +246,10 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                 if trade_oid == tp_order_id and trade_side in ['SELL', 'S', 'A']:
                     sell_trade = trade
                     time_limit = trade.get('time', 0)
+                    client.browser.log_message(
+                        f"⚠️ Using sell trade execution time as fallback (TP order creation time not found)",
+                        level="WARNING"
+                    )
                     break
             
             if not sell_trade:
@@ -244,6 +258,10 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                     first_trade = trades_history[0]
                     if first_trade.get('side', '').upper() in ['SELL', 'S', 'A']:
                         time_limit = first_trade.get('time', 0)
+                        client.browser.log_message(
+                            f"⚠️ Using first sell trade time as fallback",
+                            level="WARNING"
+                        )
         
         if not time_limit:
             client.browser.log_message("⚠️ No time limit found for buy trade search", level="WARNING")
@@ -252,10 +270,15 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
         # ИСПРАВЛЕНИЕ: ищем самую ПОСЛЕДНЮЮ покупку перед TP ордером (ближайшую к времени TP),
         # а не первую попавшуюся, чтобы не брать старые покупки
-        # Также ограничиваем поиск покупками за последние 7 дней от времени TP ордера
-        tolerance = 0.00001  # Допустимое отклонение размера (для учета округлений)
-        max_age_days = 7  # Максимальный возраст покупки относительно TP ордера (в днях)
+        # Увеличиваем tolerance для учета небольших расхождений при округлении
+        tolerance = 0.0001  # Допустимое отклонение размера (увеличено для большей гибкости)
+        max_age_days = 30  # Максимальный возраст покупки относительно TP ордера (увеличено до 30 дней)
         max_age_ms = max_age_days * 24 * 60 * 60 * 1000  # Преобразуем в миллисекунды
+        
+        # Отладочное логирование: выводим все покупки для анализа
+        from datetime import datetime
+        tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        buy_trades_for_debug = []
         
         # Собираем все подходящие покупки
         matching_buys = []
@@ -265,15 +288,28 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             
             # Ищем покупку
             if trade_side in ['BUY', 'B']:
-                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени выставления TP ордера
+                trade_size = float(trade.get('sz', 0))
+                trade_price = float(trade.get('px', 0))
+                trade_datetime = datetime.fromtimestamp(trade_time / 1000)
+                
+                # Сохраняем для отладки
+                buy_trades_for_debug.append({
+                    'time': trade_time,
+                    'time_str': trade_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+                    'size': trade_size,
+                    'price': trade_price,
+                    'before_tp': trade_time < time_limit,
+                    'size_match': abs(trade_size - sell_size) <= tolerance
+                })
+                
+                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени СОЗДАНИЯ TP ордера
+                # TP ордер создается сразу после покупки, поэтому покупка должна быть до времени создания TP
                 if trade_time >= time_limit:
-                    continue  # Пропускаем покупки, которые были после выставления TP ордера
+                    continue  # Пропускаем покупки, которые были после создания TP ордера
                 
                 # Ограничиваем поиск покупками за последние N дней от времени TP ордера
                 if time_limit - trade_time > max_age_ms:
                     continue  # Пропускаем покупки старше max_age_days дней
-                
-                trade_size = float(trade.get('sz', 0))
                 
                 # Проверяем соответствие размера (с учетом допуска)
                 if abs(trade_size - sell_size) <= tolerance:
@@ -286,6 +322,22 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                         'oid': trade.get('oid'),
                         'hash': trade.get('hash', '')
                     })
+        
+        # Логируем отладочную информацию о покупках
+        if buy_trades_for_debug:
+            client.browser.log_message(
+                f"🔍 Found {len(buy_trades_for_debug)} BUY trades in history. TP order time: {tp_datetime_str}",
+                level="INFO"
+            )
+            # Показываем последние 5 покупок
+            for i, buy_info in enumerate(buy_trades_for_debug[:5]):
+                status = "✅" if buy_info['before_tp'] and buy_info['size_match'] else "❌"
+                client.browser.log_message(
+                    f"  {status} Buy {i+1}: {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
+                    f"Price: ${buy_info['price']:.2f} | Before TP: {buy_info['before_tp']} | "
+                    f"Size match: {buy_info['size_match']}",
+                    level="INFO"
+                )
         
         # Если нашли подходящие покупки, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP ордера)
         if matching_buys:
@@ -313,7 +365,7 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             return buy_trade
         
         # Если не нашли точное совпадение, ищем максимально близкую покупку ДО времени выставления TP ордера
-        # Также ограничиваем поиск покупками за последние 7 дней от времени TP ордера
+        # Также ограничиваем поиск покупками за последние 30 дней от времени TP ордера
         from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
@@ -324,14 +376,23 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         closest_buy = None
         min_diff = float('inf')
         
+        # Отладочная информация: сколько покупок найдено в истории
+        buy_count = 0
+        buy_before_tp_count = 0
+        
         for trade in trades_history:
             trade_side = trade.get('side', '').upper()
             trade_time = trade.get('time', 0)
             
             if trade_side in ['BUY', 'B']:
-                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени выставления TP ордера
+                buy_count += 1
+                
+                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени СОЗДАНИЯ TP ордера
+                # TP ордер создается сразу после покупки, поэтому покупка должна быть до времени создания TP
                 if trade_time >= time_limit:
-                    continue  # Пропускаем покупки, которые были после выставления TP ордера
+                    continue  # Пропускаем покупки, которые были после создания TP ордера
+                
+                buy_before_tp_count += 1
                 
                 # Ограничиваем поиск покупками за последние N дней от времени TP ордера
                 if time_limit - trade_time > max_age_ms:
@@ -351,6 +412,18 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                         'oid': trade.get('oid'),
                         'hash': trade.get('hash', '')
                     }
+        
+        # Логируем отладочную информацию
+        if buy_count == 0:
+            client.browser.log_message(
+                f"⚠️ No BUY trades found in trade history (total trades: {len(trades_history)})",
+                level="WARNING"
+            )
+        elif buy_before_tp_count == 0:
+            client.browser.log_message(
+                f"⚠️ Found {buy_count} BUY trades, but all are after TP order time ({tp_datetime_str})",
+                level="WARNING"
+            )
         
         if closest_buy:
             from datetime import datetime
@@ -938,7 +1011,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     from datetime import datetime
                                     tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
                                     client.browser.log_message(
-                                        f"📅 TP order created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
+                                        f"📅 TP order created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | Price: ${tp_price:.2f}",
                                         level="INFO"
                                     )
                                 else:
