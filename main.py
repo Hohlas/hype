@@ -180,7 +180,14 @@ async def runner(mode: int):
 
     else:
         all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
-        if all_modules != 'No more accounts left':
+        logger.debug(f"get_all_modules returned: {type(all_modules)}, value: {all_modules}")
+        
+        if all_modules == 'No more accounts left':
+            logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")
+            logger.info("Please check input_data/wallets.txt file - it should contain wallet data in format: label|wallet_address|private_key|proxy")
+        elif not all_modules:
+            logger.warning("get_all_modules returned empty list or None")
+        else:
             # Подсчитываем уникальные аккаунты
             unique_accounts = list(set([m['label'] for m in all_modules]))
             logger.opt(colors=True).info(

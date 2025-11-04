@@ -19,6 +19,7 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
     wallets = []
     
     if not os.path.exists(file_path):
+        print(f"⚠️ Файл {file_path} не найден. Создайте файл с кошельками.")
         return wallets
     
     try:
