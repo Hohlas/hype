@@ -226,10 +226,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         if tp_order_time:
             # Используем время выставления TP ордера из Open Orders
             time_limit = tp_order_time
-            client.browser.log_message(
-                f"🔍 Using TP order creation time: {time_limit} (ms) from Open Orders",
-                level="INFO"
-            )
         else:
             # Fallback: используем время исполнения продажи из Trade History
             sell_trade = None
@@ -248,21 +244,10 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                     first_trade = trades_history[0]
                     if first_trade.get('side', '').upper() in ['SELL', 'S', 'A']:
                         time_limit = first_trade.get('time', 0)
-            
-            if time_limit:
-                client.browser.log_message(
-                    f"🔍 Using sell execution time from Trade History: {time_limit} (ms) as fallback",
-                    level="WARNING"
-                )
         
         if not time_limit:
             client.browser.log_message("⚠️ No time limit found for buy trade search", level="WARNING")
             return None
-        
-        client.browser.log_message(
-            f"🔍 Searching for buy trade: time_limit={time_limit} (ms), sell_size={sell_size:.6f} BTC",
-            level="INFO"
-        )
         
         # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
         tolerance = 0.00001  # Допустимое отклонение размера (для учета округлений)
@@ -295,16 +280,27 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                     client.browser.log_message(
                         f"✅ Found matching buy trade: {buy_trade['sz']:.6f} BTC @ ${buy_trade['px']:.2f}, "
                         f"fee: {buy_trade['fee']} {buy_trade['feeToken']}, "
-                        f"buy_time={buy_trade['time']} < tp_order_time={time_limit}, "
                         f"sell: {sell_size:.6f} BTC @ ${sell_price:.2f}",
+                        level="INFO"
+                    )
+                    
+                    # Логируем время покупки и TP ордера в читаемом формате для проверки с веб-терминалом
+                    from datetime import datetime
+                    buy_datetime = datetime.fromtimestamp(buy_trade['time'] / 1000)
+                    tp_datetime = datetime.fromtimestamp(time_limit / 1000)
+                    client.browser.log_message(
+                        f"📅 Buy trade: {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
+                        f"TP order: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
                         level="INFO"
                     )
                     
                     return buy_trade
         
         # Если не нашли точное совпадение, ищем максимально близкую покупку ДО времени выставления TP ордера
+        from datetime import datetime
+        tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
-            f"⚠️ No exact match found for sell size {sell_size:.6f} BTC, searching for closest match before time_limit={time_limit}...",
+            f"⚠️ No exact match found for sell size {sell_size:.6f} BTC, searching for closest match before TP order time ({tp_datetime_str})...",
             level="WARNING"
         )
         
@@ -336,15 +332,25 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                     }
         
         if closest_buy:
+            from datetime import datetime
+            buy_datetime = datetime.fromtimestamp(closest_buy['time'] / 1000)
+            tp_datetime = datetime.fromtimestamp(time_limit / 1000)
             client.browser.log_message(
                 f"⚠️ Using closest buy trade: {closest_buy['sz']:.6f} BTC @ ${closest_buy['px']:.2f} "
-                f"(diff: {min_diff:.6f} BTC, buy_time={closest_buy['time']} < tp_order_time={time_limit})",
+                f"(diff: {min_diff:.6f} BTC)",
                 level="WARNING"
+            )
+            client.browser.log_message(
+                f"📅 Buy trade: {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"TP order: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
+                level="INFO"
             )
             return closest_buy
         
+        from datetime import datetime
+        tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
-            f"❌ Could not find matching buy trade for sell size {sell_size:.6f} BTC before time_limit={time_limit}",
+            f"❌ Could not find matching buy trade for sell size {sell_size:.6f} BTC before TP order time ({tp_datetime_str})",
             level="ERROR"
         )
         return None
@@ -812,92 +818,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # ВРЕМЕННЫЙ КОД: Диагностика Trade History для поиска информации о комиссиях
-        try:
-            import json
-            client.browser.log_message("=" * 80, level="INFO")
-            client.browser.log_message("🔍 TEMPORARY: Trade History Diagnostics", level="INFO")
-            client.browser.log_message("=" * 80, level="INFO")
-            
-            # Получаем историю сделок и сырой ответ API
-            trades_history, raw_api_response = await client.browser.get_all_orders_history_with_raw(token_name, limit=5)
-            
-            # Выводим сырой ответ API
-            client.browser.log_message("📡 RAW API Response (userFillsByTime):", level="INFO")
-            client.browser.log_message(json.dumps(raw_api_response, indent=2, ensure_ascii=False), level="INFO")
-            client.browser.log_message("", level="INFO")
-            
-            # Выводим последние 5 сделок от самой новой к более старым
-            if trades_history:
-                client.browser.log_message(f"📈 Trade History (Last {len(trades_history)} trades, newest first):", level="INFO")
-                for i, trade in enumerate(trades_history[:5], 1):
-                    client.browser.log_message(f"\n--- Trade #{i} ---", level="INFO")
-                    
-                    # Выводим все доступные поля
-                    for key, value in trade.items():
-                        client.browser.log_message(f"  {key}: {value}", level="INFO")
-                    
-                    # Дополнительный анализ комиссий
-                    if 'px' in trade and 'sz' in trade:
-                        price = float(trade.get('px', 0))
-                        size = float(trade.get('sz', 0))
-                        side = trade.get('side', 'UNKNOWN')
-                        trade_value = price * size
-                        
-                        client.browser.log_message(f"\n  Calculated values:", level="INFO")
-                        client.browser.log_message(f"    Price: ${price:.2f}", level="INFO")
-                        client.browser.log_message(f"    Size: {size:.8f} BTC", level="INFO")
-                        client.browser.log_message(f"    Trade Value: ${trade_value:.2f}", level="INFO")
-                        client.browser.log_message(f"    Side: {side}", level="INFO")
-                        
-                        # Ищем поля, связанные с комиссией
-                        fee_fields = [k for k in trade.keys() if 'fee' in k.lower() or 'commission' in k.lower() or 'cost' in k.lower()]
-                        fee_token = trade.get('feeToken', '')
-                        
-                        if fee_fields:
-                            client.browser.log_message(f"    ⚠️ Fee-related fields found: {fee_fields}", level="INFO")
-                            for fee_field in fee_fields:
-                                fee_value = trade.get(fee_field)
-                                if fee_value:
-                                    if fee_field == 'feeToken':
-                                        # feeToken - это просто название токена, не комиссия
-                                        client.browser.log_message(f"      {fee_field}: {fee_value} (token for fee payment)", level="INFO")
-                                    else:
-                                        try:
-                                            fee_float = float(fee_value)
-                                            # Определяем валюту комиссии из feeToken
-                                            if fee_token == 'UBTC' or fee_token == 'BTC':
-                                                # Комиссия в BTC, считаем процент от размера сделки
-                                                fee_percent = (fee_float / size) * 100 if size > 0 else 0
-                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token} ({fee_percent:.6f}% of size)", level="INFO")
-                                            elif fee_token == 'USDC' or fee_token == 'USDT':
-                                                # Комиссия в USDC/USDT, считаем процент от стоимости сделки
-                                                fee_percent = (fee_float / trade_value) * 100 if trade_value > 0 else 0
-                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token} ({fee_percent:.6f}% of trade value)", level="INFO")
-                                            else:
-                                                # Неизвестный токен комиссии
-                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token}", level="INFO")
-                                        except:
-                                            client.browser.log_message(f"      {fee_field}: {fee_value}", level="INFO")
-                        else:
-                            client.browser.log_message(f"    ❌ No fee-related fields found in trade data", level="INFO")
-                        
-                        # Пример расчета комиссии из веб-терминала:
-                        # Покупка: 0,0000000672 BTC от 0,00010 BTC = (0.0000000672 / 0.00010) * 100 = 0.0672%
-                        # Продажа: 0,00 USDC (комиссия может быть 0 для определенных типов сделок)
-                        if side in ['BUY', 'B']:
-                            example_fee_btc = 0.0000000672
-                            example_size = 0.00010
-                            example_fee_percent = (example_fee_btc / example_size) * 100
-                            client.browser.log_message(f"    📊 Example from web terminal: {example_fee_btc} BTC fee on {example_size} BTC = {example_fee_percent:.4f}%", level="INFO")
-            else:
-                client.browser.log_message("⚠️ No trade history found", level="INFO")
-            
-            client.browser.log_message("=" * 80, level="INFO")
-            client.browser.log_message("", level="INFO")
-        except Exception as e:
-            client.browser.log_message(f"❌ Failed to get trade history diagnostics: {e}", level="ERROR")
-        
         # Тестируем функцию расчета прибыли при запуске (закомментировано - используем расчет через баланс)
         # client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
         # test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
@@ -994,8 +914,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         tp_order_time = executed_order.get('timestamp')
                         
                         if tp_order_time:
+                            # Конвертируем в читаемый формат для проверки
+                            from datetime import datetime
+                            tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
                             client.browser.log_message(
-                                f"🔍 TP order creation time: {tp_order_time} (ms) for oid={tp_order_id}",
+                                f"📅 TP order created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
                                 level="INFO"
                             )
                         else:
@@ -1143,24 +1066,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if skip_orders_this_iteration:
                     client._skip_orders_log_after_profit = False  # Сбрасываем флаг на следующей итерации
                 
-                if (orders_changed or balance_changed) and not skip_orders_this_iteration:
-                    orders_info = []
-                    orders_info.append(f"📋 Open Orders ({len(open_orders)} total):")
-                    
-                    for i, order_info in enumerate(current_orders_state):
-                        orders_info.append(f"  {i+1}. {order_info}")
-                    
-                    # Добавляем баланс с общей стоимостью для отображения (но не для сравнения)
-                    try:
-                        balance_str = " + ".join(token_balances)
-                        orders_info.append(f"Balance: {balance_str} = ${total_usd_value:.2f}")
-                    except:
-                        orders_info.append(current_balance_state)
-                    
-                    # Отправляем все в одном сообщении
-                    client.browser.log_message("\n".join(orders_info), level="INFO")
-                    
-                    # Обновляем кэш
+                # Обновляем кэш для отслеживания изменений (но не выводим список ордеров)
+                if orders_changed or balance_changed:
                     previous_orders_state = current_orders_state.copy()
                     previous_balance_state = current_balance_state
                 
