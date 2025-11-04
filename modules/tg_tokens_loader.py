@@ -39,18 +39,17 @@ def load_tg_tokens_from_file(file_path: str = "input_data/tg_bot_tokens.txt") ->
                     continue
                 
                 # Ищем паттерн: KEY = 'value' или KEY = "value" или KEY = [value]
-                match = re.match(r'(\w+)\s*=\s*([\'"]?)(.*?)\2', line)
+                # Сначала убираем комментарии из строки
+                line_without_comments = re.sub(r'#.*$', '', line).strip()
+                
+                # Ищем KEY = value
+                match = re.match(r'(\w+)\s*=\s*(.+)', line_without_comments)
                 if match:
                     key = match.group(1)
-                    value = match.group(3).strip()
+                    value = match.group(2).strip()
                     
-                    # Убираем комментарии из значения
-                    value = re.sub(r'#.*$', '', value).strip()
-                    
-                    # Убираем кавычки если есть
-                    if value.startswith("'") and value.endswith("'"):
-                        value = value[1:-1]
-                    elif value.startswith('"') and value.endswith('"'):
+                    # Убираем кавычки если есть (одинарные или двойные)
+                    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
                         value = value[1:-1]
                     
                     # Обработка списка для TG_USER_ID

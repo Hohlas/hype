@@ -26,6 +26,11 @@ def _get_tg_tokens():
     """Кэшированная загрузка токенов из файла"""
     if not hasattr(_get_tg_tokens, '_cached'):
         _get_tg_tokens._cached = load_tg_tokens_from_file()
+        # Логируем загруженные токены (скрывая чувствительные данные)
+        tokens = _get_tg_tokens._cached
+        logger.debug(f"Loaded TG tokens: TG_BOT_TOKEN={'***' if tokens.get('TG_BOT_TOKEN') else 'None'}, "
+                     f"PROFIT_BOT_TOKEN={'***' if tokens.get('PROFIT_BOT_TOKEN') else 'None'}, "
+                     f"TG_USER_ID={'***' if tokens.get('TG_USER_ID') else 'None'}")
     return _get_tg_tokens._cached
 
 
@@ -39,6 +44,12 @@ class TgReport:
         self.bot_token = tokens.get("TG_BOT_TOKEN") or "12345:AABBCC"
         self.chat_id = tokens.get("TG_USER_ID") or "12345"
         
+        # Проверяем, что токены не являются значениями по умолчанию
+        if self.bot_token == "12345:AABBCC" or not self.bot_token:
+            logger.warning("TG_BOT_TOKEN not configured or invalid. Telegram notifications will fail.")
+        if self.chat_id == "12345" or not self.chat_id:
+            logger.warning("TG_USER_ID not configured or invalid. Telegram notifications will fail.")
+        
     async def send_log(self, logs: str):
         """
         Отправляет логи в Telegram.
@@ -49,6 +60,16 @@ class TgReport:
             # Проверяем, что logs не пустой и содержит корректный текст
             if not logs or not isinstance(logs, str) or logs.strip() == "":
                 logger.warning("Empty or invalid logs text, skipping Telegram notification")
+                return
+            
+            # Проверяем, что токен не является значением по умолчанию
+            if self.bot_token == "12345:AABBCC" or not self.bot_token or "..." in self.bot_token:
+                logger.warning("TG_BOT_TOKEN not configured properly. Check input_data/tg_bot_tokens.txt file.")
+                return
+            
+            # Проверяем, что chat_id не является значением по умолчанию
+            if self.chat_id == "12345" or not self.chat_id or "..." in str(self.chat_id):
+                logger.warning("TG_USER_ID not configured properly. Check input_data/tg_bot_tokens.txt file.")
                 return
             
             # Очищаем текст от потенциально проблемных символов
@@ -65,7 +86,10 @@ class TgReport:
                 async with session.post(url, json=data) as response:
                     if response.status != 200:
                         response_text = await response.text()
-                        logger.error(f"Failed to send Telegram message: {response.status} - {response_text}")
+                        if response.status == 401:
+                            logger.error(f"Failed to send Telegram message: Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
+                        else:
+                            logger.error(f"Failed to send Telegram message: {response.status} - {response_text}")
                         
         except Exception as e:
             logger.error(f"Failed to send Telegram notification: {e}")
