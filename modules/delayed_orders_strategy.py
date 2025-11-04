@@ -40,95 +40,96 @@ import settings
 _order_skipped_cache = {}
 
 
-async def calculate_real_profit(client, token_name: str, sold_amount: float, sell_price: float) -> float:
-    """
-    Рассчитывает реальную прибыль от сделки с учетом комиссии
-    
-    Args:
-        client: HyperliquidClient instance
-        token_name: Название токена (например, "BTC")
-        sold_amount: Количество проданных токенов
-        sell_price: Цена продажи
-    
-    Returns:
-        float: Реальная прибыль в USDC
-    """
-    try:
-        # Получаем историю сделок для поиска цены покупки
-        trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
-        
-        # Отладочная информация (убрано для чистоты логов)
-        
-        if not trades_history:
-            client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
-            # Используем упрощенный расчет на основе STEP
-            step_profit = sold_amount * float(settings.STEP)
-            commission = sold_amount * sell_price * 0.0002  # 0.02% комиссия
-            estimated_profit = step_profit - commission
-            client.browser.log_message(f"💰 Using STEP-based profit estimation: ${estimated_profit:.2f}", level="INFO")
-            return estimated_profit
-        
-        # Ищем последние BUY сделки для расчета средней цены покупки
-        buy_trades = []
-        total_bought = 0.0
-        
-        for trade in trades_history:
-            side = trade.get('side', '').upper()
-            if side in ['BUY', 'B']:
-                trade_amount = float(trade.get('sz', 0))
-                trade_price = float(trade.get('px', 0))
-                
-                buy_trades.append({
-                    'amount': trade_amount,
-                    'price': trade_price,
-                    'value': trade_amount * trade_price
-                })
-                total_bought += trade_amount
-                
-                # Если набрали достаточно для покрытия проданного количества
-                if total_bought >= sold_amount:
-                    break
-        
-        if not buy_trades or total_bought < sold_amount:
-            client.browser.log_message("⚠️ Insufficient buy history for profit calculation", level="INFO")
-            return 0.0
-        
-        # Рассчитываем средневзвешенную цену покупки
-        weighted_price = 0.0
-        remaining_to_cover = sold_amount
-        
-        for trade in reversed(buy_trades):  # Берем последние сделки
-            if remaining_to_cover <= 0:
-                break
-                
-            amount_to_use = min(trade['amount'], remaining_to_cover)
-            weighted_price += amount_to_use * trade['price']
-            remaining_to_cover -= amount_to_use
-        
-        avg_buy_price = weighted_price / sold_amount
-        
-        # Рассчитываем прибыль
-        sell_value = sold_amount * sell_price
-        buy_value = sold_amount * avg_buy_price
-        
-        # Примерная комиссия (обычно 0.02% на Hyperliquid)
-        commission_rate = 0.0002  # 0.02%
-        commission = sell_value * commission_rate
-        
-        real_profit = sell_value - buy_value - commission
-        
-        client.browser.log_message(
-            f"💰 Profit calculation: Sold {sold_amount:.6f}BTC @ ${sell_price:.2f} = ${sell_value:.2f}, "
-            f"Bought @ ${avg_buy_price:.2f} = ${buy_value:.2f}, Commission ${commission:.2f}, "
-            f"Net profit: ${real_profit:.2f}", 
-            level="INFO"
-        )
-        
-        return real_profit
-        
-    except Exception as e:
-        client.browser.log_message(f"Failed to calculate real profit: {e}", level="ERROR")
-        return 0.0
+# async def calculate_real_profit(client, token_name: str, sold_amount: float, sell_price: float) -> float:
+#     """
+#     Рассчитывает реальную прибыль от сделки с учетом комиссии
+#     (ЗАКОММЕНТИРОВАНО: используем расчет через изменение баланса USDC)
+#     
+#     Args:
+#         client: HyperliquidClient instance
+#         token_name: Название токена (например, "BTC")
+#         sold_amount: Количество проданных токенов
+#         sell_price: Цена продажи
+#     
+#     Returns:
+#         float: Реальная прибыль в USDC
+#     """
+#     try:
+#         # Получаем историю сделок для поиска цены покупки
+#         trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
+#         
+#         # Отладочная информация (убрано для чистоты логов)
+#         
+#         if not trades_history:
+#             client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
+#             # Используем упрощенный расчет на основе STEP
+#             step_profit = sold_amount * float(settings.STEP)
+#             commission = sold_amount * sell_price * 0.0002  # 0.02% комиссия
+#             estimated_profit = step_profit - commission
+#             client.browser.log_message(f"💰 Using STEP-based profit estimation: ${estimated_profit:.2f}", level="INFO")
+#             return estimated_profit
+#         
+#         # Ищем последние BUY сделки для расчета средней цены покупки
+#         buy_trades = []
+#         total_bought = 0.0
+#         
+#         for trade in trades_history:
+#             side = trade.get('side', '').upper()
+#             if side in ['BUY', 'B']:
+#                 trade_amount = float(trade.get('sz', 0))
+#                 trade_price = float(trade.get('px', 0))
+#                 
+#                 buy_trades.append({
+#                     'amount': trade_amount,
+#                     'price': trade_price,
+#                     'value': trade_amount * trade_price
+#                 })
+#                 total_bought += trade_amount
+#                 
+#                 # Если набрали достаточно для покрытия проданного количества
+#                 if total_bought >= sold_amount:
+#                     break
+#         
+#         if not buy_trades or total_bought < sold_amount:
+#             client.browser.log_message("⚠️ Insufficient buy history for profit calculation", level="INFO")
+#             return 0.0
+#         
+#         # Рассчитываем средневзвешенную цену покупки
+#         weighted_price = 0.0
+#         remaining_to_cover = sold_amount
+#         
+#         for trade in reversed(buy_trades):  # Берем последние сделки
+#             if remaining_to_cover <= 0:
+#                 break
+#                 
+#             amount_to_use = min(trade['amount'], remaining_to_cover)
+#             weighted_price += amount_to_use * trade['price']
+#             remaining_to_cover -= amount_to_use
+#         
+#         avg_buy_price = weighted_price / sold_amount
+#         
+#         # Рассчитываем прибыль
+#         sell_value = sold_amount * sell_price
+#         buy_value = sold_amount * avg_buy_price
+#         
+#         # Примерная комиссия (обычно 0.02% на Hyperliquid)
+#         commission_rate = 0.0002  # 0.02%
+#         commission = sell_value * commission_rate
+#         
+#         real_profit = sell_value - buy_value - commission
+#         
+#         client.browser.log_message(
+#             f"💰 Profit calculation: Sold {sold_amount:.6f}BTC @ ${sell_price:.2f} = ${sell_value:.2f}, "
+#             f"Bought @ ${avg_buy_price:.2f} = ${buy_value:.2f}, Commission ${commission:.2f}, "
+#             f"Net profit: ${real_profit:.2f}", 
+#             level="INFO"
+#         )
+#         
+#         return real_profit
+#         
+#     except Exception as e:
+#         client.browser.log_message(f"Failed to calculate real profit: {e}", level="ERROR")
+#         return 0.0
 
 
 async def get_actual_fill_price_from_history(client, token_name: str, order_time: float, timeout: int = 10):
@@ -668,10 +669,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # Тестируем функцию расчета прибыли при запуске
-        client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
-        test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
-        client.browser.log_message(f"🔍 Test profit calculation result: ${test_profit:.2f}", level="INFO")
+        # Тестируем функцию расчета прибыли при запуске (закомментировано - используем расчет через баланс)
+        # client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
+        # test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
+        # client.browser.log_message(f"🔍 Test profit calculation result: ${test_profit:.2f}", level="INFO")
         
         # Тест DEBUG лога отключен для чистоты логов
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
@@ -699,6 +700,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 ]
                 current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
                 current_price = float(current_price_raw)
+                
+                # Инициализация отслеживания баланса USDC для расчета прибыли
+                if not hasattr(client, '_previous_usdc_balance'):
+                    client._previous_usdc_balance = all_balances.get("USDC", 0.0)
                 
                 # Отладочная информация отключена для чистоты логов
                 # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
@@ -736,6 +741,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         usdc_balance = all_balances.get("USDC", 0.0)
                         btc_balance = all_balances.get("UBTC", 0.0)
                         
+                        # Сохраняем старое значение баланса для логирования
+                        previous_usdc_balance = client._previous_usdc_balance
+                        
+                        # Рассчитываем прибыль через изменение баланса USDC
+                        profit = usdc_balance - client._previous_usdc_balance
+                        
+                        # Обновляем предыдущий баланс для следующей итерации
+                        client._previous_usdc_balance = usdc_balance
+                        
                         # Рассчитываем общую стоимость
                         total_usd_value = usdc_balance
                         if btc_balance > 0:
@@ -745,11 +759,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         filled_qty = float(executed_order.get("sz", 0))
                         tp_price = float(executed_order.get("limitPx", 0))
                         
-                        # Рассчитываем реальную прибыль от сделки
-                        real_profit = await calculate_real_profit(client, token_name, filled_qty, tp_price)
-                        
-                        # Используем реальную прибыль, если удалось рассчитать, иначе сумму продажи
-                        profit = real_profit if real_profit != 0.0 else filled_qty * tp_price
+                        # Логируем расчет прибыли через изменение баланса
+                        client.browser.log_message(
+                            f"💰 Profit calculation: Previous USDC balance: ${previous_usdc_balance:.2f}, "
+                            f"Current USDC balance: ${usdc_balance:.2f}, "
+                            f"Profit: ${profit:.2f}",
+                            level="INFO"
+                        )
                         
                         # Записываем статистику операции Take Profit
                         try:
@@ -970,6 +986,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         usdc_amount=usdc_amount
                     )
                     
+                    # Обновляем баланс после маркет-ордера на покупку
+                    all_balances = await client.browser.get_all_balances()
+                    client._previous_usdc_balance = all_balances.get("USDC", 0.0)
+                    
                     # Получаем количество токенов из результата ордера
                     token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
@@ -1027,10 +1047,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="INFO"
                     )
                     
-                    # Отправляем уведомление о TP ордере с фактической ценой исполнения
+                    # Отправляем уведомление о TP ордере
                     await send_tg_notification(
                         client,
-                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f} (filled at ${actual_price:.2f})",
+                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
                         save_to_report=False
                     )
                     
@@ -1080,6 +1100,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             order_type="MARKET",
                             usdc_amount=usdc_amount
                         )
+                        
+                        # Обновляем баланс после маркет-ордера на покупку
+                        all_balances = await client.browser.get_all_balances()
+                        client._previous_usdc_balance = all_balances.get("USDC", 0.0)
                         
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
@@ -1132,15 +1156,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             level="INFO"
                         )
                         
-                        # Отправляем дополнительное уведомление с фактической ценой исполнения
-                        if actual_price != current_price:
-                            await send_tg_notification(
-                                client,
-                                f"✅ <b>Averaging Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
-                                save_to_report=False
-                            )
-                        
-                        # Обновляем уведомление с фактической ценой исполнения
+                        # Отправляем уведомление об усреднении
                         await send_tg_notification(
                             client,
                             f"📉 <b>Averaging</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
@@ -1225,6 +1241,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             order_type="MARKET",
                             usdc_amount=usdc_amount
                         )
+                        
+                        # Обновляем баланс после маркет-ордера на покупку
+                        all_balances = await client.browser.get_all_balances()
+                        client._previous_usdc_balance = all_balances.get("USDC", 0.0)
                         
                         # Получаем количество токенов из результата ордера
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
