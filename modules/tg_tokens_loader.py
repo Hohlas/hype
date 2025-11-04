@@ -54,8 +54,11 @@ def load_tg_tokens_from_file(file_path: str = "input_data/tg_bot_tokens.txt") ->
                     
                     # Обработка списка для TG_USER_ID
                     if key == "TG_USER_ID" and value.startswith('[') and value.endswith(']'):
-                        # Извлекаем первый элемент из списка (убираем кавычки если есть)
+                        # Извлекаем содержимое списка
                         inner_value = value[1:-1].strip()
+                        # Разделяем по запятым и берем первый элемент
+                        if ',' in inner_value:
+                            inner_value = inner_value.split(',')[0].strip()
                         # Убираем кавычки если есть
                         if inner_value.startswith("'") and inner_value.endswith("'"):
                             inner_value = inner_value[1:-1]

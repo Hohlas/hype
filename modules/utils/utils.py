@@ -64,27 +64,33 @@ class TgReport:
             
             # Проверяем, что токен не является значением по умолчанию
             if self.bot_token == "12345:AABBCC" or not self.bot_token or "..." in self.bot_token:
-                logger.warning("TG_BOT_TOKEN not configured properly. Check input_data/tg_bot_tokens.txt file.")
+                logger.warning(f"TG_BOT_TOKEN not configured properly (value: '{self.bot_token}'). Check input_data/tg_bot_tokens.txt file.")
                 return
             
             # Проверяем, что chat_id не является значением по умолчанию
             if self.chat_id == "12345" or not self.chat_id or "..." in str(self.chat_id):
-                logger.warning("TG_USER_ID not configured properly. Check input_data/tg_bot_tokens.txt file.")
+                logger.warning(f"TG_USER_ID not configured properly (value: '{self.chat_id}'). Check input_data/tg_bot_tokens.txt file.")
                 return
+            
+            logger.debug(f"Attempting to send Telegram message to chat_id: {self.chat_id}")
             
             # Очищаем текст от потенциально проблемных символов
             clean_logs = logs.strip()
             
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            # Конвертируем chat_id в строку (Telegram API принимает и строку, и число)
+            chat_id_str = str(self.chat_id)
             data = {
-                "chat_id": self.chat_id,
+                "chat_id": chat_id_str,
                 "text": clean_logs,
                 "parse_mode": "HTML"
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data) as response:
-                    if response.status != 200:
+                    if response.status == 200:
+                        logger.debug("Telegram message sent successfully")
+                    else:
                         response_text = await response.text()
                         if response.status == 401:
                             logger.error(f"Failed to send Telegram message: Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
@@ -92,7 +98,7 @@ class TgReport:
                             logger.error(f"Failed to send Telegram message: {response.status} - {response_text}")
                         
         except Exception as e:
-            logger.error(f"Failed to send Telegram notification: {e}")
+            logger.error(f"Failed to send Telegram notification: {e}", exc_info=True)
 
 
 async def send_warning_notification(error_type: str, error_message: str, account_label: str = "Unknown"):
