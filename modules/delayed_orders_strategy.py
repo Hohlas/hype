@@ -684,24 +684,33 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Ищем поля, связанные с комиссией
                         fee_fields = [k for k in trade.keys() if 'fee' in k.lower() or 'commission' in k.lower() or 'cost' in k.lower()]
+                        fee_token = trade.get('feeToken', '')
+                        
                         if fee_fields:
                             client.browser.log_message(f"    ⚠️ Fee-related fields found: {fee_fields}", level="INFO")
                             for fee_field in fee_fields:
                                 fee_value = trade.get(fee_field)
                                 if fee_value:
-                                    try:
-                                        fee_float = float(fee_value)
-                                        # Для BUY комиссия в BTC, для SELL комиссия в USDC
-                                        if side in ['BUY', 'B']:
-                                            # Комиссия в BTC, считаем процент от размера сделки
-                                            fee_percent = (fee_float / size) * 100 if size > 0 else 0
-                                            client.browser.log_message(f"      {fee_field}: {fee_value} BTC ({fee_percent:.6f}% of size)", level="INFO")
-                                        else:
-                                            # Комиссия в USDC, считаем процент от стоимости сделки
-                                            fee_percent = (fee_float / trade_value) * 100 if trade_value > 0 else 0
-                                            client.browser.log_message(f"      {fee_field}: {fee_value} USDC ({fee_percent:.6f}% of trade value)", level="INFO")
-                                    except:
-                                        client.browser.log_message(f"      {fee_field}: {fee_value}", level="INFO")
+                                    if fee_field == 'feeToken':
+                                        # feeToken - это просто название токена, не комиссия
+                                        client.browser.log_message(f"      {fee_field}: {fee_value} (token for fee payment)", level="INFO")
+                                    else:
+                                        try:
+                                            fee_float = float(fee_value)
+                                            # Определяем валюту комиссии из feeToken
+                                            if fee_token == 'UBTC' or fee_token == 'BTC':
+                                                # Комиссия в BTC, считаем процент от размера сделки
+                                                fee_percent = (fee_float / size) * 100 if size > 0 else 0
+                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token} ({fee_percent:.6f}% of size)", level="INFO")
+                                            elif fee_token == 'USDC' or fee_token == 'USDT':
+                                                # Комиссия в USDC/USDT, считаем процент от стоимости сделки
+                                                fee_percent = (fee_float / trade_value) * 100 if trade_value > 0 else 0
+                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token} ({fee_percent:.6f}% of trade value)", level="INFO")
+                                            else:
+                                                # Неизвестный токен комиссии
+                                                client.browser.log_message(f"      {fee_field}: {fee_value} {fee_token}", level="INFO")
+                                        except:
+                                            client.browser.log_message(f"      {fee_field}: {fee_value}", level="INFO")
                         else:
                             client.browser.log_message(f"    ❌ No fee-related fields found in trade data", level="INFO")
                         
