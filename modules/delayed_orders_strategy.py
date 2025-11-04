@@ -186,6 +186,174 @@ async def get_actual_fill_price_from_history(client, token_name: str, order_time
         return None, None
 
 
+async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sell_size: float, sell_price: float, tp_order_time: int = None):
+    """
+    Находит связанную покупку для исполненного TP ордера.
+    
+    Алгоритм:
+    1. Получаем историю сделок (от новых к старым)
+    2. Используем время выставления TP ордера (tp_order_time) из Open Orders как верхнюю границу
+    3. Ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
+       (это гарантирует, что покупка была до выставления TP ордера)
+    
+    Важно: Если срабатывает несколько TP ордеров подряд, покупки для более ранних
+    TP ордеров будут ближе к продажам в истории. Использование времени ВЫСТАВЛЕНИЯ
+    TP ордера (а не времени исполнения) гарантирует правильное сопоставление.
+    
+    Args:
+        client: HyperliquidClient instance
+        token_name: Название токена (например, "BTC")
+        tp_order_id: Order ID исполненного TP ордера
+        sell_size: Размер проданного BTC
+        sell_price: Цена продажи
+        tp_order_time: Время выставления TP ордера из Open Orders (в миллисекундах), если доступно
+    
+    Returns:
+        dict: Данные покупки с полями px, sz, fee, feeToken, time, oid или None если не найдено
+    """
+    try:
+        # Получаем историю сделок (от новых к старым)
+        trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+        
+        if not trades_history:
+            client.browser.log_message("⚠️ No trade history found for matching buy trade", level="INFO")
+            return None
+        
+        # Определяем верхнюю границу времени для поиска покупки
+        # Приоритет: время выставления TP ордера > время исполнения продажи
+        time_limit = None
+        
+        if tp_order_time:
+            # Используем время выставления TP ордера из Open Orders
+            time_limit = tp_order_time
+            client.browser.log_message(
+                f"🔍 Using TP order creation time: {time_limit} (ms) from Open Orders",
+                level="INFO"
+            )
+        else:
+            # Fallback: используем время исполнения продажи из Trade History
+            sell_trade = None
+            for trade in trades_history:
+                trade_oid = trade.get('oid')
+                trade_side = trade.get('side', '').upper()
+                
+                if trade_oid == tp_order_id and trade_side in ['SELL', 'S', 'A']:
+                    sell_trade = trade
+                    time_limit = trade.get('time', 0)
+                    break
+            
+            if not sell_trade:
+                # Берем первую продажу в истории как fallback
+                if trades_history:
+                    first_trade = trades_history[0]
+                    if first_trade.get('side', '').upper() in ['SELL', 'S', 'A']:
+                        time_limit = first_trade.get('time', 0)
+            
+            if time_limit:
+                client.browser.log_message(
+                    f"🔍 Using sell execution time from Trade History: {time_limit} (ms) as fallback",
+                    level="WARNING"
+                )
+        
+        if not time_limit:
+            client.browser.log_message("⚠️ No time limit found for buy trade search", level="WARNING")
+            return None
+        
+        client.browser.log_message(
+            f"🔍 Searching for buy trade: time_limit={time_limit} (ms), sell_size={sell_size:.6f} BTC",
+            level="INFO"
+        )
+        
+        # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
+        tolerance = 0.00001  # Допустимое отклонение размера (для учета округлений)
+        
+        for trade in trades_history:
+            trade_side = trade.get('side', '').upper()
+            trade_time = trade.get('time', 0)
+            
+            # Ищем покупку
+            if trade_side in ['BUY', 'B']:
+                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени выставления TP ордера
+                # Это гарантирует, что покупка была ДО выставления TP ордера
+                if trade_time >= time_limit:
+                    continue  # Пропускаем покупки, которые были после выставления TP ордера
+                
+                trade_size = float(trade.get('sz', 0))
+                
+                # Проверяем соответствие размера (с учетом допуска)
+                if abs(trade_size - sell_size) <= tolerance:
+                    buy_trade = {
+                        'px': float(trade.get('px', 0)),  # Цена покупки
+                        'sz': trade_size,  # Размер покупки
+                        'fee': trade.get('fee', '0'),  # Комиссия покупки
+                        'feeToken': trade.get('feeToken', ''),  # Валюта комиссии
+                        'time': trade_time,  # Время покупки
+                        'oid': trade.get('oid'),  # Order ID покупки
+                        'hash': trade.get('hash', '')  # Hash сделки
+                    }
+                    
+                    client.browser.log_message(
+                        f"✅ Found matching buy trade: {buy_trade['sz']:.6f} BTC @ ${buy_trade['px']:.2f}, "
+                        f"fee: {buy_trade['fee']} {buy_trade['feeToken']}, "
+                        f"buy_time={buy_trade['time']} < tp_order_time={time_limit}, "
+                        f"sell: {sell_size:.6f} BTC @ ${sell_price:.2f}",
+                        level="INFO"
+                    )
+                    
+                    return buy_trade
+        
+        # Если не нашли точное совпадение, ищем максимально близкую покупку ДО времени выставления TP ордера
+        client.browser.log_message(
+            f"⚠️ No exact match found for sell size {sell_size:.6f} BTC, searching for closest match before time_limit={time_limit}...",
+            level="WARNING"
+        )
+        
+        closest_buy = None
+        min_diff = float('inf')
+        
+        for trade in trades_history:
+            trade_side = trade.get('side', '').upper()
+            trade_time = trade.get('time', 0)
+            
+            if trade_side in ['BUY', 'B']:
+                # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени выставления TP ордера
+                if trade_time >= time_limit:
+                    continue  # Пропускаем покупки, которые были после выставления TP ордера
+                
+                trade_size = float(trade.get('sz', 0))
+                diff = abs(trade_size - sell_size)
+                
+                if diff < min_diff:
+                    min_diff = diff
+                    closest_buy = {
+                        'px': float(trade.get('px', 0)),
+                        'sz': trade_size,
+                        'fee': trade.get('fee', '0'),
+                        'feeToken': trade.get('feeToken', ''),
+                        'time': trade_time,
+                        'oid': trade.get('oid'),
+                        'hash': trade.get('hash', '')
+                    }
+        
+        if closest_buy:
+            client.browser.log_message(
+                f"⚠️ Using closest buy trade: {closest_buy['sz']:.6f} BTC @ ${closest_buy['px']:.2f} "
+                f"(diff: {min_diff:.6f} BTC, buy_time={closest_buy['time']} < tp_order_time={time_limit})",
+                level="WARNING"
+            )
+            return closest_buy
+        
+        client.browser.log_message(
+            f"❌ Could not find matching buy trade for sell size {sell_size:.6f} BTC before time_limit={time_limit}",
+            level="ERROR"
+        )
+        return None
+        
+    except Exception as e:
+        client.browser.log_message(f"Failed to find matching buy trade: {e}", level="ERROR")
+        return None
+
+
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
                                  usdc_balance: float, btc_balance: float, total_value: float):
     """
@@ -819,6 +987,34 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         filled_qty = float(executed_order.get("sz", 0))
                         tp_price = float(executed_order.get("limitPx", 0))
+                        tp_order_id = executed_order.get("oid")
+                        
+                        # Получаем время выставления TP ордера из saved order
+                        # Пробуем разные возможные поля для времени создания
+                        tp_order_time = (
+                            executed_order.get('time') or
+                            executed_order.get('timestamp') or
+                            executed_order.get('createdTime') or
+                            executed_order.get('_saved_time') or
+                            None
+                        )
+                        
+                        if tp_order_time:
+                            client.browser.log_message(
+                                f"🔍 TP order creation time: {tp_order_time} (ms) for oid={tp_order_id}",
+                                level="INFO"
+                            )
+                        else:
+                            client.browser.log_message(
+                                f"⚠️ No creation time found in TP order, will use sell_time from trade history",
+                                level="WARNING"
+                            )
+                        
+                        # Находим связанную покупку для расчета прибыли
+                        # Используем время выставления TP ордера, если доступно
+                        buy_trade = await find_matching_buy_trade(
+                            client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
+                        )
                         
                         # Логируем расчет прибыли через изменение баланса
                         client.browser.log_message(
@@ -865,7 +1061,30 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client._skip_orders_log_after_profit = True
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
-                client._previous_tp_orders = {order.get("oid"): order for order in tp_orders if order.get("oid")}
+                # ВРЕМЕННО: Логируем структуру TP ордера для проверки наличия времени создания
+                if tp_orders and not hasattr(client, '_tp_order_structure_logged'):
+                    import json
+                    client.browser.log_message("=" * 80, level="INFO")
+                    client.browser.log_message("🔍 TEMPORARY: TP Order Structure from Open Orders", level="INFO")
+                    client.browser.log_message("=" * 80, level="INFO")
+                    sample_order = tp_orders[0]
+                    client.browser.log_message("Sample TP order structure:", level="INFO")
+                    client.browser.log_message(json.dumps(sample_order, indent=2, ensure_ascii=False, default=str), level="INFO")
+                    client.browser.log_message("=" * 80, level="INFO")
+                    client._tp_order_structure_logged = True
+                
+                # Сохраняем TP ордера с добавлением времени создания (если доступно)
+                import time
+                current_timestamp = int(time.time() * 1000)  # Текущее время в миллисекундах
+                
+                for order in tp_orders:
+                    oid = order.get("oid")
+                    if oid:
+                        # Если в ордере нет времени создания, добавляем текущее время как fallback
+                        # (это будет время последнего обновления, но лучше чем ничего)
+                        if 'time' not in order and 'timestamp' not in order and 'createdTime' not in order:
+                            order['_saved_time'] = current_timestamp  # Сохраняем время сохранения в кэше
+                        client._previous_tp_orders[oid] = order
                 
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
