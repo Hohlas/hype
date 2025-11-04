@@ -449,12 +449,6 @@ class HyperliquidBrowser:
             # Доступный баланс = общий баланс - зарезервированные средства
             available_balance = total_balance - reserved_usdc
             
-            # Логируем детали для отладки
-            self.log_message(
-                f"💰 Balance check: Total=${total_balance:.2f}, Reserved=${reserved_usdc:.2f}, Available=${available_balance:.2f}",
-                level="DEBUG"
-            )
-            
             return max(0.0, available_balance)  # Не возвращаем отрицательные значения
             
         except Exception as e:
@@ -1094,18 +1088,15 @@ class HyperliquidBrowser:
                     spot_response = await self.send_request("POST", spot_url, data=spot_data, build_signature=False)
                     if spot_response.status == 200:
                         spot_info = await spot_response.json()
-                        self.log_message(f"🔍 DEBUG: Spot clearinghouse info: {spot_info}", level="DEBUG")
                         
                         # Проверим балансы в spot данных
                         if "balances" in spot_info:
                             spot_balances = spot_info["balances"]
-                            self.log_message(f"🔍 DEBUG: Spot balances from clearinghouse: {spot_balances}", level="DEBUG")
                             
                             # Проверим, есть ли USDC баланс
                             for balance in spot_balances:
                                 if balance.get("coin") == "USDC":
                                     usdc_balance = float(balance.get("total", "0"))
-                                    self.log_message(f"🔍 DEBUG: USDC balance from clearinghouse: {usdc_balance}", level="DEBUG")
                                     break
                     else:
                         self.log_message(f"⚠️ WARNING: Failed to get spot clearinghouse info: {spot_response.status}", level="WARNING")
@@ -1116,9 +1107,8 @@ class HyperliquidBrowser:
                 if usdc_balance is None:
                     for balance in spot_balance:
                         if balance.get("coin") == "USDC":
-                            usdc_balance = float(balance.get("total", "0"))
-                            self.log_message(f"🔍 DEBUG: USDC balance from main account: {usdc_balance}", level="DEBUG")
-                            break
+                                    usdc_balance = float(balance.get("total", "0"))
+                                    break
                 
                 # Финальная проверка
                 if usdc_balance is None:
@@ -1134,20 +1124,16 @@ class HyperliquidBrowser:
             
             # Попробуем каждый endpoint с каждым payload
             for endpoint_url in endpoints_to_try:
-                self.log_message(f"🔍 DEBUG: Trying endpoint: {endpoint_url}", level="DEBUG")
                 
                 for i, order_payload in enumerate(payload_variants, 1):
                     try:
-                        self.log_message(f"🔍 DEBUG: Trying payload variant {i}: {order_payload}", level="DEBUG")
                         response = await self.send_request("POST", endpoint_url, data=order_payload, build_signature=True)
                         if response.status == 200:
                             success = True
                             self.log_message(f"✅ SUCCESS: Endpoint {endpoint_url} with payload variant {i} worked!", level="INFO")
                             break
-                        else:
-                            self.log_message(f"❌ Endpoint {endpoint_url} payload variant {i} failed: {response.status}", level="DEBUG")
                     except Exception as e:
-                        self.log_message(f"❌ Endpoint {endpoint_url} payload variant {i} error: {e}", level="DEBUG")
+                        pass
                 
                 if success:
                     break
@@ -1159,16 +1145,14 @@ class HyperliquidBrowser:
                 if response:
                     try:
                         error_text = await response.text()
-                        self.log_message(f"🔍 DEBUG: Last error response: {error_text}", level="DEBUG")
                         
                         # Попробуем получить JSON ошибки
                         try:
                             error_json = await response.json()
-                            self.log_message(f"🔍 DEBUG: Error JSON: {error_json}", level="DEBUG")
                         except:
                             pass
                     except Exception as e:
-                        self.log_message(f"🔍 DEBUG: Failed to get error details: {e}", level="DEBUG")
+                        pass
                 
                 # Проверяем, есть ли USDC баланс (используем данные из clearinghouse)
                 if usdc_balance is None or usdc_balance == 0:
@@ -1185,10 +1169,8 @@ class HyperliquidBrowser:
                 # Пытаемся получить текст ошибки
                 try:
                     error_text = await response.text()
-                    self.log_message(f"🔍 DEBUG: Error response text: {error_text}", level="DEBUG")
                     raise Exception(f'Failed to create order: {response.status}, message=\'{error_text}\'')
                 except Exception as text_error:
-                    self.log_message(f"🔍 DEBUG: Failed to get error text: {text_error}", level="DEBUG")
                     raise Exception(f'Failed to create order: {response.status}')
             
             # Пытаемся парсить JSON и проверить статус
@@ -1427,7 +1409,7 @@ class HyperliquidBrowser:
                     response = await self.send_request("GET", endpoint)
                     self.log_message(f"🔍 Endpoint {endpoint}: {response.status}", level="INFO")
                 except Exception as e:
-                    self.log_message(f"🔍 Endpoint {endpoint}: Error - {e}", level="DEBUG")
+                    self.log_message(f"❌ Endpoint {endpoint}: Error - {e}", level="ERROR")
             
             self.log_message("✅ API diagnosis completed", level="INFO")
             

@@ -88,28 +88,15 @@ class HyperliquidClient:
             for token in tokens:
                 token_name_from_api = token.get("name", "")
                 if token_name_from_api == token_name or token_name_from_api == f"U{token_name}":
-                    # Логируем полную структуру токена для отладки
-                    self.browser.log_message(
-                        f"🔍 DEBUG: Full token data for {token_name_from_api}: {token}",
-                        level="DEBUG"
-                    )
-                    
                     # Получаем минимальный размер из метаданных токена
                     meta = token.get("meta", {})
                     if isinstance(meta, dict):
-                        # Логируем все доступные поля в meta
-                        self.browser.log_message(
-                            f"🔍 DEBUG: Meta fields: {list(meta.keys())}",
-                            level="DEBUG"
-                        )
-                        
                         # Пробуем разные возможные поля для минимального размера
                         min_qty = None
                         for field in ["minSz", "minSize", "min_qty", "minQuantity", "szDecimals"]:
                             if field in meta:
                                 try:
                                     min_qty = float(meta[field])
-                                    self.browser.log_message(f"🔍 DEBUG: Found {field}={min_qty}", level="DEBUG")
                                     break
                                 except:
                                     continue
@@ -117,18 +104,11 @@ class HyperliquidClient:
                         # Если не нашли минимальный размер, используем очень маленькое значение
                         if min_qty is None:
                             min_qty = 0.0001  # Очень маленькое значение
-                            self.browser.log_message(f"🔍 DEBUG: No min size found, using {min_qty}", level="DEBUG")
                         
-                        # ВРЕМЕННО: Устанавливаем очень маленькое значение для тестирования
+                        # Устанавливаем очень маленькое значение для тестирования
                         min_qty = 0.0001
-                        self.browser.log_message(f"🔍 DEBUG: TEMPORARY: Overriding min_qty to {min_qty} for testing", level="DEBUG")
                         
                         min_notional = float(meta.get("minNotional", "5.0"))  # Минимальная номинальная стоимость
-                        
-                        # self.browser.log_message(
-                        #     f"📏 Token limits from API: {token_name_from_api} - MinQty={min_qty}, MinNotional=${min_notional}",
-                        #     level="INFO"
-                        # )
                         
                         return min_qty, min_notional
             

@@ -51,7 +51,7 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
         async with sem:
             hyperliquid_client = None
             try:
-                logger.info(f'[•] DEBUG: Starting run_modules for {module_data["label"]}')
+                logger.info(f'[•] Starting run_modules for {module_data["label"]}')
                 hyperliquid_client = initialize_account(module_data)
                 logger.opt(colors=True).info(f'[•] <white>{hyperliquid_client.label}</white> | Starting trading...')
                 module_data["module_info"]["status"] = await hyperliquid_client.run_mode(mode=mode)
@@ -180,7 +180,6 @@ async def runner(mode: int):
 
     else:
         all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
-        logger.debug(f"get_all_modules returned: {type(all_modules)}, value: {all_modules}")
         
         if all_modules == 'No more accounts left':
             logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")

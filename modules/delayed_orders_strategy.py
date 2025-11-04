@@ -240,8 +240,6 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Сохраняем в Excel файл
         df.to_excel(stats_file, index=False)
         
-        client.browser.log_message(f"📊 Statistics logged: {operation} | {btc_amount:.6f}BTC @ ${price:.2f}", level="DEBUG")
-        
     except Exception as e:
         client.browser.log_message(f"Failed to log statistics: {e}", level="ERROR")
 
@@ -276,13 +274,6 @@ async def check_minimum_order_size(client, token_name: str, usdc_amount: float, 
         
         # Рассчитываем количество токенов
         token_qty = usdc_amount / token_price
-        
-        # Логируем детали расчета для отладки
-        client.browser.log_message(
-            f"🔍 Order size check: Price=${token_price:.2f}, Amount=${usdc_amount:.2f}, "
-            f"Qty={token_qty:.6f}, MinQty={min_qty:.6f}, MinNotional=${min_notional:.2f}",
-            level="DEBUG"
-        )
         
         # Проверяем минимальное количество
         if token_qty < min_qty:
@@ -354,7 +345,7 @@ async def safe_place_order(client, **kwargs):
                 )
                 
             except Exception as log_err:
-                client.browser.log_message(f"Failed to log order details: {log_err}", level="DEBUG")
+                pass
         
         # Удаляем дополнительные параметры перед передачей в place_order
         order_kwargs = kwargs.copy()
@@ -372,10 +363,6 @@ async def safe_place_order(client, **kwargs):
         # Ловим ВСЕ ошибки для отладки
         error_msg = str(e)
         error_type = type(e).__name__
-        
-        # Логируем саму ошибку для отладки (не чаще раза в 5 минут)
-        if can_log_warning_message(client.label, "order_error_debug"):
-            client.browser.log_message(f"🔍 Order error caught ({error_type}): {error_msg}", level="DEBUG")
         
         # Недостаточно средств - просто ждём освобождения средств
         if 'insufficient' in error_msg.lower() or 'balance' in error_msg.lower():
@@ -423,7 +410,7 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
                 success=True
             )
     except Exception as e:
-        client.browser.log_message(f"Failed to send Telegram notification: {e}", level="DEBUG")
+        pass
 
 
 async def create_tp_order(client, token_name: str, entry_price: Decimal, order_qty: Decimal, step: Decimal):
@@ -568,12 +555,6 @@ async def create_stop_market_order(client, token_name: str, stop_price: float, u
     try:
         current_calculation_balance = float(await client.browser.get_balance())
         
-        # Логируем попытку создания стоп-маркет ордера
-        client.browser.log_message(
-            f"🔍 DEBUG: Attempting to create STOP_MARKET order at ${stop_price:.2f}",
-            level="DEBUG"
-        )
-        
         success, order_result = await safe_place_order(
             client,
             token=token_name,
@@ -585,12 +566,6 @@ async def create_stop_market_order(client, token_name: str, stop_price: float, u
             min_notional=min_notional,
             operation_type="Stop Market Breakout",
             stop_price=stop_price  # Цена активации стоп-ордера
-        )
-        
-        # Логируем результат
-        client.browser.log_message(
-            f"🔍 DEBUG: STOP_MARKET order result: success={success}, result={order_result}",
-            level="DEBUG"
         )
         
         if success and order_result:
@@ -1203,11 +1178,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             order_type="LIMIT",
                             price=tp_price,
                             usdc_amount=usdc_amount
-                        )
-                    else:
-                        client.browser.log_message(
-                            f"⚠️ No averaging needed - current ${current_price:.2f} >= trigger ${trigger_level:.2f}",
-                            level="DEBUG"
                         )
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2

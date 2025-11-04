@@ -26,11 +26,6 @@ def _get_tg_tokens():
     """Кэшированная загрузка токенов из файла"""
     if not hasattr(_get_tg_tokens, '_cached'):
         _get_tg_tokens._cached = load_tg_tokens_from_file()
-        # Логируем загруженные токены (скрывая чувствительные данные)
-        tokens = _get_tg_tokens._cached
-        logger.debug(f"Loaded TG tokens: TG_BOT_TOKEN={'***' if tokens.get('TG_BOT_TOKEN') else 'None'}, "
-                     f"PROFIT_BOT_TOKEN={'***' if tokens.get('PROFIT_BOT_TOKEN') else 'None'}, "
-                     f"TG_USER_ID={'***' if tokens.get('TG_USER_ID') else 'None'}")
     return _get_tg_tokens._cached
 
 
@@ -72,8 +67,6 @@ class TgReport:
                 logger.warning(f"TG_USER_ID not configured properly (value: '{self.chat_id}'). Check input_data/tg_bot_tokens.txt file.")
                 return
             
-            logger.debug(f"Attempting to send Telegram message to chat_id: {self.chat_id}")
-            
             # Очищаем текст от потенциально проблемных символов
             clean_logs = logs.strip()
             
@@ -88,9 +81,7 @@ class TgReport:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data) as response:
-                    if response.status == 200:
-                        logger.debug("Telegram message sent successfully")
-                    else:
+                    if response.status != 200:
                         response_text = await response.text()
                         if response.status == 401:
                             logger.error(f"Failed to send Telegram message: Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
