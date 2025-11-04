@@ -644,6 +644,83 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
+        # ВРЕМЕННЫЙ КОД: Диагностика Trade History для поиска информации о комиссиях
+        try:
+            import json
+            client.browser.log_message("=" * 80, level="INFO")
+            client.browser.log_message("🔍 TEMPORARY: Trade History Diagnostics", level="INFO")
+            client.browser.log_message("=" * 80, level="INFO")
+            
+            # Получаем историю сделок и сырой ответ API
+            trades_history, raw_api_response = await client.browser.get_all_orders_history_with_raw(token_name, limit=5)
+            
+            # Выводим сырой ответ API
+            client.browser.log_message("📡 RAW API Response (userFillsByTime):", level="INFO")
+            client.browser.log_message(json.dumps(raw_api_response, indent=2, ensure_ascii=False), level="INFO")
+            client.browser.log_message("", level="INFO")
+            
+            # Выводим последние 5 сделок от самой новой к более старым
+            if trades_history:
+                client.browser.log_message(f"📈 Trade History (Last {len(trades_history)} trades, newest first):", level="INFO")
+                for i, trade in enumerate(trades_history[:5], 1):
+                    client.browser.log_message(f"\n--- Trade #{i} ---", level="INFO")
+                    
+                    # Выводим все доступные поля
+                    for key, value in trade.items():
+                        client.browser.log_message(f"  {key}: {value}", level="INFO")
+                    
+                    # Дополнительный анализ комиссий
+                    if 'px' in trade and 'sz' in trade:
+                        price = float(trade.get('px', 0))
+                        size = float(trade.get('sz', 0))
+                        side = trade.get('side', 'UNKNOWN')
+                        trade_value = price * size
+                        
+                        client.browser.log_message(f"\n  Calculated values:", level="INFO")
+                        client.browser.log_message(f"    Price: ${price:.2f}", level="INFO")
+                        client.browser.log_message(f"    Size: {size:.8f} BTC", level="INFO")
+                        client.browser.log_message(f"    Trade Value: ${trade_value:.2f}", level="INFO")
+                        client.browser.log_message(f"    Side: {side}", level="INFO")
+                        
+                        # Ищем поля, связанные с комиссией
+                        fee_fields = [k for k in trade.keys() if 'fee' in k.lower() or 'commission' in k.lower() or 'cost' in k.lower()]
+                        if fee_fields:
+                            client.browser.log_message(f"    ⚠️ Fee-related fields found: {fee_fields}", level="INFO")
+                            for fee_field in fee_fields:
+                                fee_value = trade.get(fee_field)
+                                if fee_value:
+                                    try:
+                                        fee_float = float(fee_value)
+                                        # Для BUY комиссия в BTC, для SELL комиссия в USDC
+                                        if side in ['BUY', 'B']:
+                                            # Комиссия в BTC, считаем процент от размера сделки
+                                            fee_percent = (fee_float / size) * 100 if size > 0 else 0
+                                            client.browser.log_message(f"      {fee_field}: {fee_value} BTC ({fee_percent:.6f}% of size)", level="INFO")
+                                        else:
+                                            # Комиссия в USDC, считаем процент от стоимости сделки
+                                            fee_percent = (fee_float / trade_value) * 100 if trade_value > 0 else 0
+                                            client.browser.log_message(f"      {fee_field}: {fee_value} USDC ({fee_percent:.6f}% of trade value)", level="INFO")
+                                    except:
+                                        client.browser.log_message(f"      {fee_field}: {fee_value}", level="INFO")
+                        else:
+                            client.browser.log_message(f"    ❌ No fee-related fields found in trade data", level="INFO")
+                        
+                        # Пример расчета комиссии из веб-терминала:
+                        # Покупка: 0,0000000672 BTC от 0,00010 BTC = (0.0000000672 / 0.00010) * 100 = 0.0672%
+                        # Продажа: 0,00 USDC (комиссия может быть 0 для определенных типов сделок)
+                        if side in ['BUY', 'B']:
+                            example_fee_btc = 0.0000000672
+                            example_size = 0.00010
+                            example_fee_percent = (example_fee_btc / example_size) * 100
+                            client.browser.log_message(f"    📊 Example from web terminal: {example_fee_btc} BTC fee on {example_size} BTC = {example_fee_percent:.4f}%", level="INFO")
+            else:
+                client.browser.log_message("⚠️ No trade history found", level="INFO")
+            
+            client.browser.log_message("=" * 80, level="INFO")
+            client.browser.log_message("", level="INFO")
+        except Exception as e:
+            client.browser.log_message(f"❌ Failed to get trade history diagnostics: {e}", level="ERROR")
+        
         # Тестируем функцию расчета прибыли при запуске (закомментировано - используем расчет через баланс)
         # client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
         # test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
@@ -772,6 +849,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Дублируем сообщение о профите в PROFIT_BOT_TOKEN
                         await send_profit_notification(profit_message)
+                        
+                        # Устанавливаем флаг, чтобы пропустить вывод списка ордеров после профита
+                        if not hasattr(client, '_skip_orders_log_after_profit'):
+                            client._skip_orders_log_after_profit = False
+                        client._skip_orders_log_after_profit = True
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
                 client._previous_tp_orders = {order.get("oid"): order for order in tp_orders if order.get("oid")}
@@ -852,8 +934,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 balance_changed = (previous_balance_state is None or 
                                  previous_balance_state != current_balance_state)
                 
-                # Выводим логи только при изменении
-                if orders_changed or balance_changed:
+                # Выводим логи только при изменении, но пропускаем вывод после профита
+                # Сбрасываем флаг пропуска в начале проверки (если он был установлен ранее)
+                skip_orders_this_iteration = getattr(client, '_skip_orders_log_after_profit', False)
+                if skip_orders_this_iteration:
+                    client._skip_orders_log_after_profit = False  # Сбрасываем флаг на следующей итерации
+                
+                if (orders_changed or balance_changed) and not skip_orders_this_iteration:
                     orders_info = []
                     orders_info.append(f"📋 Open Orders ({len(open_orders)} total):")
                     

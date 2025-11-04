@@ -1317,6 +1317,83 @@ class HyperliquidBrowser:
             # Логируем ошибку, но не прерываем работу бота
             self.log_message(f"Failed to get orders history: {e}", level="ERROR")
             return []
+    
+    async def get_all_orders_history_with_raw(self, token_name: str, limit: int = 500):
+        """
+        Получение истории всех ордеров для токена + сырой ответ API
+        Возвращает tuple: (filtered_orders, raw_api_response)
+        """
+        try:
+            url = f"{self.BASE_URL}/info"
+            
+            # Используем правильный endpoint согласно документации
+            import time
+            current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
+            start_time = current_time - (30 * 24 * 60 * 60 * 1000)  # 30 дней назад
+            
+            data = {
+                "type": "userFillsByTime",  # Правильный тип согласно документации
+                "user": self.wallet_address,
+                "startTime": start_time,
+                "endTime": current_time
+            }
+            
+            response = await self.send_request("POST", url, data=data)
+            
+            # Проверяем content-type перед парсингом
+            content_type = response.headers.get('Content-Type', '')
+            
+            # Пытаемся парсить JSON независимо от content-type
+            try:
+                result = await response.json()
+            except Exception as json_error:
+                # Если не удалось парсить как JSON, пробуем как текст
+                response_text = await response.text()
+                
+                # Если ответ пустой, возвращаем пустой список (без логов)
+                if not response_text.strip():
+                    return [], []
+                
+                # Пытаемся парсить как JSON без предупреждений
+                try:
+                    import json
+                    result = json.loads(response_text)
+                except Exception as parse_error:
+                    # Тихо возвращаем пустой список без ошибок
+                    return [], []
+            
+            if response.status != 200:
+                raise Exception(f'Failed to get orders history: {result}')
+            
+            # Сохраняем сырой ответ для диагностики
+            raw_response = result.copy() if isinstance(result, list) else result
+            
+            # Фильтруем ордера по токену
+            filtered_orders = []
+            
+            # Маппинг токенов для поиска ордеров
+            token_mapping = {
+                "BTC": "@142",
+                "ETH": "@2", 
+                "USDC": "@1",
+                "UBTC": "@142"  # UBTC тоже использует @142
+            }
+            
+            # Получаем asset ID для токена
+            asset_id = token_mapping.get(token_name, token_name)
+            
+            for trade in result:
+                # Проверяем разные возможные поля для токена
+                coin = trade.get("coin") or trade.get("asset") or trade.get("symbol")
+                if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
+                    filtered_orders.append(trade)
+                    
+            return filtered_orders[:limit], raw_response
+            
+        except Exception as e:
+            # Логируем ошибку, но не прерываем работу бота
+            self.log_message(f"Failed to get orders history: {e}", level="ERROR")
+            return [], {}
             
     async def diagnose_api_structure(self):
         """
