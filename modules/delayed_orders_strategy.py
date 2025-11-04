@@ -32,7 +32,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import asyncio
-from .utils import round_cut, async_sleep, TgReport, send_warning_notification
+from .utils import round_cut, async_sleep, TgReport, send_warning_notification, send_profit_notification
 from .retry import CustomError
 import settings
 
@@ -788,11 +788,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         )
                         
                         # Отправляем уведомление в Telegram согласно требованиям
+                        profit_message = f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}'
                         await send_tg_notification(
                             client,
-                            text=f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}',
+                            text=profit_message,
                             save_to_report=False
                         )
+                        
+                        # Дублируем сообщение о профите в PROFIT_BOT_TOKEN
+                        await send_profit_notification(profit_message)
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
                 client._previous_tp_orders = {order.get("oid"): order for order in tp_orders if order.get("oid")}

@@ -67,3 +67,6 @@ postgres_data/
 temp/
 tmp/
 *.tmp
+
+# private
+input_data/*

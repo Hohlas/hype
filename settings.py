@@ -1,12 +1,5 @@
 # Hyperliquid Bot Settings
 
-# Telegram Bot Configuration
-# Создайте бота через @BotFather в Telegram и получите токен
-TG_BOT_TOKEN = "12345:AABBCC"  # Токен от @BotFather
-TG_CHAT_ID = "12345"      # ID вашего чата (можно получить через @userinfobot)
-WARNING_BOT_TOKEN = "12345:AABBCC"  # Отдельный бот для критических уведомлений
-WARNING_CHAT_ID = "12345"      # ID чата для критических уведомлений
-
 # Hyperliquid API Configuration
 HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"        # Основной API
 HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестовая сеть
