@@ -283,12 +283,18 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             return None
         
         # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
-        # ИСПРАВЛЕНИЕ: ищем самую ПОСЛЕДНЮЮ покупку перед TP ордером (ближайшую к времени TP),
-        # а не первую попавшуюся, чтобы не брать старые покупки
-        # Увеличиваем tolerance для учета небольших расхождений при округлении
-        tolerance = 0.0001  # Допустимое отклонение размера (увеличено для большей гибкости)
-        max_age_days = 30  # Максимальный возраст покупки относительно TP ордера (увеличено до 30 дней)
-        max_age_ms = max_age_days * 24 * 60 * 60 * 1000  # Преобразуем в миллисекунды
+        # КРИТИЧНО: TP ордер создается СРАЗУ после покупки (задержка несколько секунд/минут)
+        # Поэтому ищем покупку в небольшом временном окне ДО времени создания TP ордера
+        tolerance = 0.00001  # Допустимое отклонение размера (строгое сопоставление)
+        max_time_diff_minutes = 5  # Максимальная разница между покупкой и созданием TP ордера (в минутах)
+        # TP ордер создается СРАЗУ после покупки, задержка обычно несколько секунд
+        max_time_diff_ms = max_time_diff_minutes * 60 * 1000  # Преобразуем в миллисекунды
+        
+        client.browser.log_message(
+            f"🔍 Search criteria: Sell size: {sell_size:.6f} BTC, Tolerance: {tolerance:.6f}, "
+            f"Max time diff: {max_time_diff_minutes} minutes (TP order created immediately after buy)",
+            level="INFO"
+        )
         
         # Отладочное логирование: выводим все покупки для анализа
         from datetime import datetime
@@ -318,13 +324,15 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                 })
                 
                 # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени СОЗДАНИЯ TP ордера
-                # TP ордер создается сразу после покупки, поэтому покупка должна быть до времени создания TP
+                # TP ордер создается сразу после покупки (задержка несколько секунд/минут)
                 if trade_time >= time_limit:
                     continue  # Пропускаем покупки, которые были после создания TP ордера
                 
-                # Ограничиваем поиск покупками за последние N дней от времени TP ордера
-                if time_limit - trade_time > max_age_ms:
-                    continue  # Пропускаем покупки старше max_age_days дней
+                # КРИТИЧНО: Покупка должна быть в небольшом временном окне ДО создания TP ордера
+                # Разница не должна превышать max_time_diff_minutes минут
+                time_diff_ms = time_limit - trade_time
+                if time_diff_ms > max_time_diff_ms:
+                    continue  # Пропускаем покупки, которые были слишком давно (больше max_time_diff_minutes минут назад)
                 
                 # Проверяем соответствие размера (с учетом допуска)
                 if abs(trade_size - sell_size) <= tolerance:
@@ -410,18 +418,28 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             tp_datetime = datetime.fromtimestamp(time_limit / 1000)
             time_diff_ms = time_limit - buy_trade['time']
             time_diff_sec = time_diff_ms / 1000
+            time_diff_min = time_diff_sec / 60
+            
+            # Проверка: если разница больше нескольких минут, это подозрительно
+            if time_diff_min > 5:
+                client.browser.log_message(
+                    f"⚠️ WARNING: Time difference is {time_diff_min:.1f} minutes! "
+                    f"Expected: few seconds/minutes. This may indicate wrong buy trade match!",
+                    level="WARNING"
+                )
             
             client.browser.log_message(
                 f"⏱️ Time comparison: Buy at {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
                 f"TP created at {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"Difference: {time_diff_sec:.1f} seconds",
+                f"Difference: {time_diff_sec:.1f} seconds ({time_diff_min:.2f} minutes)",
                 level="INFO"
             )
             
             return buy_trade
         
         # Если не нашли точное совпадение, ищем максимально близкую покупку ДО времени выставления TP ордера
-        # Также ограничиваем поиск покупками за последние 30 дней от времени TP ордера
+        # ВАЖНО: При поиске ближайшей покупки предпочитаем покупки с размером >= размера продажи
+        # или очень близким к нему (разница не более 10%)
         from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
@@ -431,6 +449,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         
         closest_buy = None
         min_diff = float('inf')
+        closest_buy_preferred = None  # Предпочтительная покупка (размер >= размера продажи или очень близок)
+        min_diff_preferred = float('inf')
         
         # Отладочная информация: сколько покупок найдено в истории
         buy_count = 0
@@ -444,20 +464,37 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                 buy_count += 1
                 
                 # КРИТИЧНО: Время покупки должно быть МЕНЬШЕ времени СОЗДАНИЯ TP ордера
-                # TP ордер создается сразу после покупки, поэтому покупка должна быть до времени создания TP
+                # TP ордер создается сразу после покупки (задержка несколько секунд/минут)
                 if trade_time >= time_limit:
                     continue  # Пропускаем покупки, которые были после создания TP ордера
                 
                 buy_before_tp_count += 1
                 
-                # Ограничиваем поиск покупками за последние N дней от времени TP ордера
-                if time_limit - trade_time > max_age_ms:
-                    continue  # Пропускаем покупки старше max_age_days дней
+                # КРИТИЧНО: Покупка должна быть в небольшом временном окне ДО создания TP ордера
+                # Разница не должна превышать max_time_diff_minutes минут
+                time_diff_ms = time_limit - trade_time
+                if time_diff_ms > max_time_diff_ms:
+                    continue  # Пропускаем покупки, которые были слишком давно (больше max_time_diff_minutes минут назад)
                 
                 trade_size = float(trade.get('sz', 0))
                 diff = abs(trade_size - sell_size)
                 
-                if diff < min_diff:
+                # Предпочитаем покупки с размером >= размера продажи или очень близкие (разница <= 10%)
+                size_ratio = trade_size / sell_size if sell_size > 0 else 0
+                is_preferred = trade_size >= sell_size or (size_ratio >= 0.9 and size_ratio <= 1.1)
+                
+                if is_preferred and diff < min_diff_preferred:
+                    min_diff_preferred = diff
+                    closest_buy_preferred = {
+                        'px': float(trade.get('px', 0)),
+                        'sz': trade_size,
+                        'fee': trade.get('fee', '0'),
+                        'feeToken': trade.get('feeToken', ''),
+                        'time': trade_time,
+                        'oid': trade.get('oid'),
+                        'hash': trade.get('hash', '')
+                    }
+                elif diff < min_diff:
                     min_diff = diff
                     closest_buy = {
                         'px': float(trade.get('px', 0)),
@@ -468,6 +505,16 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                         'oid': trade.get('oid'),
                         'hash': trade.get('hash', '')
                     }
+        
+        # Используем предпочтительную покупку, если она найдена
+        if closest_buy_preferred:
+            closest_buy = closest_buy_preferred
+            min_diff = min_diff_preferred
+            client.browser.log_message(
+                f"✅ Found preferred buy (size >= sell or within 10%): {closest_buy['sz']:.6f} BTC "
+                f"(diff: {min_diff:.6f} BTC, {min_diff/sell_size*100:.1f}%)",
+                level="INFO"
+            )
         
         # Логируем отладочную информацию
         if buy_count == 0:
@@ -485,11 +532,22 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             from datetime import datetime
             buy_datetime = datetime.fromtimestamp(closest_buy['time'] / 1000)
             tp_datetime = datetime.fromtimestamp(time_limit / 1000)
+            size_diff_pct = (min_diff / sell_size * 100) if sell_size > 0 else 0
+            
             client.browser.log_message(
-                f"⚠️ Using closest buy trade: {closest_buy['sz']:.6f} BTC @ ${closest_buy['px']:.2f} "
-                f"(diff: {min_diff:.6f} BTC)",
+                f"⚠️ Using closest buy trade (NO EXACT MATCH): {closest_buy['sz']:.6f} BTC @ ${closest_buy['px']:.2f} | "
+                f"Size diff: {min_diff:.6f} BTC ({size_diff_pct:.1f}%)",
                 level="WARNING"
             )
+            
+            # Предупреждение, если размер покупки сильно отличается от размера продажи
+            if closest_buy['sz'] < sell_size * 0.9 or closest_buy['sz'] > sell_size * 1.1:
+                client.browser.log_message(
+                    f"⚠️ WARNING: Buy size ({closest_buy['sz']:.6f} BTC) differs significantly from sell size ({sell_size:.6f} BTC)! "
+                    f"Profit calculation may be inaccurate!",
+                    level="WARNING"
+                )
+            
             client.browser.log_message(
                 f"📅 Buy trade: {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
                 f"TP order: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
