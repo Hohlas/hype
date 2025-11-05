@@ -226,16 +226,31 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             level="INFO"
         )
         
+        # ОПИСАНИЕ АЛГОРИТМА ПОИСКА ПОКУПКИ:
+        # 1. Используем время СОЗДАНИЯ TP ордера из Open Orders как верхнюю границу
+        #    TP ордер создается СРАЗУ ПОСЛЕ покупки, поэтому покупка должна быть ДО времени создания TP
+        # 2. Ищем покупки (BUY) в истории сделок, которые:
+        #    - Время покупки < время создания TP ордера (trade_time < tp_order_time)
+        #    - Размер покупки совпадает с размером продажи (с допуском tolerance = 0.0001)
+        #    - Не старше 30 дней от времени TP ордера
+        # 3. Если найдено несколько подходящих покупок, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP)
+        #    Это гарантирует правильное сопоставление даже при множественных покупках лесенкой
+        # 4. Если точного совпадения нет, ищем ближайшую по размеру покупку
+        
+        from datetime import datetime
+        
         # Определяем верхнюю границу времени для поиска покупки
-        # ИСПРАВЛЕНИЕ: Используем время СОЗДАНИЯ TP ордера из Open Orders,
-        # потому что TP ордер создается СРАЗУ ПОСЛЕ покупки.
-        # Покупка должна быть ДО времени создания TP ордера (её время < tp_order_time)
-        # Время исполнения TP ордера может быть намного позже и не имеет значения для поиска покупки
         time_limit = None
         
         if tp_order_time:
             # Используем время СОЗДАНИЯ TP ордера из Open Orders - это правильная верхняя граница
             time_limit = tp_order_time
+            tp_datetime_readable = datetime.fromtimestamp(tp_order_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            client.browser.log_message(
+                f"🔍 Search algorithm: Using TP order creation time as upper limit: "
+                f"{tp_datetime_readable} (timestamp: {tp_order_time})",
+                level="INFO"
+            )
         else:
             # Fallback: если время создания TP ордера не найдено, используем время исполнения продажи
             sell_trade = None
@@ -329,15 +344,49 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                 f"🔍 Found {len(buy_trades_for_debug)} BUY trades in history. TP order time: {tp_datetime_str}",
                 level="INFO"
             )
-            # Показываем последние 5 покупок
-            for i, buy_info in enumerate(buy_trades_for_debug[:5]):
-                status = "✅" if buy_info['before_tp'] and buy_info['size_match'] else "❌"
+            
+            # Подсчитываем статистику
+            matching_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['size_match'])
+            before_tp_count = sum(1 for b in buy_trades_for_debug if b['before_tp'])
+            
+            client.browser.log_message(
+                f"📊 Statistics: {before_tp_count} buys before TP time, "
+                f"{matching_count} buys match both time and size criteria",
+                level="INFO"
+            )
+            
+            # Показываем все покупки, которые были до TP и имеют правильный размер
+            matching_buys_for_log = [b for b in buy_trades_for_debug if b['before_tp'] and b['size_match']]
+            if matching_buys_for_log:
                 client.browser.log_message(
-                    f"  {status} Buy {i+1}: {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
-                    f"Price: ${buy_info['price']:.2f} | Before TP: {buy_info['before_tp']} | "
-                    f"Size match: {buy_info['size_match']}",
+                    f"✅ MATCHING BUYS (before TP + size match):",
                     level="INFO"
                 )
+                for i, buy_info in enumerate(matching_buys_for_log):
+                    client.browser.log_message(
+                        f"  {i+1}. {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
+                        f"Price: ${buy_info['price']:.2f}",
+                        level="INFO"
+                    )
+            else:
+                # Показываем последние 5 покупок для анализа
+                client.browser.log_message(
+                    f"⚠️ No matching buys found. Showing last 5 BUY trades:",
+                    level="INFO"
+                )
+                for i, buy_info in enumerate(buy_trades_for_debug[:5]):
+                    status = "✅" if buy_info['before_tp'] and buy_info['size_match'] else "❌"
+                    reason = []
+                    if not buy_info['before_tp']:
+                        reason.append("after TP")
+                    if not buy_info['size_match']:
+                        reason.append(f"size diff: {abs(buy_info['size'] - sell_size):.6f}")
+                    reason_str = f" ({', '.join(reason)})" if reason else ""
+                    client.browser.log_message(
+                        f"  {status} Buy {i+1}: {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
+                        f"Price: ${buy_info['price']:.2f}{reason_str}",
+                        level="INFO"
+                    )
         
         # Если нашли подходящие покупки, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP ордера)
         if matching_buys:
@@ -346,19 +395,26 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             buy_trade = matching_buys[0]
             
             client.browser.log_message(
-                f"✅ Found matching buy trade: {buy_trade['sz']:.6f} BTC @ ${buy_trade['px']:.2f}, "
-                f"fee: {buy_trade['fee']} {buy_trade['feeToken']}, "
-                f"sell: {sell_size:.6f} BTC @ ${sell_price:.2f}",
+                f"✅ SELECTED BUY TRADE (closest to TP time):",
+                level="INFO"
+            )
+            client.browser.log_message(
+                f"  Size: {buy_trade['sz']:.6f} BTC | Price: ${buy_trade['px']:.2f} | "
+                f"Fee: {buy_trade['fee']} {buy_trade['feeToken']} | "
+                f"Time: {datetime.fromtimestamp(buy_trade['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}",
                 level="INFO"
             )
             
             # Логируем время покупки и TP ордера в читаемом формате для проверки с веб-терминалом
-            from datetime import datetime
             buy_datetime = datetime.fromtimestamp(buy_trade['time'] / 1000)
             tp_datetime = datetime.fromtimestamp(time_limit / 1000)
+            time_diff_ms = time_limit - buy_trade['time']
+            time_diff_sec = time_diff_ms / 1000
+            
             client.browser.log_message(
-                f"📅 Buy trade: {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"TP order: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"⏱️ Time comparison: Buy at {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"TP created at {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"Difference: {time_diff_sec:.1f} seconds",
                 level="INFO"
             )
             
@@ -1022,12 +1078,23 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Находим связанную покупку для расчета прибыли
                                 # Используем время выставления TP ордера, если доступно
+                                client.browser.log_message(
+                                    f"🔍 Starting buy trade search for TP order ID: {tp_order_id}, "
+                                    f"sell size: {filled_qty:.6f} BTC @ ${tp_price:.2f}",
+                                    level="INFO"
+                                )
+                                
                                 buy_trade = await find_matching_buy_trade(
                                     client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
                                 )
                                 
                                 # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
                                 if buy_trade:
+                                    client.browser.log_message(
+                                        f"✅ MATCHED BUY TRADE FOUND: {buy_trade['sz']:.6f} BTC @ ${buy_trade['px']:.2f} "
+                                        f"(time: {datetime.fromtimestamp(buy_trade['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')})",
+                                        level="INFO"
+                                    )
                                     buy_price = buy_trade['px']
                                     buy_size = buy_trade['sz']
                                     
@@ -1059,24 +1126,49 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     sell_fee_usdc = float(sell_fee_str) * tp_price
                                                 break
                                     
-                                    # Расчет прибыли:
-                                    # Выручка от продажи = количество * цена продажи - комиссия продажи
-                                    sell_revenue = filled_qty * tp_price - sell_fee_usdc
+                                    # ДЕТАЛЬНЫЙ РАСЧЕТ ПРИБЫЛИ
+                                    client.browser.log_message(
+                                        f"📊 DETAILED PROFIT CALCULATION:",
+                                        level="INFO"
+                                    )
                                     
-                                    # Затраты на покупку = количество * цена покупки + комиссия покупки
-                                    buy_cost = buy_size * buy_price + buy_fee_usdc
+                                    # Расчет выручки от продажи
+                                    sell_total = filled_qty * tp_price
+                                    sell_revenue = sell_total - sell_fee_usdc
+                                    
+                                    client.browser.log_message(
+                                        f"  💵 SELL: {filled_qty:.6f} BTC × ${tp_price:.2f} = ${sell_total:.2f} "
+                                        f"| Fee: ${sell_fee_usdc:.4f} ({sell_fee_token}) | "
+                                        f"Net revenue: ${sell_revenue:.2f}",
+                                        level="INFO"
+                                    )
+                                    
+                                    # Расчет затрат на покупку
+                                    buy_total = buy_size * buy_price
+                                    buy_cost = buy_total + buy_fee_usdc
+                                    
+                                    client.browser.log_message(
+                                        f"  💵 BUY: {buy_size:.6f} BTC × ${buy_price:.2f} = ${buy_total:.2f} "
+                                        f"| Fee: ${buy_fee_usdc:.4f} ({buy_fee_token}) | "
+                                        f"Total cost: ${buy_cost:.2f}",
+                                        level="INFO"
+                                    )
                                     
                                     # Чистая прибыль = выручка - затраты
                                     profit = sell_revenue - buy_cost
                                     
                                     client.browser.log_message(
-                                        f"💰 Profit calculation: Sold {filled_qty:.6f}BTC @ ${tp_price:.2f} = ${filled_qty * tp_price:.2f} "
-                                        f"(fee: ${sell_fee_usdc:.4f}), "
-                                        f"Bought {buy_size:.6f}BTC @ ${buy_price:.2f} = ${buy_size * buy_price:.2f} "
-                                        f"(fee: ${buy_fee_usdc:.4f}), "
-                                        f"Net profit: ${profit:.2f}",
+                                        f"  💰 PROFIT: ${sell_revenue:.2f} (revenue) - ${buy_cost:.2f} (cost) = ${profit:.2f}",
                                         level="INFO"
                                     )
+                                    
+                                    # Проверка на аномально большой профит
+                                    if profit > filled_qty * float(settings.STEP) * 2:
+                                        client.browser.log_message(
+                                            f"⚠️ WARNING: Profit ${profit:.2f} seems unusually high! "
+                                            f"Expected max ~${filled_qty * float(settings.STEP):.2f} (STEP × size)",
+                                            level="WARNING"
+                                        )
                                 else:
                                     # Если не нашли связанную покупку, используем упрощенный расчет
                                     # (fallback на случай, если не удалось найти покупку)
