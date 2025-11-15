@@ -69,8 +69,14 @@ tmp/
 *.tmp
 
 # private
-<<<<<<< HEAD
 input_data/*
-=======
-input_data/*
->>>>>>> 446af73bbaa94a43a48d504f8e6c790241ff09b4
+!input_data/.gitkeep
+
+# Statistics folder
+stat/*
+
+# Encrypted database
+databases/
+
+# workspace
+*.code-workspace

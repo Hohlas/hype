@@ -25,7 +25,7 @@ def choose_mode() -> Mode:
         Mode("module", 0, "Averaging Market", "Spot торговля с усреднением позиций"),
         Mode("module", 4, "Cancel Orders", "Отмена всех ордеров"),
         Mode("module", 5, "Parse", "Диагностика: просмотр баланса, позиций и ордеров"),
-        Mode("database", 0, "Create Database", "Создание базы данных"),
+        Mode("", -1, "(Re)Create Database", "Создание/пересоздание зашифрованной базы данных"),
         Mode("exit", 0, "Exit", "Выход из программы"),
     ]
     
@@ -34,7 +34,7 @@ def choose_mode() -> Mode:
     print("="*60)
     
     for i, mode in enumerate(modes, 1):
-        status = "✅" if mode.type == "module" and mode.soft_id in [0, 4, 5] else "❌" if mode.type == "module" else "📊"
+        status = "✅" if mode.type == "module" and mode.soft_id in [0, 4, 5] else "❌" if mode.type == "module" else "📊" if mode.type == "database" else "🔐" if mode.soft_id == -1 else "🚪"
         print(f"{i:2d}. {status} {mode.name}")
         print(f"    {mode.description}")
         print()
@@ -50,6 +50,43 @@ def choose_mode() -> Mode:
             
             if 1 <= choice_num <= len(modes):
                 selected_mode = modes[choice_num - 1]
+                
+                # Если выбрана опция "(Re)Create Database", показываем подменю
+                if selected_mode.soft_id == -1:
+                    print(f"\n💾 You want to delete current and create new database?")
+                    sub_modes = [
+                        Mode("", -1, "← Exit", "Вернуться в главное меню"),
+                        Mode("database", 101, "Create new database", "Создать новую зашифрованную базу данных"),
+                    ]
+                    
+                    for j, sub_mode in enumerate(sub_modes, 1):
+                        print(f"   {j}. {sub_mode.name}")
+                    
+                    while True:
+                        try:
+                            sub_choice = input("Выберите действие (номер): ").strip()
+                            if not sub_choice:
+                                continue
+                            sub_choice_num = int(sub_choice)
+                            if 1 <= sub_choice_num <= len(sub_modes):
+                                selected_sub_mode = sub_modes[sub_choice_num - 1]
+                                if selected_sub_mode.soft_id == -1:
+                                    # Возвращаемся в главное меню - просто продолжаем цикл
+                                    break
+                                else:
+                                    print(f"\n✅ Выбран режим: {selected_sub_mode.name}")
+                                    return selected_sub_mode
+                            else:
+                                print("❌ Неверный номер. Попробуйте снова.")
+                        except ValueError:
+                            print("❌ Введите корректный номер.")
+                        except KeyboardInterrupt:
+                            print("\n👋 До свидания!")
+                            return Mode("exit", 0, "Exit", "Выход из программы")
+                    
+                    # Если выбрали "Exit", продолжаем цикл главного меню
+                    continue
+                
                 print(f"\n✅ Выбран режим: {selected_mode.name}")
                 return selected_mode
             else:

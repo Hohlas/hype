@@ -3,12 +3,15 @@ Wallet loader module for Hyperliquid Bot
 """
 
 import os
+import json
+from os import path
 from typing import List, Dict
+from loguru import logger
 
 
 def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Dict]:
     """
-    Загружает кошельки из файла wallets.txt
+    Загружает кошельки из файла wallets.txt (используется только при создании базы данных)
     
     Формат файла:
     label|wallet_address|private_key|proxy
@@ -19,7 +22,7 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
     wallets = []
     
     if not os.path.exists(file_path):
-        print(f"⚠️ Файл {file_path} не найден. Создайте файл с кошельками.")
+        logger.warning(f"File {file_path} not found.")
         return wallets
     
     try:
@@ -35,7 +38,7 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
                 parts = line.split('|')
                 
                 if len(parts) < 3:
-                    print(f"⚠️ Строка {line_num}: неверный формат (нужно минимум 3 поля)")
+                    logger.warning(f"Line {line_num}: invalid format (need at least 3 fields)")
                     continue
                 
                 wallet_data = {
@@ -45,39 +48,88 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
                     "proxy": parts[3].strip() if len(parts) > 3 else "",
                 }
                 
-                # Диагностика загруженного кошелька
-                print(f"✅ Загружен кошелек: {wallet_data['label']} ({wallet_data['wallet_address'][:10]}...)")
-                print(f"🔑 Private key length: {len(wallet_data['private_key'])}")
-                print(f"🔑 Private key starts with: {wallet_data['private_key'][:10]}...")
-                
                 wallets.append(wallet_data)
     
     except Exception as e:
-        print(f"❌ Ошибка чтения файла {file_path}: {e}")
+        logger.error(f"Error reading file {file_path}: {e}")
     
     return wallets
 
 
-def get_wallet_modules() -> List[Dict]:
+def get_wallet_modules(db=None) -> List[Dict]:
     """
-    Получает модули кошельков для торговли
+    Получает модули кошельков для торговли из зашифрованной базы данных.
+    
+    Args:
+        db: Экземпляр DataBase для расшифровки ключей
     
     Returns:
         List[Dict]: Список модулей для обработки
     """
-    wallets = load_wallets_from_file()
+    modules_db_name = 'databases/modules.json'
     
-    modules = []
-    for wallet in wallets:
-        module_data = {
-            "label": wallet["label"],
-            "wallet_address": wallet["wallet_address"],
-            "private_key": wallet["private_key"],
-            "proxy": wallet["proxy"],
-            "module_info": {
-                "status": True
+    # Если база данных не существует, пытаемся загрузить из файла (для обратной совместимости)
+    if not path.isfile(modules_db_name):
+        logger.warning(f"Database {modules_db_name} not found. Trying to load from wallets.txt...")
+        wallets = load_wallets_from_file()
+        
+        modules = []
+        for wallet in wallets:
+            module_data = {
+                "label": wallet["label"],
+                "wallet_address": wallet["wallet_address"],
+                "private_key": wallet["private_key"],
+                "proxy": wallet["proxy"],
+                "module_info": {
+                    "status": True
+                }
             }
-        }
-        modules.append(module_data)
+            modules.append(module_data)
+        
+        return modules
     
-    return modules
+    # Загружаем из зашифрованной базы данных
+    if db is None:
+        logger.error("Database instance is required to decrypt private keys!")
+        return []
+    
+    # Получаем пароль для расшифровки
+    db.get_password()
+    
+    if db.personal_key is None:
+        logger.error("Failed to get password for database decryption!")
+        return []
+    
+    try:
+        with open(modules_db_name, encoding="utf-8") as f:
+            modules_db = json.load(f)
+        
+        if not modules_db:
+            logger.warning("Database is empty!")
+            return []
+        
+        modules = []
+        for encoded_pk, wallet_data in modules_db.items():
+            try:
+                # Расшифровываем приватный ключ
+                private_key = db.decode_pk(encoded_pk)
+                
+                module_data = {
+                    "label": wallet_data.get("label", "Unknown"),
+                    "wallet_address": wallet_data.get("wallet_address", ""),
+                    "private_key": private_key,
+                    "proxy": wallet_data.get("proxy"),
+                    "module_info": {
+                        "status": True
+                    }
+                }
+                modules.append(module_data)
+            except Exception as e:
+                logger.error(f"Failed to decrypt wallet {wallet_data.get('label', 'Unknown')}: {e}")
+                continue
+        
+        return modules
+        
+    except Exception as e:
+        logger.error(f"Error loading modules from database: {e}")
+        return []
