@@ -213,19 +213,9 @@ class DataBase:
         if not modules_db:
             return
         
-        # Пробуем найти зашифрованный ключ в базе
-        test_key = None
-        for encoded_pk in modules_db:
-            if isinstance(modules_db[encoded_pk], dict) and "encoded_private_key" in modules_db[encoded_pk]:
-                test_key = modules_db[encoded_pk]["encoded_private_key"]
-                break
-            elif isinstance(encoded_pk, str) and len(encoded_pk) > 50:
-                # Возможно, сам ключ - это зашифрованный приватный ключ
-                test_key = encoded_pk
-                break
-        
-        if not test_key:
-            return
+        # Берем первый ключ словаря (это зашифрованный приватный ключ)
+        # Структура: {encoded_pk: {wallet_address, label, proxy, ...}}
+        test_key = list(modules_db.keys())[0]
         
         # Пробуем дефолтный пароль
         try:
@@ -318,6 +308,7 @@ class DataBase:
             raise Exception("No wallets found in wallets.txt!")
         
         # Создаем зашифрованную базу данных
+        # Структура: {encoded_pk: {wallet_address, label, proxy}}
         new_modules = {}
         for wallet_data, label, proxy in zip(wallets_data, labels, proxies):
             encoded_pk = self.encode_pk(wallet_data["private_key"])
@@ -325,7 +316,6 @@ class DataBase:
                 "wallet_address": wallet_data["wallet_address"],
                 "label": label,
                 "proxy": proxy,
-                "encoded_private_key": encoded_pk,
             }
         
         # Сохраняем базу данных
