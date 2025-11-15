@@ -94,11 +94,14 @@ def get_wallet_modules(db=None) -> List[Dict]:
         return []
     
     # Получаем пароль для расшифровки
+    logger.debug("Calling get_password() to decrypt database...")
     db.get_password()
     
     if db.personal_key is None:
         logger.error("Failed to get password for database decryption!")
         return []
+    
+    logger.debug("Password obtained successfully, decrypting wallets...")
     
     try:
         with open(modules_db_name, encoding="utf-8") as f:

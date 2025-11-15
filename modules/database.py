@@ -202,15 +202,18 @@ class DataBase:
         Получение пароля для расшифровки приватных ключей.
         """
         if self.personal_key is not None:
+            logger.debug('Password already set, skipping password request')
             return
         
         if not path.isfile(self.modules_db_name):
+            logger.debug(f'Database file {self.modules_db_name} not found')
             return
         
         with open(self.modules_db_name, encoding="utf-8") as f:
             modules_db = json.load(f)
         
         if not modules_db:
+            logger.debug('Database is empty')
             return
         
         # Берем первый ключ словаря (это зашифрованный приватный ключ)
@@ -222,15 +225,33 @@ class DataBase:
             temp_key = Fernet(urlsafe_b64encode(md5("@karamelniy dumb shit encrypting".encode()).hexdigest().encode()))
             self.decode_pk(pk=test_key, key=temp_key)
             self.personal_key = temp_key
+            logger.info('[+] Soft | Default password worked\n')
             return
         except InvalidToken:
+            # Дефолтный пароль не подошел, запрашиваем у пользователя
             pass
         
         # Запрашиваем пароль у пользователя
+        print('\n' + '='*60)
+        print('🔐 Database is encrypted. Please enter password to decrypt.')
+        print('='*60)
         while True:
             try:
-                logger.debug('Enter password to decrypt your privatekeys (empty for default):')
-                raw_password = input("")
+                print('\nEnter password to decrypt your privatekeys (empty for default):')
+                raw_password = input("> ")
+                
+                # Если пустой пароль, пробуем дефолтный
+                if not raw_password:
+                    try:
+                        temp_key = Fernet(urlsafe_b64encode(md5("@karamelniy dumb shit encrypting".encode()).hexdigest().encode()))
+                        self.decode_pk(pk=test_key, key=temp_key)
+                        self.personal_key = temp_key
+                        logger.success('[+] Soft | Default password worked\n')
+                        return
+                    except InvalidToken:
+                        logger.error('[-] Soft | Default password also failed!\n')
+                        continue
+                
                 password = md5(raw_password.encode()).hexdigest().encode()
                 
                 temp_key = Fernet(urlsafe_b64encode(password))
@@ -240,7 +261,10 @@ class DataBase:
                 return
                 
             except InvalidToken:
-                logger.error('[-] Soft | Invalid password\n')
+                logger.error('[-] Soft | Invalid password. Please try again.\n')
+            except KeyboardInterrupt:
+                logger.error('\n[-] Soft | Password entry cancelled.\n')
+                raise
     
     def encode_pk(self, pk: str, key: None | Fernet = None):
         """
