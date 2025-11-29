@@ -74,6 +74,7 @@ input_data/*
 
 # Statistics folder
 stat/*
+!stat/.tmp
 
 # Encrypted database
 databases/
