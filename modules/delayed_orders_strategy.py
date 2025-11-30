@@ -1244,12 +1244,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     
                                     # Получаем данные о продаже из Trade History для точной комиссии продажи
                                     sell_fee_usdc = 0.0
+                                    sell_fee_token = 'USDC'  # Значение по умолчанию
                                     trades_history = await client.browser.get_all_orders_history(token_name, limit=10)
                                     if trades_history:
                                         for trade in trades_history:
                                             if trade.get('oid') == tp_order_id and trade.get('side', '').upper() in ['SELL', 'S', 'A']:
                                                 sell_fee_str = trade.get('fee', '0')
-                                                sell_fee_token = trade.get('feeToken', '')
+                                                sell_fee_token = trade.get('feeToken', 'USDC')
                                                 
                                                 if sell_fee_token == 'USDC':
                                                     sell_fee_usdc = float(sell_fee_str)
