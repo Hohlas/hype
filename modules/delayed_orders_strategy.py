@@ -220,29 +220,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             client.browser.log_message("⚠️ No trade history found for matching buy trade", level="INFO")
             return None
         
-        # Логируем общее количество сделок для отладки
-        client.browser.log_message(
-            f"📊 Total trades in history: {len(trades_history)}",
-            level="INFO"
-        )
-        
-        # Проверяем порядок сортировки: выводим первые 5 сделок для проверки
-        if trades_history and len(trades_history) > 0:
-            from datetime import datetime
-            client.browser.log_message(
-                f"🔍 Checking sort order - First 5 trades:",
-                level="INFO"
-            )
-            for i, trade in enumerate(trades_history[:5]):
-                trade_time = trade.get('time', 0)
-                trade_datetime = datetime.fromtimestamp(trade_time / 1000) if trade_time > 0 else None
-                trade_side = trade.get('side', '').upper()
-                trade_size = float(trade.get('sz', 0))
-                if trade_datetime:
-                    client.browser.log_message(
-                        f"  {i+1}. {trade_datetime.strftime('%Y-%m-%d %H:%M:%S')} | {trade_side} | {trade_size:.6f} BTC",
-                        level="INFO"
-                    )
         
         # ОПИСАНИЕ АЛГОРИТМА ПОИСКА ПОКУПКИ:
         # 1. Используем время СОЗДАНИЯ TP ордера из Open Orders как верхнюю границу
@@ -264,11 +241,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             # Используем время СОЗДАНИЯ TP ордера из Open Orders - это правильная верхняя граница
             time_limit = tp_order_time
             tp_datetime_readable = datetime.fromtimestamp(tp_order_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            client.browser.log_message(
-                f"🔍 Search algorithm: Using TP order creation time as upper limit: "
-                f"{tp_datetime_readable} (timestamp: {tp_order_time})",
-                level="INFO"
-            )
         else:
             # Fallback: если время создания TP ордера не найдено, используем время исполнения продажи
             sell_trade = None
@@ -308,11 +280,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         # TP ордер создается СРАЗУ после покупки, задержка обычно несколько секунд
         max_time_diff_ms = max_time_diff_minutes * 60 * 1000  # Преобразуем в миллисекунды
         
-        client.browser.log_message(
-            f"🔍 Search criteria: Sell size: {sell_size:.6f} BTC, Tolerance: {tolerance:.6f}, "
-            f"Max time diff: {max_time_diff_minutes} minutes (TP order created immediately after buy)",
-            level="INFO"
-        )
         
         # Отладочное логирование: выводим все покупки для анализа
         from datetime import datetime
@@ -367,59 +334,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                         'hash': trade.get('hash', '')
                     })
         
-        # Логируем отладочную информацию о покупках
-        if buy_trades_for_debug:
-            client.browser.log_message(
-                f"🔍 Found {len(buy_trades_for_debug)} BUY trades in history. TP order time: {tp_datetime_str}",
-                level="INFO"
-            )
-            
-            # Подсчитываем статистику
-            matching_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'] and b['size_match'])
-            before_tp_count = sum(1 for b in buy_trades_for_debug if b['before_tp'])
-            within_window_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'])
-            
-            client.browser.log_message(
-                f"📊 Statistics: {before_tp_count} buys before TP time, "
-                f"{within_window_count} buys within {max_time_diff_minutes} min window, "
-                f"{matching_count} buys match all criteria (time window + size)",
-                level="INFO"
-            )
-            
-            # Показываем все покупки, которые были до TP, в пределах временного окна и имеют правильный размер
-            matching_buys_for_log = [b for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'] and b['size_match']]
-            if matching_buys_for_log:
-                client.browser.log_message(
-                    f"✅ MATCHING BUYS (before TP + size match):",
-                    level="INFO"
-                )
-                for i, buy_info in enumerate(matching_buys_for_log):
-                    client.browser.log_message(
-                        f"  {i+1}. {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
-                        f"Price: ${buy_info['price']:.2f}",
-                        level="INFO"
-                    )
-            else:
-                # Показываем последние 5 покупок для анализа
-                client.browser.log_message(
-                    f"⚠️ No matching buys found. Showing last 5 BUY trades:",
-                    level="INFO"
-                )
-                for i, buy_info in enumerate(buy_trades_for_debug[:5]):
-                    status = "✅" if buy_info['before_tp'] and buy_info['within_time_window'] and buy_info['size_match'] else "❌"
-                    reason = []
-                    if not buy_info['before_tp']:
-                        reason.append("after TP")
-                    if buy_info['before_tp'] and not buy_info['within_time_window']:
-                        reason.append("outside time window")
-                    if not buy_info['size_match']:
-                        reason.append(f"size diff: {abs(buy_info['size'] - sell_size):.6f}")
-                    reason_str = f" ({', '.join(reason)})" if reason else ""
-                    client.browser.log_message(
-                        f"  {status} Buy {i+1}: {buy_info['time_str']} | Size: {buy_info['size']:.6f} BTC | "
-                        f"Price: ${buy_info['price']:.2f}{reason_str}",
-                        level="INFO"
-                    )
         
         # Если нашли подходящие покупки, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP ордера)
         if matching_buys:
@@ -427,16 +341,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             matching_buys.sort(key=lambda x: x['time'], reverse=True)
             buy_trade = matching_buys[0]
             
-            client.browser.log_message(
-                f"✅ SELECTED BUY TRADE (closest to TP time):",
-                level="INFO"
-            )
-            client.browser.log_message(
-                f"  Size: {buy_trade['sz']:.6f} BTC | Price: ${buy_trade['px']:.2f} | "
-                f"Fee: {buy_trade['fee']} {buy_trade['feeToken']} | "
-                f"Time: {datetime.fromtimestamp(buy_trade['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}",
-                level="INFO"
-            )
             
             # Логируем время покупки и TP ордера в читаемом формате для проверки с веб-терминалом
             buy_datetime = datetime.fromtimestamp(buy_trade['time'] / 1000)
@@ -1235,11 +1139,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Находим связанную покупку для расчета прибыли
                                 # Используем время выставления TP ордера, если доступно
-                                client.browser.log_message(
-                                    f"🔍 Starting buy trade search for TP order ID: {tp_order_id}, "
-                                    f"sell size: {filled_qty:.6f} BTC @ ${tp_price:.2f}",
-                                    level="INFO"
-                                )
                                 
                                 buy_trade = await find_matching_buy_trade(
                                     client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
@@ -1247,11 +1146,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
                                 if buy_trade:
-                                    client.browser.log_message(
-                                        f"✅ MATCHED BUY TRADE FOUND: {buy_trade['sz']:.6f} BTC @ ${buy_trade['px']:.2f} "
-                                        f"(time: {datetime.fromtimestamp(buy_trade['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')})",
-                                        level="INFO"
-                                    )
                                     buy_price = buy_trade['px']
                                     buy_size = buy_trade['sz']
                                     
@@ -1284,11 +1178,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     sell_fee_usdc = float(sell_fee_str) * tp_price
                                                 break
                                     
-                                    # ДЕТАЛЬНЫЙ РАСЧЕТ ПРИБЫЛИ
-                                    client.browser.log_message(
-                                        f"📊 DETAILED PROFIT CALCULATION:",
-                                        level="INFO"
-                                    )
                                     
                                     # Расчет выручки от продажи
                                     sell_total = filled_qty * tp_price
