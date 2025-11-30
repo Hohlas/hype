@@ -632,6 +632,12 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Путь к файлу статистики
         stats_file = "hype_stat.xlsx"
         
+        # Определяем список колонок
+        expected_columns = [
+            'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
+            'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
+        ]
+        
         # Проверяем, существует ли файл
         if os.path.exists(stats_file):
             # Читаем существующий файл
@@ -647,16 +653,23 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                 else:
                     # Если "Total Value" нет, добавляем в конец
                     df['Limit Profit'] = 0.0
+            
+            # Убеждаемся, что все ожидаемые колонки присутствуют
+            for col in expected_columns:
+                if col not in df.columns:
+                    df[col] = None
         else:
-            # Создаем новый DataFrame с заголовками
-            df = pd.DataFrame(columns=[
-                'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
-                'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
-            ])
+            # Создаем новый пустой DataFrame с заголовками
+            df = pd.DataFrame(columns=expected_columns)
         
-        # Добавляем новую строку (исправлено для избежания предупреждения pandas)
-        new_df = pd.DataFrame([new_row])
-        df = pd.concat([df, new_df], ignore_index=True)
+        # Создаем новый DataFrame из строки с явным указанием колонок
+        new_df = pd.DataFrame([new_row], columns=expected_columns)
+        
+        # Убеждаемся, что колонки в обоих DataFrame совпадают и в правильном порядке
+        df = df.reindex(columns=expected_columns, fill_value=None)
+        
+        # Конкатенируем с явным указанием колонок для избежания предупреждения
+        df = pd.concat([df, new_df], ignore_index=True, sort=False)
         
         # Сохраняем в Excel файл
         df.to_excel(stats_file, index=False)
@@ -1036,6 +1049,9 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
             entry_price = Decimal(str(order_result.get("avgPrice", limit_price)))
             order_qty = Decimal(str(order_result.get("executedQty", usdc_amount / limit_price)))
             
+            # Рассчитываем цену TP
+            tp_price = float(entry_price + step)
+            
             await create_tp_order(
                 client,
                 token_name=token_name,
@@ -1043,6 +1059,25 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
                 order_qty=order_qty,
                 step=step
             )
+            
+            # Записываем статистику операции Set TP
+            try:
+                all_balances = await client.browser.get_all_balances()
+                current_price = float(await client.browser.get_token_price("BTC"))
+                usdc_balance = all_balances.get("USDC", 0.0)
+                btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                total_value = usdc_balance + (btc_balance * current_price)
+                await log_statistics_to_excel(
+                    client=client,
+                    operation="Set TP",
+                    btc_amount=float(order_qty),
+                    price=tp_price,
+                    usdc_balance=usdc_balance,
+                    btc_balance=btc_balance,
+                    total_value=total_value
+                )
+            except Exception as e:
+                client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
             
             return True
         
@@ -1581,7 +1616,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         total_value = usdc_balance + (btc_balance * current_price)
                         await log_statistics_to_excel(
                             client=client,
-                            operation="set TP",
+                            operation="Set TP",
                             btc_amount=token_amount,
                             price=tp_price,
                             usdc_balance=usdc_balance,
@@ -1720,6 +1755,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             price=tp_price,
                             usdc_amount=usdc_amount
                         )
+                        
+                        # Записываем статистику операции Set TP
+                        try:
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            total_value = usdc_balance + (btc_balance * current_price)
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Set TP",
+                                btc_amount=token_amount,
+                                price=tp_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
+                                total_value=total_value
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
@@ -1844,6 +1895,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             price=tp_price,
                             usdc_amount=usdc_amount
                         )
+                        
+                        # Записываем статистику операции Set TP
+                        try:
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            total_value = usdc_balance + (btc_balance * current_price)
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Set TP",
+                                btc_amount=token_amount,
+                                price=tp_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
+                                total_value=total_value
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                 
                 await async_sleep(10)
                 
