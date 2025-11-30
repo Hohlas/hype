@@ -213,8 +213,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
     """
     try:
         # Получаем историю сделок (от новых к старым)
-        # Увеличиваем limit до 1000, чтобы гарантированно найти покупку
-        trades_history = await client.browser.get_all_orders_history(token_name, limit=1000)
+        # Сортировка работает правильно, 500 самых новых сделок достаточно для поиска покупки
+        trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
         
         if not trades_history:
             client.browser.log_message("⚠️ No trade history found for matching buy trade", level="INFO")
@@ -1270,7 +1270,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     # Получаем данные о продаже из Trade History для точной комиссии продажи
                                     sell_fee_usdc = 0.0
                                     sell_fee_token = 'USDC'  # Значение по умолчанию
-                                    trades_history = await client.browser.get_all_orders_history(token_name, limit=1000)
+                                    trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
                                     if trades_history:
                                         for trade in trades_history:
                                             if trade.get('oid') == tp_order_id and trade.get('side', '').upper() in ['SELL', 'S', 'A']:
