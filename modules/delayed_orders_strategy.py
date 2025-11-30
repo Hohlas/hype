@@ -569,7 +569,7 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
 
 
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
-                                 usdc_balance: float, btc_balance: float, total_value: float):
+                                 usdc_balance: float, btc_balance: float, total_value: float, orders=None):
     """
     Записывает статистику операции в Excel файл hype_stat.xlsx
     
@@ -581,10 +581,37 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         usdc_balance: Баланс USDC
         btc_balance: Баланс BTC
         total_value: Суммарная стоимость всех активов
+        orders: Список открытых ордеров (опционально, если не передан - будет получен внутри функции)
     """
     try:
         # Получаем текущую цену BTC
         current_btc_price = float(await client.browser.get_token_price("BTC"))
+        
+        # Если ордера не переданы, получаем их
+        if orders is None:
+            orders = await client.browser.get_account_orders()
+        
+        # Рассчитываем сумму Order Value для всех лимитных ордеров на продажу
+        limit_profit = 0.0
+        for order in orders:
+            # Проверяем, что это лимитный ордер на продажу
+            side = order.get("side", "")
+            is_buy = order.get("isBuy", True)
+            limit_price = float(order.get("limitPx", 0))
+            
+            # Ордер на продажу: side in ["SELL", "S", "A"] или isBuy == False
+            is_sell = side in ["SELL", "S", "A"] or (not is_buy)
+            
+            # Проверяем, что это лимитный ордер (есть limitPx > 0)
+            is_limit = limit_price > 0
+            
+            if is_sell and is_limit:
+                # Получаем размер ордера
+                size = float(order.get("sz", 0))
+                
+                # Order Value = размер * цена
+                if size > 0:
+                    limit_profit += size * limit_price
         
         # Создаем запись статистики
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -598,6 +625,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             'Operation Price': price,
             'USDC Balance': usdc_balance,
             'BTC Balance': btc_balance,
+            'Limit Profit': limit_profit,
             'Total Value': total_value
         }
         
@@ -608,11 +636,22 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         if os.path.exists(stats_file):
             # Читаем существующий файл
             df = pd.read_excel(stats_file)
+            
+            # Если столбец "Limit Profit" отсутствует, добавляем его
+            if 'Limit Profit' not in df.columns:
+                # Находим позицию столбца "Total Value"
+                if 'Total Value' in df.columns:
+                    total_value_idx = df.columns.get_loc('Total Value')
+                    # Вставляем столбец "Limit Profit" перед "Total Value"
+                    df.insert(total_value_idx, 'Limit Profit', 0.0)
+                else:
+                    # Если "Total Value" нет, добавляем в конец
+                    df['Limit Profit'] = 0.0
         else:
             # Создаем новый DataFrame с заголовками
             df = pd.DataFrame(columns=[
                 'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
-                'Operation Price', 'USDC Balance', 'BTC Balance', 'Total Value'
+                'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
             ])
         
         # Добавляем новую строку (исправлено для избежания предупреждения pandas)
@@ -1251,7 +1290,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         price=tp_price,
                                         usdc_balance=usdc_balance,
                                         btc_balance=btc_balance,
-                                        total_value=total_usd_value
+                                        total_value=total_usd_value,
+                                        orders=open_orders
                                     )
                                 except Exception as e:
                                     client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
