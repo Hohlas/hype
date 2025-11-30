@@ -158,21 +158,77 @@ async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
                         await async_sleep(10)
 
 
+async def get_account_startup_info(module_data: dict):
+    """
+    Получает информацию об аккаунте для стартового сообщения
+    """
+    try:
+        client = initialize_account(module_data)
+        await client.browser.start_session()
+        
+        # Получаем данные параллельно
+        all_balances, orders, btc_price = await asyncio.gather(
+            client.browser.get_all_balances(),
+            client.browser.get_account_orders(),
+            client.browser.get_token_price("BTC")
+        )
+        
+        # Извлекаем балансы
+        usdc_balance = all_balances.get("USDC", 0.0)
+        btc_balance = all_balances.get("UBTC", 0.0) or all_balances.get("BTC", 0.0)
+        
+        # Рассчитываем Total Value
+        total_value = usdc_balance + (btc_balance * float(btc_price))
+        
+        # Рассчитываем Limit Profit (сумма Order Value всех лимитных ордеров на продажу)
+        limit_profit = 0.0
+        for order in orders:
+            side = order.get("side", "")
+            is_buy = order.get("isBuy", True)
+            limit_price = float(order.get("limitPx", 0))
+            
+            # Ордер на продажу: side in ["SELL", "S", "A"] или isBuy == False
+            is_sell = side in ["SELL", "S", "A"] or (not is_buy)
+            
+            # Проверяем, что это лимитный ордер (есть limitPx > 0)
+            is_limit = limit_price > 0
+            
+            if is_sell and is_limit:
+                size = float(order.get("sz", 0))
+                if size > 0:
+                    limit_profit += size * limit_price
+        
+        await client.browser.close_sessions()
+        
+        return {
+            "label": module_data["label"],
+            "usdc_balance": usdc_balance,
+            "btc_balance": btc_balance,
+            "total_value": total_value,
+            "limit_profit": limit_profit
+        }
+    except Exception as e:
+        logger.error(f"Failed to get startup info for {module_data.get('label', 'Unknown')}: {e}")
+        return None
+
+
 async def runner(mode: int):
     sem = asyncio.Semaphore(settings.THREADS)
     
-    # Отправляем уведомление о старте
-    mode_names = {
-        0: "Averaging Market",
-        4: "Cancel Orders", 
-        5: "Parse"
-    }
-    mode_name = mode_names.get(mode, f"Mode {mode}")
-    await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nMode: {mode_name}\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
-
     if mode in [3]:
         all_groups = db.get_all_groups()
         if all_groups != 'No more accounts left':
+            # Для режима 3 (pair trading) отправляем простое сообщение
+            mode_names = {
+                0: "Averaging Market",
+                4: "Cancel Orders", 
+                5: "Parse"
+            }
+            mode_name = mode_names.get(mode, f"Mode {mode}")
+            await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
+            logger.info(f"🚀 Hyperliquid Bot Started")
+            logger.info(f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
+            
             await asyncio.gather(*[
                 run_pair(group_data=group_data, mode=mode, sem=sem)
                 for group_data in all_groups
@@ -194,6 +250,29 @@ async def runner(mode: int):
                 f'<white>{", ".join(unique_accounts)}</white> | '
                 f'Total modules: <white>{len(all_modules)}</white>'
             )
+            
+            # Получаем информацию о стартовом состоянии аккаунтов
+            account_infos = []
+            for module_data in all_modules:
+                info = await get_account_startup_info(module_data)
+                if info:
+                    account_infos.append(info)
+            
+            # Формируем стартовое сообщение
+            message_lines = ["🚀 <b>Hyperliquid Bot Started</b>", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
+            log_lines = ["🚀 Hyperliquid Bot Started", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
+            
+            for info in account_infos:
+                account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, LimProfit = ${info['limit_profit']:.0f}"
+                message_lines.append(account_line)
+                log_lines.append(account_line)
+            
+            # Отправляем сообщение в Telegram
+            await TgReport().send_log(logs="\n".join(message_lines))
+            
+            # Выводим в логах
+            for line in log_lines:
+                logger.info(line)
             
             await asyncio.gather(*[
                 run_modules(module_data=module_data, mode=mode, sem=sem)
