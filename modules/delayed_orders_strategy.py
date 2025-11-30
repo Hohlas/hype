@@ -226,6 +226,24 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             level="INFO"
         )
         
+        # Проверяем порядок сортировки: выводим первые 5 сделок для проверки
+        if trades_history and len(trades_history) > 0:
+            from datetime import datetime
+            client.browser.log_message(
+                f"🔍 Checking sort order - First 5 trades:",
+                level="INFO"
+            )
+            for i, trade in enumerate(trades_history[:5]):
+                trade_time = trade.get('time', 0)
+                trade_datetime = datetime.fromtimestamp(trade_time / 1000) if trade_time > 0 else None
+                trade_side = trade.get('side', '').upper()
+                trade_size = float(trade.get('sz', 0))
+                if trade_datetime:
+                    client.browser.log_message(
+                        f"  {i+1}. {trade_datetime.strftime('%Y-%m-%d %H:%M:%S')} | {trade_side} | {trade_size:.6f} BTC",
+                        level="INFO"
+                    )
+        
         # ОПИСАНИЕ АЛГОРИТМА ПОИСКА ПОКУПКИ:
         # 1. Используем время СОЗДАНИЯ TP ордера из Open Orders как верхнюю границу
         #    TP ордер создается СРАЗУ ПОСЛЕ покупки, поэтому покупка должна быть ДО времени создания TP

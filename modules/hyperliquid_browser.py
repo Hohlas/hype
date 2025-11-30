@@ -1314,7 +1314,15 @@ class HyperliquidBrowser:
             
             # Сортируем сделки по времени (от новых к старым) для гарантии правильного порядка
             # Используем поле 'time' (timestamp в миллисекундах)
-            filtered_orders.sort(key=lambda x: x.get('time', 0), reverse=True)
+            # Фильтруем сделки без времени и сортируем остальные
+            trades_with_time = [t for t in filtered_orders if t.get('time', 0) > 0]
+            trades_without_time = [t for t in filtered_orders if t.get('time', 0) == 0]
+            
+            # Сортируем сделки с временем от новых к старым
+            trades_with_time.sort(key=lambda x: x.get('time', 0), reverse=True)
+            
+            # Объединяем: сначала сделки с временем (отсортированные), потом без времени
+            filtered_orders = trades_with_time + trades_without_time
                     
             # self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
             # Возвращаем первые N сделок (самые новые)
