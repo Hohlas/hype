@@ -1,5 +1,5 @@
 # Hyperliquid Bot Settings
-version = "1.0.3"
+version = "1.0.6"
 
 # Risk Management
 POSITION_SIZE_PERCENT = 20  # Размер открываемой позиции в % от баланса

@@ -1115,9 +1115,24 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     # Используем уже полученную цену current_price для расчета стоимости BTC
                                     total_usd_value += btc_balance * current_price
                                 
+                                # Получаем размер из сохраненного ордера (fallback)
                                 filled_qty = float(executed_order.get("sz", 0))
                                 tp_price = float(executed_order.get("limitPx", 0))
                                 tp_order_id = executed_order.get("oid")
+                                
+                                # Получаем фактический размер исполнения и комиссию из Trade History
+                                # Это важно, так как биржа может округлить размер при исполнении
+                                trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
+                                sell_trade_from_history = None
+                                if trades_history:
+                                    for trade in trades_history:
+                                        if trade.get('oid') == tp_order_id and trade.get('side', '').upper() in ['SELL', 'S', 'A']:
+                                            # Используем фактический размер исполнения из Trade History
+                                            actual_filled_qty = float(trade.get('sz', filled_qty))
+                                            if actual_filled_qty > 0:
+                                                filled_qty = actual_filled_qty
+                                            sell_trade_from_history = trade
+                                            break
                                 
                                 # Получаем время выставления TP ордера из saved order
                                 # В Open Orders ордерах есть поле "timestamp" - время создания ордера
@@ -1162,21 +1177,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         buy_fee_usdc = float(buy_fee_str) * buy_price
                                     
                                     # Получаем данные о продаже из Trade History для точной комиссии продажи
+                                    # Используем уже полученный sell_trade_from_history
                                     sell_fee_usdc = 0.0
                                     sell_fee_token = 'USDC'  # Значение по умолчанию
-                                    trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
-                                    if trades_history:
-                                        for trade in trades_history:
-                                            if trade.get('oid') == tp_order_id and trade.get('side', '').upper() in ['SELL', 'S', 'A']:
-                                                sell_fee_str = trade.get('fee', '0')
-                                                sell_fee_token = trade.get('feeToken', 'USDC')
-                                                
-                                                if sell_fee_token == 'USDC':
-                                                    sell_fee_usdc = float(sell_fee_str)
-                                                elif sell_fee_token == 'UBTC' or sell_fee_token == 'BTC':
-                                                    # Если комиссия в BTC, конвертируем в USDC по цене продажи
-                                                    sell_fee_usdc = float(sell_fee_str) * tp_price
-                                                break
+                                    
+                                    if sell_trade_from_history:
+                                        sell_fee_str = sell_trade_from_history.get('fee', '0')
+                                        sell_fee_token = sell_trade_from_history.get('feeToken', 'USDC')
+                                        
+                                        if sell_fee_token == 'USDC':
+                                            sell_fee_usdc = float(sell_fee_str)
+                                        elif sell_fee_token == 'UBTC' or sell_fee_token == 'BTC':
+                                            # Если комиссия в BTC, конвертируем в USDC по цене продажи
+                                            sell_fee_usdc = float(sell_fee_str) * tp_price
                                     
                                     
                                     # Расчет выручки от продажи
@@ -1247,8 +1260,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
                                 
                                 # Формируем сообщение согласно требованиям
+                                # Используем фактический размер исполнения из Trade History
                                 client.browser.log_message(
-                                    f"✅ Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
+                                    f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}BTC | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
                                     level="INFO"
                                 )
                                 
