@@ -213,8 +213,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
     """
     try:
         # Получаем историю сделок (от новых к старым)
-        # Увеличиваем limit до 500, чтобы гарантированно найти покупку
-        trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
+        # Увеличиваем limit до 1000, чтобы гарантированно найти покупку
+        trades_history = await client.browser.get_all_orders_history(token_name, limit=1000)
         
         if not trades_history:
             client.browser.log_message("⚠️ No trade history found for matching buy trade", level="INFO")
@@ -314,12 +314,15 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                 trade_datetime = datetime.fromtimestamp(trade_time / 1000)
                 
                 # Сохраняем для отладки
+                time_diff_ms = time_limit - trade_time
+                within_time_window = time_diff_ms <= max_time_diff_ms
                 buy_trades_for_debug.append({
                     'time': trade_time,
                     'time_str': trade_datetime.strftime('%Y-%m-%d %H:%M:%S'),
                     'size': trade_size,
                     'price': trade_price,
                     'before_tp': trade_time < time_limit,
+                    'within_time_window': within_time_window,
                     'size_match': abs(trade_size - sell_size) <= tolerance
                 })
                 
@@ -354,17 +357,19 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             )
             
             # Подсчитываем статистику
-            matching_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['size_match'])
+            matching_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'] and b['size_match'])
             before_tp_count = sum(1 for b in buy_trades_for_debug if b['before_tp'])
+            within_window_count = sum(1 for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'])
             
             client.browser.log_message(
                 f"📊 Statistics: {before_tp_count} buys before TP time, "
-                f"{matching_count} buys match both time and size criteria",
+                f"{within_window_count} buys within {max_time_diff_minutes} min window, "
+                f"{matching_count} buys match all criteria (time window + size)",
                 level="INFO"
             )
             
-            # Показываем все покупки, которые были до TP и имеют правильный размер
-            matching_buys_for_log = [b for b in buy_trades_for_debug if b['before_tp'] and b['size_match']]
+            # Показываем все покупки, которые были до TP, в пределах временного окна и имеют правильный размер
+            matching_buys_for_log = [b for b in buy_trades_for_debug if b['before_tp'] and b['within_time_window'] and b['size_match']]
             if matching_buys_for_log:
                 client.browser.log_message(
                     f"✅ MATCHING BUYS (before TP + size match):",
@@ -383,10 +388,12 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
                     level="INFO"
                 )
                 for i, buy_info in enumerate(buy_trades_for_debug[:5]):
-                    status = "✅" if buy_info['before_tp'] and buy_info['size_match'] else "❌"
+                    status = "✅" if buy_info['before_tp'] and buy_info['within_time_window'] and buy_info['size_match'] else "❌"
                     reason = []
                     if not buy_info['before_tp']:
                         reason.append("after TP")
+                    if buy_info['before_tp'] and not buy_info['within_time_window']:
+                        reason.append("outside time window")
                     if not buy_info['size_match']:
                         reason.append(f"size diff: {abs(buy_info['size'] - sell_size):.6f}")
                     reason_str = f" ({', '.join(reason)})" if reason else ""
@@ -1245,7 +1252,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     # Получаем данные о продаже из Trade History для точной комиссии продажи
                                     sell_fee_usdc = 0.0
                                     sell_fee_token = 'USDC'  # Значение по умолчанию
-                                    trades_history = await client.browser.get_all_orders_history(token_name, limit=10)
+                                    trades_history = await client.browser.get_all_orders_history(token_name, limit=1000)
                                     if trades_history:
                                         for trade in trades_history:
                                             if trade.get('oid') == tp_order_id and trade.get('side', '').upper() in ['SELL', 'S', 'A']:

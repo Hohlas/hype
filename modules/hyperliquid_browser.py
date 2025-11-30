@@ -1252,7 +1252,9 @@ class HyperliquidBrowser:
             # Используем правильный endpoint согласно документации
             import time
             current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
-            start_time = current_time - (30 * 24 * 60 * 60 * 1000)  # 30 дней назад
+            # Устанавливаем очень старое время (10 лет назад) для получения всех сделок
+            # API вернет все сделки, затем мы ограничим результат до limit
+            start_time = current_time - (10 * 365 * 24 * 60 * 60 * 1000)  # 10 лет назад (все сделки)
             
             data = {
                 "type": "userFillsByTime",  # Правильный тип согласно документации
@@ -1309,8 +1311,13 @@ class HyperliquidBrowser:
                 coin = trade.get("coin") or trade.get("asset") or trade.get("symbol")
                 if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
+            
+            # Сортируем сделки по времени (от новых к старым) для гарантии правильного порядка
+            # Используем поле 'time' (timestamp в миллисекундах)
+            filtered_orders.sort(key=lambda x: x.get('time', 0), reverse=True)
                     
             # self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
+            # Возвращаем первые N сделок (самые новые)
             return filtered_orders[:limit]
             
         except Exception as e:
@@ -1329,7 +1336,9 @@ class HyperliquidBrowser:
             # Используем правильный endpoint согласно документации
             import time
             current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
-            start_time = current_time - (30 * 24 * 60 * 60 * 1000)  # 30 дней назад
+            # Устанавливаем очень старое время (10 лет назад) для получения всех сделок
+            # API вернет все сделки, затем мы ограничим результат до limit
+            start_time = current_time - (10 * 365 * 24 * 60 * 60 * 1000)  # 10 лет назад (все сделки)
             
             data = {
                 "type": "userFillsByTime",  # Правильный тип согласно документации
