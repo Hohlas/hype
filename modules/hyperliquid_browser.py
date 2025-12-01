@@ -9,7 +9,8 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct, encode_typed_data as encode_structured_data
+from eth_account.messages import encode_defunct, SignableMessage
+from eth_account._utils.structured_data.hashing import hash_domain, hash_message
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -255,39 +256,58 @@ class HyperliquidBrowser:
             # Правильный chainId для mainnet (Arbitrum)
             chain_id = 42161 if is_mainnet else 421614
             
-            # ✅ ПРАВИЛЬНАЯ структура EIP-712 для encode_structured_data
-            structured_data = {
-                "types": {
-                    "EIP712Domain": [
-                        {"name": "name", "type": "string"},
-                        {"name": "version", "type": "string"},
-                        {"name": "chainId", "type": "uint256"},
-                        {"name": "verifyingContract", "type": "address"}
-                    ],
-                    "Agent": [
-                        {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"}
-                    ]
-                },
+            # ✅ ПРАВИЛЬНАЯ структура для EIP-712 (без ключа "types" на верхнем уровне для hash_domain/hash_message)
+            # Создаём domain и message отдельно
+            domain_data = {
+                "name": "Exchange",
+                "version": "1",
+                "chainId": chain_id,
+                "verifyingContract": "0x0000000000000000000000000000000000000000"
+            }
+            
+            message_data = {
+                "source": "a",
+                "connectionId": action_hash  # bytes (32 bytes from keccak)
+            }
+            
+            # Типы для Agent
+            agent_types = {
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"}
+                ],
+                "Agent": [
+                    {"name": "source", "type": "string"},
+                    {"name": "connectionId", "type": "bytes32"}
+                ]
+            }
+            
+            # Полная структура для hash_domain и hash_message
+            full_data = {
+                "types": agent_types,
                 "primaryType": "Agent",
-                "domain": {
-                    "name": "Exchange",
-                    "version": "1",
-                    "chainId": chain_id,
-                    "verifyingContract": "0x0000000000000000000000000000000000000000"
-                },
-                "message": {
-                    "source": "a",
-                    "connectionId": action_hash  # bytes (32 bytes from keccak)
-                }
+                "domain": domain_data,
+                "message": message_data
             }
             
             # Отладочный вывод структуры данных
-            logger.info(f"[DEBUG] Structured data: {json.dumps(structured_data, indent=2, default=lambda x: x.hex() if isinstance(x, bytes) else str(x))}")
+            logger.info(f"[DEBUG] Structured data: {json.dumps(full_data, indent=2, default=lambda x: x.hex() if isinstance(x, bytes) else str(x))}")
             
-            # Используем encode_structured_data (импортирован в начале файла)
-            encoded_data = encode_structured_data(structured_data)
-            signed_message = self.account.sign_message(encoded_data)
+            # Хешируем domain и message
+            domain_hash = hash_domain(full_data)
+            message_hash = hash_message(full_data)
+            
+            # Создаём SignableMessage вручную
+            signable_message = SignableMessage(
+                version=b"\x19\x01",
+                header=domain_hash,
+                body=message_hash
+            )
+            
+            # Подписываем
+            signed_message = self.account.sign_message(signable_message)
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
