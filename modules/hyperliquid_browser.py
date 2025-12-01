@@ -1374,8 +1374,9 @@ class HyperliquidBrowser:
                     variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format"))
             
             # Пробуем каждый вариант
+            last_error = None
             for i, (coin_value, description) in enumerate(variants_to_try, 1):
-                self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value})", level="INFO")
+                self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value}, type={type(coin_value).__name__})", level="INFO")
                 
                 cancel_payload = {
                     "action": {
@@ -1387,6 +1388,10 @@ class HyperliquidBrowser:
                     },
                     "nonce": int(time.time() * 1000),
                 }
+                
+                # DEBUG: логируем полный payload
+                import json
+                self.log_message(f"🔍 DEBUG: Cancel payload: {json.dumps(cancel_payload, indent=2)}", level="INFO")
                 
                 response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
                 
@@ -1422,13 +1427,44 @@ class HyperliquidBrowser:
                         return {"status": "ok"}
                 elif response.status == 422 or response.status == 404:
                     # Ордер не найден с этим вариантом - пробуем следующий
-                    self.log_message(f"❌ Variant {i} failed: order not found (status {response.status})", level="INFO")
+                    try:
+                        response_text = await response.text()
+                        self.log_message(f"❌ Variant {i} failed: order not found (status {response.status}), response: {response_text[:200]}", level="INFO")
+                        last_error = f"Status {response.status}: {response_text[:200]}"
+                    except Exception:
+                        last_error = f"Status {response.status}"
+                        self.log_message(f"❌ Variant {i} failed: order not found (status {response.status})", level="INFO")
+                    
                     if i < len(variants_to_try):
                         continue  # Пробуем следующий вариант
                     else:
-                        # Это был последний вариант
-                        self.log_message(f"Order {order_id} not found or already cancelled (tried all variants)", level="INFO")
-                        return {"status": "ok", "message": "Order not found or already cancelled"}
+                        # Это был последний вариант - проверим, есть ли ордер еще в списке открытых
+                        self.log_message(f"⚠️ All variants failed. Checking if order {order_id} still exists in open orders...", level="WARNING")
+                        
+                        # Проверяем список открытых ордеров
+                        try:
+                            open_orders = await self.get_account_orders()
+                            order_still_exists = any(
+                                o.get("oid") == order_id 
+                                for o in open_orders 
+                                if o.get("oid")
+                            )
+                            
+                            if order_still_exists:
+                                # Ордер ВСЕ ЕЩЕ в списке - это ОШИБКА!
+                                self.log_message(
+                                    f"❌ ERROR: Order {order_id} still exists in open orders after all cancel attempts! "
+                                    f"This is a failure, not success. Last error: {last_error}",
+                                    level="ERROR"
+                                )
+                                return {"status": "error", "message": "Order still exists after cancel attempts", "detail": last_error}
+                            else:
+                                # Ордер действительно не найден - возможно, был отменен вручную
+                                self.log_message(f"ℹ️ Order {order_id} not found in open orders (may have been cancelled manually)", level="INFO")
+                                return {"status": "ok", "message": "Order not found in open orders"}
+                        except Exception as check_error:
+                            self.log_message(f"⚠️ Failed to check open orders: {check_error}", level="WARNING")
+                            return {"status": "error", "message": "Failed to verify order cancellation", "detail": last_error}
                 else:
                     # Другая ошибка - пробуем следующий вариант
                     try:

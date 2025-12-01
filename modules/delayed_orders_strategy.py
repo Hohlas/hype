@@ -1801,17 +1801,23 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     result = await client.browser.cancel_order(order_coin, order_id)
                                     
                                     # Проверяем результат отмены
-                                    # Если result содержит "status": "ok" или пустой, считаем успешным
-                                    if result and (result.get("status") == "ok" or "status" not in result):
+                                    if result and result.get("status") == "error":
+                                        # Это ошибка - ордер не удалось отменить
+                                        client.browser.log_message(
+                                            f"❌ ERROR: Failed to cancel Buy Limit at ${order_price:.2f} (oid: {order_id}): {result.get('message', 'Unknown error')}",
+                                            level="ERROR"
+                                        )
+                                    elif result and (result.get("status") == "ok" or "status" not in result):
+                                        # Успешная отмена
                                         client.browser.log_message(
                                             f"✅ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f}, oid: {order_id})",
                                             level="INFO"
                                         )
                                     else:
-                                        # Ордер уже не существует или был отменен ранее
+                                        # Неопределенный статус
                                         client.browser.log_message(
-                                            f"ℹ️ Buy Limit at ${order_price:.2f} (oid: {order_id}) already cancelled or not found",
-                                            level="INFO"
+                                            f"⚠️ Buy Limit at ${order_price:.2f} (oid: {order_id}) - unclear cancellation status: {result}",
+                                            level="WARNING"
                                         )
                                 except Exception as e:
                                     client.browser.log_message(
