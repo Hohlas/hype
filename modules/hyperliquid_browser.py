@@ -1479,8 +1479,21 @@ class HyperliquidBrowser:
                 
                 # Проверяем статус ответа
                 if response.status == 200:
+                    # Читаем текст ответа один раз
+                    response_text = await response.text()
+                    
                     try:
-                        result = await response.json()
+                        result = json.loads(response_text)
+                        
+                        # ВАЖНО: Проверяем статус в ответе!
+                        if result.get("status") == "err":
+                            error_msg = result.get("response", "Unknown error")
+                            self.log_message(f"❌ Variant {i} failed with API error: {error_msg}", level="ERROR")
+                            # Пробуем следующий вариант
+                            if i < len(variants_to_try):
+                                continue
+                            else:
+                                raise Exception(f"All variants failed. Last error: {error_msg}")
                         
                         # ВАЖНО: Проверяем, есть ли ошибки в JSON ответе!
                         # API может вернуть 200, но с ошибкой в response.data.statuses
@@ -1501,12 +1514,18 @@ class HyperliquidBrowser:
                         self.log_message(f"✅ SUCCESS! Order {order_id} cancelled using variant {i} ({description})", level="INFO")
                         return result
                         
-                    except Exception as json_error:
-                        response_text = await response.text()
-                        logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
-                        # Если не удалось распарсить JSON, но статус 200 - считаем успехом
-                        self.log_message(f"✅ SUCCESS! Order {order_id} cancelled (no JSON), variant {i}", level="INFO")
-                        return {"status": "ok"}
+                    except json.JSONDecodeError:
+                        # Если не удалось распарсить JSON, проверяем текст ответа
+                        if "err" in response_text.lower() or "error" in response_text.lower() or "does not exist" in response_text.lower():
+                            self.log_message(f"❌ Variant {i} failed: {response_text[:200]}", level="ERROR")
+                            if i < len(variants_to_try):
+                                continue
+                            else:
+                                raise Exception(f"All variants failed. Last error: {response_text[:200]}")
+                        else:
+                            # Неизвестный формат, но статус 200 - считаем успехом
+                            self.log_message(f"✅ SUCCESS! Order {order_id} cancelled (unexpected response format), variant {i}", level="INFO")
+                            return {"status": "ok"}
                 elif response.status == 422 or response.status == 404:
                     # Ордер не найден с этим вариантом - пробуем следующий
                     try:
