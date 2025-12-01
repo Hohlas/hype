@@ -1339,52 +1339,34 @@ class HyperliquidBrowser:
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
             
-            # Построить список вариантов для попытки
+            # Используем ТОЛЬКО формат из ордера (@142) - как в реальном запросе биржи
+            # Не пробуем другие варианты, т.к. они создают разные подписи и адреса
             variants_to_try = []
             
-            # Если передан дополнительный token_name, добавляем его варианты
-            if token_name:
-                variants_to_try.append((token_name, f"token name '{token_name}'"))
-                variants_to_try.append((f"{token_name}-SPOT", f"token name '{token_name}-SPOT'"))
-                # Для BTC также пробуем UBTC
-                if token_name == "BTC":
-                    variants_to_try.append(("UBTC", "token name 'UBTC'"))
-                    variants_to_try.append(("UBTC-SPOT", "token name 'UBTC-SPOT'"))
-            
-            if isinstance(token_name_or_asset_id, str):
-                if token_name_or_asset_id.startswith("@"):
-                    # Формат "@142" - пробуем разные варианты
-                    base_id = int(token_name_or_asset_id[1:])
-                    
-                    # Вариант 1: строка "@142" как есть
-                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
-                    
-                    # Вариант 2: базовый ID 142 (число)
-                    variants_to_try.append((base_id, f"base ID {base_id}"))
-                    
-                    # Вариант 3: spot ID 10142 (число)
-                    variants_to_try.append((10000 + base_id, f"spot ID {10000 + base_id}"))
-                    
-                    # Вариант 4: строка "10142"
-                    variants_to_try.append((str(10000 + base_id), f"string '{10000 + base_id}'"))
-                    
-                    # Вариант 5: попробуем определить токен по base_id и использовать его название
-                    # Маппинг base_id -> токен (для BTC base_id = 142)
-                    base_id_to_token = {
-                        142: "BTC",
-                        2: "ETH",
-                        1: "USDC"
-                    }
-                    token_name = base_id_to_token.get(base_id)
-                    if token_name:
-                        # Вариант 5: "BTC"
-                        variants_to_try.append((token_name, f"token name '{token_name}'"))
-                        # Вариант 6: "BTC-SPOT"
-                        variants_to_try.append((f"{token_name}-SPOT", f"token name '{token_name}-SPOT'"))
-                        # Вариант 7: "UBTC" (для BTC)
-                        if token_name == "BTC":
-                            variants_to_try.append(("UBTC", "token name 'UBTC'"))
-                            variants_to_try.append(("UBTC-SPOT", "token name 'UBTC-SPOT'"))
+            if isinstance(token_name_or_asset_id, str) and token_name_or_asset_id.startswith("@"):
+                # Формат "@142" - используем ТОЛЬКО этот вариант
+                base_id = int(token_name_or_asset_id[1:])
+                variants_to_try.append((token_name_or_asset_id, f"@-format '{token_name_or_asset_id}'"))
+            elif isinstance(token_name_or_asset_id, int):
+                # Если передан числовой ID, преобразуем в @-формат
+                if token_name_or_asset_id >= 10000:
+                    base_id = token_name_or_asset_id - 10000
+                    variants_to_try.append((f"@{base_id}", f"@-format from spot ID"))
+                else:
+                    variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format from base ID"))
+            else:
+                # Для других форматов пробуем получить через API
+                if "-SPOT" in str(token_name_or_asset_id):
+                    spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
+                    base_id = spot_asset_id - 10000
+                    variants_to_try.append((f"@{base_id}", f"@-format from API"))
+                elif token_name:
+                    spot_asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
+                    base_id = spot_asset_id - 10000
+                    variants_to_try.append((f"@{base_id}", f"@-format from token name"))
+                else:
+                    # Fallback: пробуем как есть
+                    variants_to_try.append((token_name_or_asset_id, "as-is"))
                 elif "-SPOT" in token_name_or_asset_id:
                     variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
                     spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
@@ -1409,9 +1391,8 @@ class HyperliquidBrowser:
                     variants_to_try.append((10000 + token_name_or_asset_id, f"spot ID {10000 + token_name_or_asset_id}"))
                     variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format"))
             
-            # Пробуем каждый вариант
-            last_error = None
-            for i, (coin_value, description) in enumerate(variants_to_try, 1):
+            # Отправляем запрос (один вариант, без цикла)
+            try:
                 self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value}, type={type(coin_value).__name__})", level="INFO")
                 
                 # ВАЖНО: API использует короткие имена полей!
@@ -1444,37 +1425,34 @@ class HyperliquidBrowser:
                     # Не удалось определить asset ID, пробуем как есть
                     asset_id_for_cancel = coin_value
                 
-                # Правильная структура action для отмены (как в реальном запросе биржи)
-                cancel_action = {
-                    "type": "cancel",
-                    "cancels": [{
-                        "a": asset_id_for_cancel,  # asset ID (для spot: 10000 + base_index)
-                        "o": order_id              # order ID
-                    }]
-                }
-                
-                # Создаем nonce и expiresAfter
-                current_time_ms = int(time.time() * 1000)
-                nonce = current_time_ms
-                expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
-                
-                # Подписываем action через sign_l1_action (как при создании ордера)
-                signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
-                
-                # Формируем финальный payload с подписью (как в реальном запросе биржи)
-                cancel_payload = {
-                    "action": cancel_action,
-                    "expiresAfter": expires_after,  # ВАЖНО: это поле требуется!
-                    "isFrontend": True,            # ВАЖНО: это поле требуется!
-                    "nonce": nonce,
-                    "signature": signature,
-                    "vaultAddress": None  # Для основного кошелька используем None
-                }
-                
-                import json
-                # DEBUG: логируем адрес кошелька для диагностики
-                self.log_message(f"🔍 DEBUG: Wallet address: {self.wallet_address}, Account address: {self.account.address if self.account else 'None'}", level="INFO")
-                self.log_message(f"🔍 DEBUG: Cancel payload (with signature): {json.dumps(cancel_payload, indent=2)}", level="INFO")
+            # Правильная структура action для отмены (как в реальном запросе биржи)
+            cancel_action = {
+                "type": "cancel",
+                "cancels": [{
+                    "a": asset_id_for_cancel,  # числовой asset ID (10142), а не строка!
+                    "o": order_id              # order ID
+                }]
+            }
+            
+            # Создаем nonce и expiresAfter
+            current_time_ms = int(time.time() * 1000)
+            nonce = current_time_ms
+            expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
+            
+            # Подписываем action через sign_l1_action (как при создании ордера)
+            signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
+            
+            # Формируем финальный payload с подписью (как в реальном запросе биржи)
+            cancel_payload = {
+                "action": cancel_action,
+                "expiresAfter": expires_after,  # ВАЖНО: это поле требуется!
+                "isFrontend": True,            # ВАЖНО: это поле требуется!
+                "nonce": nonce,
+                "signature": signature,
+                "vaultAddress": None  # Для основного кошелька используем None
+            }
+            
+            import json
                 
                 # Отправляем напрямую через session с заголовками как в реальном запросе браузера
                 if not self.session:
