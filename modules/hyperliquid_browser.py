@@ -1414,61 +1414,52 @@ class HyperliquidBrowser:
             for i, (coin_value, description) in enumerate(variants_to_try, 1):
                 self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value}, type={type(coin_value).__name__})", level="INFO")
                 
-                # Пробуем две структуры payload:
-                # 1. С "coin" (как было)
-                # 2. С "assetIndex" (возможно, требуется для spot)
+                # ВАЖНО: API использует короткие имена полей!
+                # "a" = asset ID (для spot: 10000 + base_index)
+                # "o" = order ID
                 
-                # Вариант 1: структура с "coin"
-                cancel_payload_1 = {
+                # Определяем правильный asset ID для spot ордера
+                asset_id_for_cancel = None
+                
+                if isinstance(coin_value, str):
+                    if coin_value.startswith("@"):
+                        # "@142" -> base_id = 142 -> spot asset ID = 10142
+                        base_id = int(coin_value[1:])
+                        asset_id_for_cancel = 10000 + base_id
+                    elif "-SPOT" in coin_value:
+                        # "BTC-SPOT" -> получаем через API
+                        asset_id_for_cancel = await self._get_spot_asset_id(coin_value)
+                    else:
+                        # "BTC" -> получаем через API
+                        asset_id_for_cancel = await self._get_spot_asset_id(f"{coin_value}-SPOT")
+                elif isinstance(coin_value, int):
+                    if coin_value >= 10000:
+                        # Уже spot asset ID
+                        asset_id_for_cancel = coin_value
+                    else:
+                        # Базовый ID -> spot asset ID
+                        asset_id_for_cancel = 10000 + coin_value
+                
+                if asset_id_for_cancel is None:
+                    # Не удалось определить asset ID, пробуем как есть
+                    asset_id_for_cancel = coin_value
+                
+                # Правильная структура payload с короткими именами полей
+                cancel_payload = {
                     "action": {
                         "type": "cancel",
                         "cancels": [{
-                            "coin": coin_value,
-                            "oid": order_id
+                            "a": asset_id_for_cancel,  # asset ID (для spot: 10000 + base_index)
+                            "o": order_id              # order ID
                         }]
                     },
                     "nonce": int(time.time() * 1000),
                 }
                 
-                # Вариант 2: структура с "assetIndex" (если coin_value - число)
-                cancel_payload_2 = None
-                if isinstance(coin_value, int):
-                    cancel_payload_2 = {
-                        "action": {
-                            "type": "cancel",
-                            "cancels": [{
-                                "assetIndex": coin_value,
-                                "oid": order_id
-                            }]
-                        },
-                        "nonce": int(time.time() * 1000),
-                    }
-                
-                # Пробуем сначала вариант с "coin"
                 import json
-                self.log_message(f"🔍 DEBUG: Cancel payload (coin): {json.dumps(cancel_payload_1, indent=2)}", level="INFO")
+                self.log_message(f"🔍 DEBUG: Cancel payload (correct format): {json.dumps(cancel_payload, indent=2)}", level="INFO")
                 
-                response = await self.send_request("POST", url, data=cancel_payload_1, build_signature=True)
-                
-                # Если вариант с "coin" не сработал и есть вариант с "assetIndex", пробуем его
-                if (response.status == 422 or response.status == 404) and cancel_payload_2:
-                    self.log_message(f"🔍 DEBUG: Trying assetIndex variant for {description}", level="INFO")
-                    self.log_message(f"🔍 DEBUG: Cancel payload (assetIndex): {json.dumps(cancel_payload_2, indent=2)}", level="INFO")
-                    response = await self.send_request("POST", url, data=cancel_payload_2, build_signature=True)
-                
-                # Если оба варианта не сработали, пробуем упрощенную структуру без вложенного action
-                if response.status == 422 or response.status == 404:
-                    # Вариант 3: упрощенная структура (как в некоторых примерах API)
-                    cancel_payload_3 = {
-                        "cancels": [{
-                            "coin": coin_value,
-                            "oid": order_id
-                        }],
-                        "nonce": int(time.time() * 1000),
-                    }
-                    self.log_message(f"🔍 DEBUG: Trying simplified payload structure for {description}", level="INFO")
-                    self.log_message(f"🔍 DEBUG: Cancel payload (simplified): {json.dumps(cancel_payload_3, indent=2)}", level="INFO")
-                    response = await self.send_request("POST", url, data=cancel_payload_3, build_signature=True)
+                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
                 
                 # Проверяем статус ответа
                 if response.status == 200:
