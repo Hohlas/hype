@@ -206,7 +206,7 @@ class HyperliquidBrowser:
 
             def normalize_action(obj):
                 if isinstance(obj, dict):
-                    # Специальная обработка для объектов ордера
+                    # Специальная обработка для объектов ордера (order item внутри orders)
                     if all(k in obj for k in ['a', 'b', 'p', 's', 'r', 't']):
                         return {
                             'a': int(obj['a']),
@@ -216,20 +216,15 @@ class HyperliquidBrowser:
                             'r': bool(obj['r']),
                             't': normalize_action(obj['t'])
                         }
-                    # Специальная обработка для cancel action
-                    # Порядок ключей должен быть: cancels -> type (как в браузере)
-                    elif 'cancels' in obj and 'type' in obj and obj.get('type') == 'cancel' and len(obj) == 2:
-                        return {
-                            'cancels': normalize_action(obj['cancels']),
-                            'type': obj['type']
-                        }
-                    # Специальная обработка для объектов отмены ордера (cancel item)
+                    # Специальная обработка для объектов отмены ордера (cancel item внутри cancels)
                     # Порядок ключей должен быть: a -> o (как в браузере)
                     elif all(k in obj for k in ['a', 'o']) and len(obj) == 2:
                         return {
                             'a': int(obj['a']),
                             'o': int(obj['o'])
                         }
+                    # Для всех остальных dict (включая cancel action верхнего уровня)
+                    # просто рекурсивно нормализуем значения, сохраняя порядок ключей
                     return {k: normalize_action(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
                     return [normalize_action(x) for x in obj]
@@ -1383,6 +1378,8 @@ class HyperliquidBrowser:
             
             # Отладочный вывод структуры action
             import json
+            logger.info(f"[DEBUG] Order ID: {order_id} (type: {type(order_id).__name__})")
+            logger.info(f"[DEBUG] Asset ID: {asset_id} (type: {type(asset_id).__name__})")
             logger.info(f"[DEBUG] Cancel action structure: {json.dumps(cancel_action, indent=2)}")
             logger.info(f"[DEBUG] Cancel action keys order: {list(cancel_action.keys())}")
             logger.info(f"[DEBUG] Wallet address: {self.wallet_address}")
