@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct, encode_structured_data
+from eth_account.messages import encode_defunct
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
