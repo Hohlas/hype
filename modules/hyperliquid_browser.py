@@ -1472,10 +1472,38 @@ class HyperliquidBrowser:
                 }
                 
                 import json
+                # DEBUG: логируем адрес кошелька для диагностики
+                self.log_message(f"🔍 DEBUG: Wallet address: {self.wallet_address}, Account address: {self.account.address if self.account else 'None'}", level="INFO")
                 self.log_message(f"🔍 DEBUG: Cancel payload (with signature): {json.dumps(cancel_payload, indent=2)}", level="INFO")
                 
-                # Отправляем БЕЗ build_signature, т.к. подпись уже в payload
-                response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
+                # Отправляем напрямую через session (как в реальном запросе биржи)
+                # БЕЗ заголовка X-Wallet-Address, т.к. адрес определяется из подписи
+                if not self.session:
+                    await self.start_session()
+                
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': '*/*',
+                }
+                
+                # Отправляем напрямую через session (без использования send_request)
+                response_obj = await self.session.post(url, json=cancel_payload, headers=headers)
+                response_text = await response_obj.text()
+                
+                # Создаем объект-обертку для совместимости с остальным кодом
+                class ResponseWrapper:
+                    def __init__(self, status, text):
+                        self.status = status
+                        self._text = text
+                    
+                    async def text(self):
+                        return self._text
+                    
+                    async def json(self):
+                        import json
+                        return json.loads(self._text)
+                
+                response = ResponseWrapper(response_obj.status, response_text)
                 
                 # Проверяем статус ответа
                 if response.status == 200:
