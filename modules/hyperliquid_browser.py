@@ -1333,8 +1333,8 @@ class HyperliquidBrowser:
             token_name: Дополнительное имя токена (например, "BTC") для пробования вариантов
         """
         try:
-            # Используем стандартный endpoint для всех типов торговли
-            url = f"{self.BASE_URL}/exchange"
+            # Используем правильный endpoint для отмены ордеров (api-ui, а не api)
+            url = "https://api-ui.hyperliquid.xyz/exchange"
             
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
@@ -1444,22 +1444,38 @@ class HyperliquidBrowser:
                     # Не удалось определить asset ID, пробуем как есть
                     asset_id_for_cancel = coin_value
                 
-                # Правильная структура payload с короткими именами полей
+                # Правильная структура action для отмены (как в реальном запросе биржи)
+                cancel_action = {
+                    "type": "cancel",
+                    "cancels": [{
+                        "a": asset_id_for_cancel,  # asset ID (для spot: 10000 + base_index)
+                        "o": order_id              # order ID
+                    }]
+                }
+                
+                # Создаем nonce и expiresAfter
+                current_time_ms = int(time.time() * 1000)
+                nonce = current_time_ms
+                expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
+                
+                # Подписываем action через sign_l1_action (как при создании ордера)
+                signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
+                
+                # Формируем финальный payload с подписью (как в реальном запросе биржи)
                 cancel_payload = {
-                    "action": {
-                        "type": "cancel",
-                        "cancels": [{
-                            "a": asset_id_for_cancel,  # asset ID (для spot: 10000 + base_index)
-                            "o": order_id              # order ID
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000),
+                    "action": cancel_action,
+                    "expiresAfter": expires_after,  # ВАЖНО: это поле требуется!
+                    "isFrontend": True,            # ВАЖНО: это поле требуется!
+                    "nonce": nonce,
+                    "signature": signature,
+                    "vaultAddress": None  # Для основного кошелька используем None
                 }
                 
                 import json
-                self.log_message(f"🔍 DEBUG: Cancel payload (correct format): {json.dumps(cancel_payload, indent=2)}", level="INFO")
+                self.log_message(f"🔍 DEBUG: Cancel payload (with signature): {json.dumps(cancel_payload, indent=2)}", level="INFO")
                 
-                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
+                # Отправляем БЕЗ build_signature, т.к. подпись уже в payload
+                response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
                 
                 # Проверяем статус ответа
                 if response.status == 200:
