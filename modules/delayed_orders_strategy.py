@@ -579,7 +579,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                     total_value_idx = df.columns.get_loc('Total Value')
                     # Вставляем столбец "Limit Profit" перед "Total Value"
                     df.insert(total_value_idx, 'Limit Profit', 0.0)
-                else:
+        else:
                     # Если "Total Value" нет, добавляем в конец
                     df['Limit Profit'] = 0.0
             
@@ -1212,33 +1212,33 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     if new_executed_tp_ids:
                         # client.browser.log_message(f"🔍 DEBUG: Found executed TP orders: {new_executed_tp_ids}", level="INFO")
-                        
-                        # Получаем информацию об исполненном ордере из предыдущего состояния
+                    
+                    # Получаем информацию об исполненном ордере из предыдущего состояния
                         for executed_id in new_executed_tp_ids:
                             # Проверяем, не обработан ли уже этот ордер (защита от дубликатов)
                             if executed_id in client._processed_tp_orders:
                                 continue
                             
-                            executed_order = client._previous_tp_orders.get(executed_id)
-                            
-                            if executed_order:
+                        executed_order = client._previous_tp_orders.get(executed_id)
+                        
+                    if executed_order:
                                 # Оборачиваем обработку в try-finally, чтобы гарантировать пометку как обработанного
                                 try:
-                                    # Используем уже полученные балансы из основного цикла
-                                    # all_balances уже получены выше в цикле
-                                    
-                                    # Извлекаем балансы
-                                    usdc_balance = all_balances.get("USDC", 0.0)
-                                    btc_balance = all_balances.get("UBTC", 0.0)
-                                    
-                                    # Рассчитываем общую стоимость
-                                    total_usd_value = usdc_balance
-                                    if btc_balance > 0:
-                                        # Используем уже полученную цену current_price для расчета стоимости BTC
-                                        total_usd_value += btc_balance * current_price
-                                    
+                        # Используем уже полученные балансы из основного цикла
+                        # all_balances уже получены выше в цикле
+                        
+                        # Извлекаем балансы
+                        usdc_balance = all_balances.get("USDC", 0.0)
+                        btc_balance = all_balances.get("UBTC", 0.0)
+                        
+                        # Рассчитываем общую стоимость
+                        total_usd_value = usdc_balance
+                        if btc_balance > 0:
+                            # Используем уже полученную цену current_price для расчета стоимости BTC
+                            total_usd_value += btc_balance * current_price
+                        
                                     # Получаем размер из сохраненного ордера (fallback)
-                                    filled_qty = float(executed_order.get("sz", 0))
+                        filled_qty = float(executed_order.get("sz", 0))
                                     tp_price_fallback = float(executed_order.get("limitPx", 0))  # Fallback цена
                                     tp_order_id = executed_order.get("oid")
                                     
@@ -1407,36 +1407,36 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             
                                             # Обновляем предыдущий баланс для следующей итерации
                                             client._previous_usdc_balance = usdc_balance
-                                            
-                                            # Записываем статистику операции Take Profit
-                                            try:
-                                                await log_statistics_to_excel(
-                                                    client=client,
-                                                    operation="Take Profit",
-                                                    btc_amount=filled_qty,
-                                                    price=tp_price,
-                                                    usdc_balance=usdc_balance,
-                                                    btc_balance=btc_balance,
+                        
+                        # Записываем статистику операции Take Profit
+                        try:
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Take Profit",
+                                btc_amount=filled_qty,
+                                price=tp_price,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
                                                     total_value=total_usd_value,
                                                     orders=open_orders
-                                                )
-                                            except Exception as e:
-                                                client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
-                                            
-                                            # Формируем сообщение согласно требованиям
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
+                        
+                        # Формируем сообщение согласно требованиям
                                             # Используем фактический размер исполнения из Trade History
-                                            client.browser.log_message(
+                        client.browser.log_message(
                                                 f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}BTC | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
-                                                level="INFO"
-                                            )
-                                            
-                                            # Отправляем уведомление в Telegram согласно требованиям
+                            level="INFO"
+                        )
+                        
+                        # Отправляем уведомление в Telegram согласно требованиям
                                             profit_message = f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}'
-                                            await send_tg_notification(
-                                                client,
+                        await send_tg_notification(
+                            client,
                                                 text=profit_message,
-                                                save_to_report=False
-                                            )
+                            save_to_report=False
+                        )
                                             
                                             # Дублируем сообщение о профите в PROFIT_BOT_TOKEN
                                             await send_profit_notification(profit_message)
@@ -1694,15 +1694,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         )
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
-                
+                    
                 # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
                     # Расчет целевой цены для лимитного ордера
                     target_buy_price = min_tp_price - float(step) * 2
                     
-                    # Используем уже полученный баланс USDC из all_balances
-                    usdc_balance = all_balances.get("USDC", 0.0)
-                    
+                        # Используем уже полученный баланс USDC из all_balances
+                        usdc_balance = all_balances.get("USDC", 0.0)
+                        
                     # Проверяем, есть ли активные Buy Limit ордера
                     active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
                     
@@ -1717,9 +1717,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         else:
                             # Размещение лимитного ордера на покупку
                             try:
-                                order_result = await client.place_order(
-                                    token=token_name,
-                                    side="BUY",
+                        order_result = await client.place_order(
+                            token=token_name,
+                            side="BUY",
                                     order_type="LIMIT",
                                     usdc_amount=usdc_amount,
                                     price=target_buy_price
@@ -1732,30 +1732,30 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     )
                                     
                                     # Отправляем уведомление в Telegram
-                                    await send_tg_notification(
-                                        client,
+                            await send_tg_notification(
+                                client,
                                         f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                        save_to_report=False
-                                    )
-                                    
+                                save_to_report=False
+                            )
+                        
                                     # Записываем статистику операции Averaging (лимитный ордер, еще не исполнен)
-                                    try:
-                                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                        try:
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                                         total_value = usdc_balance + (btc_balance * current_price)
                                         # Для лимитного ордера используем целевую цену и расчетное количество
                                         token_amount = usdc_amount / target_buy_price
-                                        await log_statistics_to_excel(
-                                            client=client,
-                                            operation="Averaging",
-                                            btc_amount=token_amount,
+                            await log_statistics_to_excel(
+                                client=client,
+                                operation="Averaging",
+                                btc_amount=token_amount,
                                             price=target_buy_price,
-                                            usdc_balance=usdc_balance,
-                                            btc_balance=btc_balance,
+                                usdc_balance=usdc_balance,
+                                btc_balance=btc_balance,
                                             total_value=total_value,
                                             orders=open_orders
-                                        )
-                                    except Exception as e:
-                                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                            )
+                        except Exception as e:
+                            client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                     else:
@@ -1765,73 +1765,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         for order in active_buy_limits:
                             order_price = float(order.get("limitPx", 0))
                             order_id = order.get("oid")
-                            order_coin = order.get("coin")
-                            
-                            # DEBUG: выводим ПОЛНУЮ информацию об ордере
-                            client.browser.log_message(
-                                f"🔍 DEBUG: Full order data: {order}",
-                                level="INFO"
-                            )
-                            client.browser.log_message(
-                                f"🔍 DEBUG: Checking order - coin={order_coin} (type={type(order_coin).__name__}), price=${order_price:.2f}, oid={order_id}",
-                                level="INFO"
-                            )
                             
                             if order_price < threshold:
                                 # Ордер устарел - отменяем его
-                                # Сначала проверяем, действительно ли ордер еще существует в списке открытых
-                                order_still_exists = any(
-                                    o.get("oid") == order_id 
-                                    for o in open_orders 
-                                    if o.get("oid")
-                                )
-                                
-                                if not order_still_exists:
-                                    # Ордер уже не существует (исполнен или отменен)
-                                    client.browser.log_message(
-                                        f"ℹ️ Buy Limit at ${order_price:.2f} (oid: {order_id}) already cancelled or executed",
-                                        level="INFO"
-                                    )
-                                    continue
-                                
                                 try:
-                                    # Получаем coin из ордера (может быть "@142", "BTC-SPOT" или другой формат)
-                                    # Также передаем token_name для вариантов с названиями токенов
-                                    order_coin = order.get("coin", token_name)
-                                    
-                                    # DEBUG: логируем, что передаем
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG: Attempting to cancel order - order_coin={order_coin}, token_name={token_name}, oid={order_id}",
-                                        level="INFO"
-                                    )
-                                    
-                                    # Передаем и order_coin, и token_name для максимального количества вариантов
-                                    result = await client.browser.cancel_order(order_coin, order_id, token_name=token_name)
-                                    
-                                    # Проверяем результат отмены
-                                    if result and result.get("status") == "error":
-                                        # Это ошибка - ордер не удалось отменить
-                                        client.browser.log_message(
-                                            f"❌ ERROR: Failed to cancel Buy Limit at ${order_price:.2f} (oid: {order_id}): {result.get('message', 'Unknown error')}",
-                                            level="ERROR"
-                                        )
-                                    elif result and (result.get("status") == "ok" or "status" not in result):
-                                        # Успешная отмена
-                                        client.browser.log_message(
-                                            f"✅ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f}, oid: {order_id})",
-                                            level="INFO"
-                                        )
-                                    else:
-                                        # Неопределенный статус
-                                        client.browser.log_message(
-                                            f"⚠️ Buy Limit at ${order_price:.2f} (oid: {order_id}) - unclear cancellation status: {result}",
-                                            level="WARNING"
-                                        )
+                                    await client.browser.cancel_order(token_name, order_id)
+                        client.browser.log_message(
+                                        f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
+                            level="INFO"
+                        )
                                 except Exception as e:
-                                    client.browser.log_message(
-                                        f"❌ Failed to cancel old Buy Limit order (oid: {order_id}): {e}", 
-                                        level="ERROR"
-                                    )
+                                    client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
@@ -1934,7 +1878,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
-                
+                        
                 # Задержка между итерациями основного цикла
                 # Увеличена до 15 секунд для снижения нагрузки на API и предотвращения 429 ошибок
                 await async_sleep(15)
@@ -1946,7 +1890,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     client.browser.log_message(f"⚠️ Rate limit detected, waiting 30 seconds...", level="WARNING")
                     await async_sleep(30)
                 else:
-                    client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
+                client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
                     await async_sleep(10)
                 
     except Exception as e:

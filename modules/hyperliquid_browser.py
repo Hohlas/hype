@@ -1323,114 +1323,24 @@ class HyperliquidBrowser:
             logger.error(f"Failed to create order: {e}")
             raise
             
-    async def cancel_order(self, token_name_or_asset_id, order_id: int, token_name: str = None):
+    async def cancel_order(self, token_name: str, order_id: int):
         """
         Отмена ордера
-        
-        Args:
-            token_name_or_asset_id: Имя токена (str), формат "@142" (str) или числовой asset ID (int)
-            order_id: ID ордера для отмены
-            token_name: Дополнительное имя токена (например, "BTC") для пробования вариантов
+        Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем правильный endpoint для отмены ордеров (api-ui, а не api)
+            # Используем правильный endpoint (api-ui, а не api)
             url = "https://api-ui.hyperliquid.xyz/exchange"
             
-            # DEBUG: логируем входные данные
-            self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
+            # Получаем числовой asset ID для токена
+            asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
             
-            # Используем ТОЛЬКО формат из ордера (@142) - как в реальном запросе биржи
-            # Не пробуем другие варианты, т.к. они создают разные подписи и адреса
-            variants_to_try = []
-            
-            if isinstance(token_name_or_asset_id, str) and token_name_or_asset_id.startswith("@"):
-                # Формат "@142" - используем ТОЛЬКО этот вариант
-                base_id = int(token_name_or_asset_id[1:])
-                variants_to_try.append((token_name_or_asset_id, f"@-format '{token_name_or_asset_id}'"))
-            elif isinstance(token_name_or_asset_id, int):
-                # Если передан числовой ID, преобразуем в @-формат
-                if token_name_or_asset_id >= 10000:
-                    base_id = token_name_or_asset_id - 10000
-                    variants_to_try.append((f"@{base_id}", f"@-format from spot ID"))
-                else:
-                    variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format from base ID"))
-            else:
-                # Для других форматов пробуем получить через API
-                if "-SPOT" in str(token_name_or_asset_id):
-                    spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
-                    base_id = spot_asset_id - 10000
-                    variants_to_try.append((f"@{base_id}", f"@-format from API"))
-                elif token_name:
-                    spot_asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
-                    base_id = spot_asset_id - 10000
-                    variants_to_try.append((f"@{base_id}", f"@-format from token name"))
-                else:
-                    # Fallback: пробуем как есть
-                    variants_to_try.append((token_name_or_asset_id, "as-is"))
-                elif "-SPOT" in token_name_or_asset_id:
-                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
-                    spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
-                    variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
-                    variants_to_try.append((spot_asset_id - 10000, f"base ID from API {spot_asset_id - 10000}"))
-                    variants_to_try.append((f"@{spot_asset_id - 10000}", f"@-format from API"))
-                else:
-                    # Обычное имя типа 'BTC'
-                    variants_to_try.append((f"{token_name_or_asset_id}-SPOT", f"string '{token_name_or_asset_id}-SPOT'"))
-                    spot_asset_id = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
-                    variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
-                    variants_to_try.append((f"@{spot_asset_id - 10000}", f"@-format from API"))
-            elif isinstance(token_name_or_asset_id, int):
-                if token_name_or_asset_id >= 10000:
-                    # Spot asset ID
-                    variants_to_try.append((token_name_or_asset_id, f"spot ID {token_name_or_asset_id}"))
-                    variants_to_try.append((token_name_or_asset_id - 10000, f"base ID {token_name_or_asset_id - 10000}"))
-                    variants_to_try.append((f"@{token_name_or_asset_id - 10000}", f"@-format"))
-                else:
-                    # Base ID
-                    variants_to_try.append((token_name_or_asset_id, f"base ID {token_name_or_asset_id}"))
-                    variants_to_try.append((10000 + token_name_or_asset_id, f"spot ID {10000 + token_name_or_asset_id}"))
-                    variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format"))
-            
-            # Отправляем запрос (один вариант, без цикла)
-            try:
-                self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value}, type={type(coin_value).__name__})", level="INFO")
-                
-                # ВАЖНО: API использует короткие имена полей!
-                # "a" = asset ID (для spot: 10000 + base_index)
-                # "o" = order ID
-                
-                # Определяем правильный asset ID для spot ордера
-                asset_id_for_cancel = None
-                
-                if isinstance(coin_value, str):
-                    if coin_value.startswith("@"):
-                        # "@142" -> base_id = 142 -> spot asset ID = 10142
-                        base_id = int(coin_value[1:])
-                        asset_id_for_cancel = 10000 + base_id
-                    elif "-SPOT" in coin_value:
-                        # "BTC-SPOT" -> получаем через API
-                        asset_id_for_cancel = await self._get_spot_asset_id(coin_value)
-                    else:
-                        # "BTC" -> получаем через API
-                        asset_id_for_cancel = await self._get_spot_asset_id(f"{coin_value}-SPOT")
-                elif isinstance(coin_value, int):
-                    if coin_value >= 10000:
-                        # Уже spot asset ID
-                        asset_id_for_cancel = coin_value
-                    else:
-                        # Базовый ID -> spot asset ID
-                        asset_id_for_cancel = 10000 + coin_value
-                
-                if asset_id_for_cancel is None:
-                    # Не удалось определить asset ID, пробуем как есть
-                    asset_id_for_cancel = coin_value
-                
-            # Правильная структура action для отмены (как в реальном запросе биржи)
+            # Создаем правильную структуру action согласно реальному запросу
             cancel_action = {
                 "type": "cancel",
                 "cancels": [{
-                    "a": asset_id_for_cancel,  # числовой asset ID (10142), а не строка!
-                    "o": order_id              # order ID
+                    "a": asset_id,  # Числовой asset ID (10142)
+                    "o": order_id   # Order ID (не "oid"!)
                 }]
             }
             
@@ -1439,10 +1349,10 @@ class HyperliquidBrowser:
             nonce = current_time_ms
             expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
             
-            # Подписываем action через sign_l1_action (как при создании ордера)
+            # Подписываем action через sign_l1_action (EIP-712)
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload с подписью (как в реальном запросе биржи)
+            # Формируем финальный payload с правильной структурой
             cancel_payload = {
                 "action": cancel_action,
                 "expiresAfter": expires_after,  # ВАЖНО: это поле требуется!
@@ -1452,151 +1362,86 @@ class HyperliquidBrowser:
                 "vaultAddress": None  # Для основного кошелька используем None
             }
             
-            import json
+            # Отправляем напрямую через session с правильными заголовками
+            if not self.session:
+                await self.start_session()
+            
+            # Заголовки точно как в реальном запросе браузера
+            headers = {
+                'Accept': '*/*',
+                'Accept-Language': 'ru,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Content-Type': 'application/json',
+                'DNT': '1',
+                'Origin': 'https://app.hyperliquid.xyz',
+                'Referer': 'https://app.hyperliquid.xyz/',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 YaBrowser/25.10.0.0 Safari/537.36',
+                'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'sec-gpc': '1',
+            }
+            
+            # Отправляем напрямую через session (без использования send_request)
+            response_obj = await self.session.post(url, json=cancel_payload, headers=headers)
+            response_text = await response_obj.text()
+            
+            # Создаем объект-обертку для совместимости
+            class ResponseWrapper:
+                def __init__(self, status, text):
+                    self.status = status
+                    self._text = text
                 
-                # Отправляем напрямую через session с заголовками как в реальном запросе браузера
-                if not self.session:
-                    await self.start_session()
+                async def text(self):
+                    return self._text
                 
-                # Заголовки точно как в curl запросе из браузера
-                headers = {
-                    'Accept': '*/*',
-                    'Accept-Language': 'ru,en;q=0.9',
-                    'Connection': 'keep-alive',
-                    'Content-Type': 'application/json',
-                    'DNT': '1',
-                    'Origin': 'https://app.hyperliquid.xyz',
-                    'Referer': 'https://app.hyperliquid.xyz/',
-                    'Sec-Fetch-Dest': 'empty',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Site': 'same-site',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 YaBrowser/25.10.0.0 Safari/537.36',
-                    'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"',
-                    'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"Windows"',
-                    'sec-gpc': '1',
-                }
-                
-                # Отправляем напрямую через session (без использования send_request)
-                # Используем data вместо json, чтобы точно соответствовать curl --data-raw
-                response_obj = await self.session.post(url, data=json.dumps(cancel_payload), headers=headers)
-                response_text = await response_obj.text()
-                
-                # Создаем объект-обертку для совместимости с остальным кодом
-                class ResponseWrapper:
-                    def __init__(self, status, text):
-                        self.status = status
-                        self._text = text
+                async def json(self):
+                    import json
+                    return json.loads(self._text)
+            
+            response = ResponseWrapper(response_obj.status, response_text)
+            
+            # Проверяем статус ответа перед парсингом JSON
+            if response.status == 200:
+                try:
+                    result = await response.json()
                     
-                    async def text(self):
-                        return self._text
+                    # Проверяем, есть ли ошибки в ответе
+                    if result.get("status") == "err":
+                        error_msg = result.get("response", "Unknown error")
+                        raise Exception(f"API error: {error_msg}")
                     
-                    async def json(self):
-                        import json
-                        return json.loads(self._text)
-                
-                response = ResponseWrapper(response_obj.status, response_text)
-                
-                # Проверяем статус ответа
-                if response.status == 200:
-                    # Читаем текст ответа один раз
+                    # Проверяем statuses в ответе
+                    statuses = result.get("response", {}).get("data", {}).get("statuses", [])
+                    if statuses and isinstance(statuses, list) and len(statuses) > 0:
+                        status_obj = statuses[0]
+                        if isinstance(status_obj, dict) and "error" in status_obj:
+                            error_msg = status_obj["error"]
+                            raise Exception(f"API error in response: {error_msg}")
+                    
+                    return result
+                except Exception as json_error:
+                    # Если не удалось распарсить JSON, но статус 200
+                    logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
+                    return {"status": "ok"}
+            else:
+                # Если статус не 200, пытаемся получить текст ответа
+                try:
                     response_text = await response.text()
-                    
-                    try:
-                        result = json.loads(response_text)
-                        
-                        # ВАЖНО: Проверяем статус в ответе!
-                        if result.get("status") == "err":
-                            error_msg = result.get("response", "Unknown error")
-                            self.log_message(f"❌ Variant {i} failed with API error: {error_msg}", level="ERROR")
-                            # Пробуем следующий вариант
-                            if i < len(variants_to_try):
-                                continue
-                            else:
-                                raise Exception(f"All variants failed. Last error: {error_msg}")
-                        
-                        # ВАЖНО: Проверяем, есть ли ошибки в JSON ответе!
-                        # API может вернуть 200, но с ошибкой в response.data.statuses
-                        statuses = result.get("response", {}).get("data", {}).get("statuses", [])
-                        
-                        if statuses and isinstance(statuses, list) and len(statuses) > 0:
-                            status_obj = statuses[0]
-                            if isinstance(status_obj, dict) and "error" in status_obj:
-                                error_msg = status_obj["error"]
-                                self.log_message(f"❌ Variant {i} failed with API error in response: {error_msg}", level="INFO")
-                                # Пробуем следующий вариант
-                                if i < len(variants_to_try):
-                                    continue
-                                else:
-                                    raise Exception(f"All variants failed. Last error: {error_msg}")
-                        
-                        # Нет ошибок в ответе - успех!
-                        self.log_message(f"✅ SUCCESS! Order {order_id} cancelled using variant {i} ({description})", level="INFO")
-                        return result
-                        
-                    except json.JSONDecodeError:
-                        # Если не удалось распарсить JSON, проверяем текст ответа
-                        if "err" in response_text.lower() or "error" in response_text.lower() or "does not exist" in response_text.lower():
-                            self.log_message(f"❌ Variant {i} failed: {response_text[:200]}", level="ERROR")
-                            if i < len(variants_to_try):
-                                continue
-                            else:
-                                raise Exception(f"All variants failed. Last error: {response_text[:200]}")
-                        else:
-                            # Неизвестный формат, но статус 200 - считаем успехом
-                            self.log_message(f"✅ SUCCESS! Order {order_id} cancelled (unexpected response format), variant {i}", level="INFO")
-                            return {"status": "ok"}
-                elif response.status == 422 or response.status == 404:
-                    # Ордер не найден с этим вариантом - пробуем следующий
-                    try:
-                        response_text = await response.text()
-                        self.log_message(f"❌ Variant {i} failed: order not found (status {response.status}), response: {response_text[:200]}", level="INFO")
-                        last_error = f"Status {response.status}: {response_text[:200]}"
-                    except Exception:
-                        last_error = f"Status {response.status}"
-                        self.log_message(f"❌ Variant {i} failed: order not found (status {response.status})", level="INFO")
-                    
-                    if i < len(variants_to_try):
-                        continue  # Пробуем следующий вариант
-                    else:
-                        # Это был последний вариант - проверим, есть ли ордер еще в списке открытых
-                        self.log_message(f"⚠️ All variants failed. Checking if order {order_id} still exists in open orders...", level="WARNING")
-                        
-                        # Проверяем список открытых ордеров
-                        try:
-                            open_orders = await self.get_account_orders()
-                            order_still_exists = any(
-                                o.get("oid") == order_id 
-                                for o in open_orders 
-                                if o.get("oid")
-                            )
-                            
-                            if order_still_exists:
-                                # Ордер ВСЕ ЕЩЕ в списке - это ОШИБКА!
-                                self.log_message(
-                                    f"❌ ERROR: Order {order_id} still exists in open orders after all cancel attempts! "
-                                    f"This is a failure, not success. Last error: {last_error}",
-                                    level="ERROR"
-                                )
-                                return {"status": "error", "message": "Order still exists after cancel attempts", "detail": last_error}
-                            else:
-                                # Ордер действительно не найден - возможно, был отменен вручную
-                                self.log_message(f"ℹ️ Order {order_id} not found in open orders (may have been cancelled manually)", level="INFO")
-                                return {"status": "ok", "message": "Order not found in open orders"}
-                        except Exception as check_error:
-                            self.log_message(f"⚠️ Failed to check open orders: {check_error}", level="WARNING")
-                            return {"status": "error", "message": "Failed to verify order cancellation", "detail": last_error}
+                except Exception:
+                    response_text = f"Status {response.status}, no response body"
+                
+                # Проверяем, не является ли это ошибкой "ордер не найден" (это нормально)
+                if response.status == 422 or response.status == 404:
+                    # Ордер уже не существует (отменен или исполнен) - это не ошибка
+                    logger.info(f"Order {order_id} not found or already cancelled (status {response.status})")
+                    return {"status": "ok", "message": "Order not found or already cancelled"}
                 else:
-                    # Другая ошибка - пробуем следующий вариант
-                    try:
-                        response_text = await response.text()
-                    except Exception:
-                        response_text = f"Status {response.status}, no response body"
-                    self.log_message(f"❌ Variant {i} failed: {response.status}, {response_text[:100]}", level="INFO")
-                    if i < len(variants_to_try):
-                        continue
-                    else:
-                        raise Exception(f"Failed to cancel order with all variants: last error {response.status}, {response_text[:200]}")
+                    # Другие ошибки - пробрасываем исключение
+                    raise Exception(f'Failed to cancel order: Status {response.status}, Response: {response_text[:200]}')
             
         except Exception as e:
             error_str = str(e)
