@@ -206,6 +206,7 @@ class HyperliquidBrowser:
 
             def normalize_action(obj):
                 if isinstance(obj, dict):
+                    # Специальная обработка для объектов ордера
                     if all(k in obj for k in ['a', 'b', 'p', 's', 'r', 't']):
                         return {
                             'a': int(obj['a']),
@@ -214,6 +215,20 @@ class HyperliquidBrowser:
                             's': normalize_number(obj['s']),
                             'r': bool(obj['r']),
                             't': normalize_action(obj['t'])
+                        }
+                    # Специальная обработка для cancel action
+                    # Порядок ключей должен быть: cancels -> type (как в браузере)
+                    elif 'cancels' in obj and 'type' in obj and obj.get('type') == 'cancel':
+                        return {
+                            'cancels': normalize_action(obj['cancels']),
+                            'type': obj['type']
+                        }
+                    # Специальная обработка для объектов отмены ордера (cancel item)
+                    # Порядок ключей должен быть: a -> o (как в браузере)
+                    elif all(k in obj for k in ['a', 'o']) and len(obj) == 2:
+                        return {
+                            'a': int(obj['a']),
+                            'o': int(obj['o'])
                         }
                     return {k: normalize_action(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
@@ -1336,12 +1351,14 @@ class HyperliquidBrowser:
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
             
             # Создаем правильную структуру action согласно реальному запросу
+            # ВАЖНО: порядок ключей должен совпадать с браузером для правильной подписи!
+            # Используем OrderedDict или Python 3.7+ сохраняет порядок вставки
             cancel_action = {
-                "type": "cancel",
                 "cancels": [{
                     "a": asset_id,  # Числовой asset ID (10142)
                     "o": order_id   # Order ID (не "oid"!)
-                }]
+                }],
+                "type": "cancel"
             }
             
             # Создаем nonce и expiresAfter
@@ -1408,25 +1425,26 @@ class HyperliquidBrowser:
             if response.status == 200:
                 try:
                     result = await response.json()
-                    
-                    # Проверяем, есть ли ошибки в ответе
-                    if result.get("status") == "err":
-                        error_msg = result.get("response", "Unknown error")
-                        raise Exception(f"API error: {error_msg}")
-                    
-                    # Проверяем statuses в ответе
-                    statuses = result.get("response", {}).get("data", {}).get("statuses", [])
-                    if statuses and isinstance(statuses, list) and len(statuses) > 0:
-                        status_obj = statuses[0]
-                        if isinstance(status_obj, dict) and "error" in status_obj:
-                            error_msg = status_obj["error"]
-                            raise Exception(f"API error in response: {error_msg}")
-                    
-                    return result
                 except Exception as json_error:
                     # Если не удалось распарсить JSON, но статус 200
-                    logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
+                    logger.warning(f"Failed to parse JSON response (status 200): {response_text[:500]}")
+                    # Если не JSON, считаем что запрос прошел успешно
                     return {"status": "ok"}
+                
+                # Проверяем, есть ли ошибки в ответе
+                if result.get("status") == "err":
+                    error_msg = result.get("response", "Unknown error")
+                    raise Exception(f"API error: {error_msg}")
+                
+                # Проверяем statuses в ответе
+                statuses = result.get("response", {}).get("data", {}).get("statuses", [])
+                if statuses and isinstance(statuses, list) and len(statuses) > 0:
+                    status_obj = statuses[0]
+                    if isinstance(status_obj, dict) and "error" in status_obj:
+                        error_msg = status_obj["error"]
+                        raise Exception(f"API error in response: {error_msg}")
+                
+                return result
             else:
                 # Если статус не 200, пытаемся получить текст ответа
                 try:
