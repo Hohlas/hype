@@ -218,7 +218,7 @@ class HyperliquidBrowser:
                         }
                     # Специальная обработка для cancel action
                     # Порядок ключей должен быть: cancels -> type (как в браузере)
-                    elif 'cancels' in obj and 'type' in obj and obj.get('type') == 'cancel':
+                    elif 'cancels' in obj and 'type' in obj and obj.get('type') == 'cancel' and len(obj) == 2:
                         return {
                             'cancels': normalize_action(obj['cancels']),
                             'type': obj['type']
@@ -239,6 +239,13 @@ class HyperliquidBrowser:
 
             # Нормализация и кодирование
             normalized_action = normalize_action(action)
+            
+            # Отладочный вывод для cancel action
+            if isinstance(action, dict) and action.get('type') == 'cancel':
+                import json
+                logger.info(f"[DEBUG] Normalized cancel action: {json.dumps(normalized_action, indent=2, default=str)}")
+                logger.info(f"[DEBUG] Normalized action keys order: {list(normalized_action.keys())}")
+            
             action_bytes = msgpack.packb(normalized_action, use_bin_type=True)
             
             # Создание буфера данных
@@ -251,6 +258,11 @@ class HyperliquidBrowser:
             
             # Хеширование данных
             action_hash = keccak(bytes(data))
+            
+            # Отладочный вывод для cancel action
+            if isinstance(action, dict) and action.get('type') == 'cancel':
+                logger.info(f"[DEBUG] Action hash (hex): {action_hash.hex()}")
+                logger.info(f"[DEBUG] Nonce: {nonce}")
             
             # Логирование только при ошибках
             
@@ -300,11 +312,17 @@ class HyperliquidBrowser:
                 raise Exception(f"EIP-712 подпись failed. Ошибка: {last_error}")
 
             # Возвращаем подпись в нужном формате
-            return {
+            signature_dict = {
                 "r": "0x" + signature.r.to_bytes(32, "big").hex(),
                 "s": "0x" + signature.s.to_bytes(32, "big").hex(),
                 "v": signature.v
             }
+            
+            # Отладочный вывод для cancel action
+            if isinstance(action, dict) and action.get('type') == 'cancel':
+                logger.info(f"[DEBUG] Signature: r={signature_dict['r'][:10]}..., s={signature_dict['s'][:10]}..., v={signature_dict['v']}")
+            
+            return signature_dict
             
         except Exception as e:
             self.log_message(f"Failed to sign L1 action: {e}", level="ERROR")
@@ -1365,6 +1383,13 @@ class HyperliquidBrowser:
             current_time_ms = int(time.time() * 1000)
             nonce = current_time_ms
             expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
+            
+            # Отладочный вывод структуры action
+            import json
+            logger.info(f"[DEBUG] Cancel action structure: {json.dumps(cancel_action, indent=2)}")
+            logger.info(f"[DEBUG] Cancel action keys order: {list(cancel_action.keys())}")
+            logger.info(f"[DEBUG] Wallet address: {self.wallet_address}")
+            logger.info(f"[DEBUG] Account address: {self.account.address if self.account else 'No account'}")
             
             # Подписываем action через sign_l1_action (EIP-712)
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
