@@ -1086,6 +1086,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         buy_trades = []
                         for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
+                            
                             # Ищем покупки
                             if trade_side in ['BUY', 'B']:
                                 buy_trades.append(trade)
@@ -1165,6 +1166,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             )
                                         except Exception as e:
                                             client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
+                                        
+                                        # Обновляем min_tp_price немедленно, не дожидаясь следующей итерации
+                                        # Это предотвращает повторное размещение Averaging ордера
+                                        if min_tp_price == 0 or tp_price < min_tp_price:
+                                            min_tp_price = tp_price
+                                            client.browser.log_message(
+                                                f"📊 Updated min_tp_price to ${min_tp_price:.2f}",
+                                                level="INFO"
+                                            )
                                         
                                     except Exception as e:
                                         client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
@@ -1265,157 +1275,176 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         # Выходим из try блока, finally все равно выполнится
                                         # (пропускаем остальной код обработки)
                                     else:
-                                        # Получаем время выставления TP ордера из saved order или из Trade History
-                                        tp_order_time = executed_order.get('timestamp')
+                                        # Проверяем время исполнения сделки продажи - игнорируем старые (> 5 минут)
+                                        sell_trade_time = sell_trade_from_history.get('time', 0)
+                                        should_process = True
                                         
-                                        # Используем время исполнения из Trade History, если доступно
-                                        if sell_trade_from_history and sell_trade_from_history.get('time'):
-                                            tp_order_time = sell_trade_from_history.get('time')
-                                        
-                                        if tp_order_time:
-                                            # Конвертируем в читаемый формат для проверки
-                                            from datetime import datetime
-                                            tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
-                                            client.browser.log_message(
-                                                f"📅 TP order executed at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
-                                                f"Actual price: ${tp_price:.2f} (limit was ${tp_price_fallback:.2f})",
-                                                level="INFO"
-                                            )
-                                        else:
-                                            client.browser.log_message(
-                                                f"⚠️ No timestamp found, using current time",
-                                                level="WARNING"
-                                            )
-                                        
-                                        # Находим связанную покупку для расчета прибыли
-                                        # Используем время выставления TP ордера, если доступно
-                                        
-                                        buy_trade = await find_matching_buy_trade(
-                                            client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
-                                        )
-                                        
-                                        # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
-                                        if buy_trade:
-                                            buy_price = buy_trade['px']
-                                            buy_size = buy_trade['sz']
+                                        if sell_trade_time:
+                                            import time
+                                            current_time_ms = int(time.time() * 1000)
+                                            age_minutes = (current_time_ms - sell_trade_time) / (1000 * 60)
                                             
-                                            # Получаем комиссии из API
-                                            buy_fee_str = buy_trade.get('fee', '0')
-                                            buy_fee_token = buy_trade.get('feeToken', '')
-                                            
-                                            # Рассчитываем комиссию покупки в USDC
-                                            buy_fee_usdc = 0.0
-                                            if buy_fee_token == 'USDC':
-                                                buy_fee_usdc = float(buy_fee_str)
-                                            elif buy_fee_token == 'UBTC' or buy_fee_token == 'BTC':
-                                                # Если комиссия в BTC, конвертируем в USDC по цене покупки
-                                                buy_fee_usdc = float(buy_fee_str) * buy_price
-                                            
-                                            # Получаем данные о продаже из Trade History для точной комиссии продажи
-                                            # Используем уже полученный sell_trade_from_history
-                                            sell_fee_usdc = 0.0
-                                            sell_fee_token = 'USDC'  # Значение по умолчанию
-                                            
-                                            if sell_trade_from_history:
-                                                sell_fee_str = sell_trade_from_history.get('fee', '0')
-                                                sell_fee_token = sell_trade_from_history.get('feeToken', 'USDC')
-                                                
-                                                if sell_fee_token == 'USDC':
-                                                    sell_fee_usdc = float(sell_fee_str)
-                                                elif sell_fee_token == 'UBTC' or sell_fee_token == 'BTC':
-                                                    # Если комиссия в BTC, конвертируем в USDC по цене продажи
-                                                    sell_fee_usdc = float(sell_fee_str) * tp_price
-                                            
-                                            
-                                            # Расчет выручки от продажи
-                                            sell_total = filled_qty * tp_price
-                                            sell_revenue = sell_total - sell_fee_usdc
-                                            
-                                            client.browser.log_message(
-                                                f"  💵 SELL: {filled_qty:.6f} BTC × ${tp_price:.2f} = ${sell_total:.2f} "
-                                                f"| Fee: ${sell_fee_usdc:.4f} ({sell_fee_token}) | "
-                                                f"Net revenue: ${sell_revenue:.2f}",
-                                                level="INFO"
-                                            )
-                                            
-                                            # Расчет затрат на покупку
-                                            buy_total = buy_size * buy_price
-                                            buy_cost = buy_total + buy_fee_usdc
-                                            
-                                            client.browser.log_message(
-                                                f"  💵 BUY: {buy_size:.6f} BTC × ${buy_price:.2f} = ${buy_total:.2f} "
-                                                f"| Fee: ${buy_fee_usdc:.4f} ({buy_fee_token}) | "
-                                                f"Total cost: ${buy_cost:.2f}",
-                                                level="INFO"
-                                            )
-                                            
-                                            # Чистая прибыль = выручка - затраты
-                                            profit = sell_revenue - buy_cost
-                                            
-                                            client.browser.log_message(
-                                                f"  💰 PROFIT: ${sell_revenue:.2f} (revenue) - ${buy_cost:.2f} (cost) = ${profit:.2f}",
-                                                level="INFO"
-                                            )
-                                            
-                                            # Проверка на аномально большой профит
-                                            if profit > filled_qty * float(settings.STEP) * 2:
+                                            if age_minutes > 5:
                                                 client.browser.log_message(
-                                                    f"⚠️ WARNING: Profit ${profit:.2f} seems unusually high! "
-                                                    f"Expected max ~${filled_qty * float(settings.STEP):.2f} (STEP × size)",
+                                                    f"⏰ Skipping old Take Profit trade (executed {age_minutes:.1f} minutes ago)",
+                                                    level="INFO"
+                                                )
+                                                # Пропускаем обработку старой сделки, переходим к finally
+                                                should_process = False
+                                        
+                                        # Обрабатываем только если сделка свежая (< 5 минут) или время не определено
+                                        if should_process:
+                                            # Получаем время выставления TP ордера из saved order или из Trade History
+                                            tp_order_time = executed_order.get('timestamp')
+                                            
+                                            # Используем время исполнения из Trade History, если доступно
+                                            if sell_trade_from_history and sell_trade_from_history.get('time'):
+                                                tp_order_time = sell_trade_from_history.get('time')
+                                            
+                                            if tp_order_time:
+                                                # Конвертируем в читаемый формат для проверки
+                                                from datetime import datetime
+                                                tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
+                                                client.browser.log_message(
+                                                    f"📅 TP order executed at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
+                                                    f"Actual price: ${tp_price:.2f} (limit was ${tp_price_fallback:.2f})",
+                                                    level="INFO"
+                                                )
+                                            else:
+                                                client.browser.log_message(
+                                                    f"⚠️ No timestamp found, using current time",
                                                     level="WARNING"
                                                 )
-                                        else:
-                                            # Если не нашли связанную покупку, используем упрощенный расчет
-                                            # (fallback на случай, если не удалось найти покупку)
-                                            step_profit = filled_qty * float(settings.STEP)
-                                            estimated_commission = filled_qty * tp_price * 0.0002  # 0.02% комиссия
-                                            profit = step_profit - estimated_commission
                                             
+                                            # Находим связанную покупку для расчета прибыли
+                                            # Используем время выставления TP ордера, если доступно
+                                            
+                                            buy_trade = await find_matching_buy_trade(
+                                                client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
+                                            )
+                                            
+                                            # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
+                                            if buy_trade:
+                                                buy_price = buy_trade['px']
+                                                buy_size = buy_trade['sz']
+                                                
+                                                # Получаем комиссии из API
+                                                buy_fee_str = buy_trade.get('fee', '0')
+                                                buy_fee_token = buy_trade.get('feeToken', '')
+                                                
+                                                # Рассчитываем комиссию покупки в USDC
+                                                buy_fee_usdc = 0.0
+                                                if buy_fee_token == 'USDC':
+                                                    buy_fee_usdc = float(buy_fee_str)
+                                                elif buy_fee_token == 'UBTC' or buy_fee_token == 'BTC':
+                                                    # Если комиссия в BTC, конвертируем в USDC по цене покупки
+                                                    buy_fee_usdc = float(buy_fee_str) * buy_price
+                                                
+                                                # Получаем данные о продаже из Trade History для точной комиссии продажи
+                                                # Используем уже полученный sell_trade_from_history
+                                                sell_fee_usdc = 0.0
+                                                sell_fee_token = 'USDC'  # Значение по умолчанию
+                                                
+                                                if sell_trade_from_history:
+                                                    sell_fee_str = sell_trade_from_history.get('fee', '0')
+                                                    sell_fee_token = sell_trade_from_history.get('feeToken', 'USDC')
+                                                    
+                                                    if sell_fee_token == 'USDC':
+                                                        sell_fee_usdc = float(sell_fee_str)
+                                                    elif sell_fee_token == 'UBTC' or sell_fee_token == 'BTC':
+                                                        # Если комиссия в BTC, конвертируем в USDC по цене продажи
+                                                        sell_fee_usdc = float(sell_fee_str) * tp_price
+                                                
+                                                
+                                                # Расчет выручки от продажи
+                                                sell_total = filled_qty * tp_price
+                                                sell_revenue = sell_total - sell_fee_usdc
+                                                
+                                                client.browser.log_message(
+                                                    f"  💵 SELL: {filled_qty:.6f} BTC × ${tp_price:.2f} = ${sell_total:.2f} "
+                                                    f"| Fee: ${sell_fee_usdc:.4f} ({sell_fee_token}) | "
+                                                    f"Net revenue: ${sell_revenue:.2f}",
+                                                    level="INFO"
+                                                )
+                                                
+                                                # Расчет затрат на покупку
+                                                buy_total = buy_size * buy_price
+                                                buy_cost = buy_total + buy_fee_usdc
+                                                
+                                                client.browser.log_message(
+                                                    f"  💵 BUY: {buy_size:.6f} BTC × ${buy_price:.2f} = ${buy_total:.2f} "
+                                                    f"| Fee: ${buy_fee_usdc:.4f} ({buy_fee_token}) | "
+                                                    f"Total cost: ${buy_cost:.2f}",
+                                                    level="INFO"
+                                                )
+                                                
+                                                # Чистая прибыль = выручка - затраты
+                                                profit = sell_revenue - buy_cost
+                                                
+                                                client.browser.log_message(
+                                                    f"  💰 PROFIT: ${sell_revenue:.2f} (revenue) - ${buy_cost:.2f} (cost) = ${profit:.2f}",
+                                                    level="INFO"
+                                                )
+                                                
+                                                # Проверка на аномально большой профит
+                                                if profit > filled_qty * float(settings.STEP) * 2:
+                                                    client.browser.log_message(
+                                                        f"⚠️ WARNING: Profit ${profit:.2f} seems unusually high! "
+                                                        f"Expected max ~${filled_qty * float(settings.STEP):.2f} (STEP × size)",
+                                                        level="WARNING"
+                                                    )
+                                            else:
+                                                # Если не нашли связанную покупку, используем упрощенный расчет
+                                                # (fallback на случай, если не удалось найти покупку)
+                                                step_profit = filled_qty * float(settings.STEP)
+                                                estimated_commission = filled_qty * tp_price * 0.0002  # 0.02% комиссия
+                                                profit = step_profit - estimated_commission
+                                                
+                                                client.browser.log_message(
+                                                    f"⚠️ Buy trade not found, using STEP-based estimation: ${profit:.2f}",
+                                                    level="WARNING"
+                                                )
+                                            
+                                            # Обновляем предыдущий баланс для следующей итерации
+                                            client._previous_usdc_balance = usdc_balance
+                                            
+                                            # Записываем статистику операции Take Profit
+                                            try:
+                                                await log_statistics_to_excel(
+                                                    client=client,
+                                                    operation="Take Profit",
+                                                    btc_amount=filled_qty,
+                                                    price=tp_price,
+                                                    usdc_balance=usdc_balance,
+                                                    btc_balance=btc_balance,
+                                                    total_value=total_usd_value,
+                                                    orders=open_orders
+                                                )
+                                            except Exception as e:
+                                                client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
+                                            
+                                            # Формируем сообщение согласно требованиям
+                                            # Используем фактический размер исполнения из Trade History
                                             client.browser.log_message(
-                                                f"⚠️ Buy trade not found, using STEP-based estimation: ${profit:.2f}",
-                                                level="WARNING"
+                                                f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}BTC | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
+                                                level="INFO"
                                             )
-                                        
-                                        # Обновляем предыдущий баланс для следующей итерации
-                                        client._previous_usdc_balance = usdc_balance
-                                        
-                                        # Записываем статистику операции Take Profit
-                                        try:
-                                            await log_statistics_to_excel(
-                                                client=client,
-                                                operation="Take Profit",
-                                                btc_amount=filled_qty,
-                                                price=tp_price,
-                                                usdc_balance=usdc_balance,
-                                                btc_balance=btc_balance,
-                                                total_value=total_usd_value,
-                                                orders=open_orders
+                                            
+                                            # Отправляем уведомление в Telegram согласно требованиям
+                                            profit_message = f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}'
+                                            await send_tg_notification(
+                                                client,
+                                                text=profit_message,
+                                                save_to_report=False
                                             )
-                                        except Exception as e:
-                                            client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
-                                        
-                                        # Формируем сообщение согласно требованиям
-                                        # Используем фактический размер исполнения из Trade History
-                                        client.browser.log_message(
-                                            f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}BTC | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
-                                            level="INFO"
-                                        )
-                                        
-                                        # Отправляем уведомление в Telegram согласно требованиям
-                                        profit_message = f'🎯 Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}'
-                                        await send_tg_notification(
-                                            client,
-                                            text=profit_message,
-                                            save_to_report=False
-                                        )
-                                        
-                                        # Дублируем сообщение о профите в PROFIT_BOT_TOKEN
-                                        await send_profit_notification(profit_message)
-                                        
-                                        # Устанавливаем флаг, чтобы пропустить вывод списка ордеров после профита
-                                        if not hasattr(client, '_skip_orders_log_after_profit'):
-                                            client._skip_orders_log_after_profit = False
-                                        client._skip_orders_log_after_profit = True
+                                            
+                                            # Дублируем сообщение о профите в PROFIT_BOT_TOKEN
+                                            await send_profit_notification(profit_message)
+                                            
+                                            # Устанавливаем флаг, чтобы пропустить вывод списка ордеров после профита
+                                            if not hasattr(client, '_skip_orders_log_after_profit'):
+                                                client._skip_orders_log_after_profit = False
+                                            client._skip_orders_log_after_profit = True
                                 
                                 except Exception as e:
                                     client.browser.log_message(
