@@ -983,7 +983,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
-        # Тестируем функцию расчета прибыли при запуске (закомментировано - используем расчет через баланс)
+        # Тестируем функцию расчета прибыли при запуске (сейчас используем расчет через баланс)
         # client.browser.log_message("🔍 Testing profit calculation function...", level="INFO")
         # test_profit = await calculate_real_profit(client, token_name, 0.001, 110000.0)
         # client.browser.log_message(f"🔍 Test profit calculation result: ${test_profit:.2f}", level="INFO")
@@ -993,6 +993,28 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional = await client.load_token_limits(token_name)
+        
+        # Получаем информацию о последней покупке из Trade History при старте 
+        last_buy_price = None
+        last_buy_size = None
+        try:
+            trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
+            if trades_history:
+                # История уже отсортирована от новых к старым
+                for trade in trades_history:
+                    trade_side = trade.get('side', '').upper()
+                    # Ищем последнюю покупку
+                    if trade_side in ['BUY', 'B']:
+                        last_buy_price = float(trade.get('px', 0))
+                        last_buy_size = float(trade.get('sz', 0))
+                        if last_buy_price > 0 and last_buy_size > 0:
+                            client.browser.log_message(
+                                f"📊 Last buy: {last_buy_size:.6f} {token_name} @ ${last_buy_price:.2f}",
+                                level="INFO"
+                            )
+                            break
+        except Exception as e:
+            client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
         
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
