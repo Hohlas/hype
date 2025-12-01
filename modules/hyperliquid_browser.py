@@ -326,8 +326,9 @@ class HyperliquidBrowser:
         try:
             import json
             
-            # Определяем chainId для Arbitrum
-            chain_id = 42161 if is_mainnet else 421614
+            # Определяем chainId для Hyperliquid (L1 blockchain)
+            # Используем 1337 как в оригинальном коде для Hyperliquid mainnet
+            chain_id = 1337 if is_mainnet else 421614
             
             logger.info(f"[DEBUG] Signing cancel action with wallet: {self.wallet_address}")
             logger.info(f"[DEBUG] ChainId: {chain_id}")
@@ -1437,9 +1438,9 @@ class HyperliquidBrowser:
         Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем обычный API endpoint (не api-ui!)
-            # Важно: для cancel используется api.hyperliquid.xyz, как в примере Perplexity
-            url = f"{self.BASE_URL}/exchange"
+            # Используем api-ui endpoint как в вашем curl-запросе
+            # С новой правильной EIP-712 структурой это должно работать
+            url = "https://api-ui.hyperliquid.xyz/exchange"
             
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
@@ -1471,6 +1472,9 @@ class HyperliquidBrowser:
                 "signature": signature,
                 "vaultAddress": None
             }
+            
+            # Отладочный вывод финального payload перед отправкой
+            logger.info(f"[DEBUG] Final payload JSON: {json.dumps(cancel_payload, indent=2)}")
             
             # Используем тот же метод отправки, что и для обычных ордеров
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
