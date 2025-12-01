@@ -932,18 +932,6 @@ async def create_stop_market_order(client, token_name: str, stop_price: float, u
         )
         
         if success and order_result:
-            # Создаем TP ордер
-            entry_price = Decimal(str(order_result.get("avgPrice", stop_price)))
-            order_qty = Decimal(str(order_result.get("executedQty", usdc_amount / stop_price)))
-            
-            await create_tp_order(
-                client,
-                token_name=token_name,
-                entry_price=entry_price,
-                order_qty=order_qty,
-                step=step
-            )
-            
             return True
         
         return False
@@ -974,40 +962,6 @@ async def create_limit_order(client, token_name: str, limit_price: float, usdc_a
         )
         
         if success and order_result:
-            # Создаем TP ордер
-            entry_price = Decimal(str(order_result.get("avgPrice", limit_price)))
-            order_qty = Decimal(str(order_result.get("executedQty", usdc_amount / limit_price)))
-            
-            # Рассчитываем цену TP
-            tp_price = float(entry_price + step)
-            
-            await create_tp_order(
-                client,
-                token_name=token_name,
-                entry_price=entry_price,
-                order_qty=order_qty,
-                step=step
-            )
-            
-            # Записываем статистику операции Set TP
-            try:
-                all_balances = await client.browser.get_all_balances()
-                current_price = float(await client.browser.get_token_price("BTC"))
-                usdc_balance = all_balances.get("USDC", 0.0)
-                btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                total_value = usdc_balance + (btc_balance * current_price)
-                await log_statistics_to_excel(
-                    client=client,
-                    operation="Set TP",
-                    btc_amount=float(order_qty),
-                    price=tp_price,
-                    usdc_balance=usdc_balance,
-                    btc_balance=btc_balance,
-                    total_value=total_value
-                )
-            except Exception as e:
-                client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
-            
             return True
         
         return False
@@ -1522,45 +1476,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         )
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
-                    
-                    # Сразу ставим TP ордер на продажу с расчетом от фактической цены
-                    tp_price = actual_price + float(step)
-                    client.browser.log_message(
-                        f"🎯 Set TP ${tp_price:.2f}",
-                        level="INFO"
-                    )
-                    
-                    # Отправляем уведомление о TP ордере
-                    await send_tg_notification(
-                        client,
-                        f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
-                        save_to_report=False
-                    )
-                    
-                    # Записываем статистику операции Set TP
-                    try:
-                        usdc_balance = all_balances.get("USDC", 0.0)
-                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                        total_value = usdc_balance + (btc_balance * current_price)
-                        await log_statistics_to_excel(
-                            client=client,
-                            operation="Set TP",
-                            btc_amount=token_amount,
-                            price=tp_price,
-                            usdc_balance=usdc_balance,
-                            btc_balance=btc_balance,
-                            total_value=total_value
-                        )
-                    except Exception as e:
-                        client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
-                    
-                    await client.place_order(
-                        token=token_name,
-                        side="SELL",
-                        order_type="LIMIT",
-                        price=tp_price,
-                        usdc_amount=usdc_amount
-                    )
                 
                 # 2. Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
@@ -1661,44 +1576,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             )
                         except Exception as e:
                             client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
-                        
-                        # Сразу ставим TP ордер на продажу с расчетом от фактической цены
-                        tp_price = actual_price + float(step)
-                        client.browser.log_message(
-                            f"🎯 Set TP ${tp_price:.2f}",
-                            level="INFO"
-                        )
-                        
-                        # Отправляем уведомление о TP ордере
-                        await send_tg_notification(
-                            client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
-                            save_to_report=False
-                        )
-                        
-                        await client.place_order(
-                            token=token_name,
-                            side="SELL",
-                            order_type="LIMIT",
-                            price=tp_price,
-                            usdc_amount=usdc_amount
-                        )
-                        
-                        # Записываем статистику операции Set TP
-                        try:
-                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                            total_value = usdc_balance + (btc_balance * current_price)
-                            await log_statistics_to_excel(
-                                client=client,
-                                operation="Set TP",
-                                btc_amount=token_amount,
-                                price=tp_price,
-                                usdc_balance=usdc_balance,
-                                btc_balance=btc_balance,
-                                total_value=total_value
-                            )
-                        except Exception as e:
-                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
@@ -1801,44 +1678,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
-                        
-                        # Сразу ставим TP ордер на продажу с расчетом от фактической цены
-                        tp_price = actual_price + float(step)
-                        client.browser.log_message(
-                            f"🎯 Set TP ${tp_price:.2f}",
-                            level="INFO"
-                        )
-                        
-                        # Отправляем уведомление о TP ордере
-                        await send_tg_notification(
-                            client,
-                            f"🎯 <b>Set TP</b>\n{token_amount:.6f}{token_name} / ${tp_price:.2f}",
-                            save_to_report=False
-                        )
-                        
-                        await client.place_order(
-                            token=token_name,
-                            side="SELL",
-                            order_type="LIMIT",
-                            price=tp_price,
-                            usdc_amount=usdc_amount
-                        )
-                        
-                        # Записываем статистику операции Set TP
-                        try:
-                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                            total_value = usdc_balance + (btc_balance * current_price)
-                            await log_statistics_to_excel(
-                                client=client,
-                                operation="Set TP",
-                                btc_amount=token_amount,
-                                price=tp_price,
-                                usdc_balance=usdc_balance,
-                                btc_balance=btc_balance,
-                                total_value=total_value
-                            )
-                        except Exception as e:
-                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                 
                 await async_sleep(10)
                 
