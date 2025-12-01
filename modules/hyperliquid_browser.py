@@ -185,7 +185,10 @@ class HyperliquidBrowser:
         return rounded
 
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
-        """Подписывает action для Hyperliquid L1 с EIP-712"""
+        """
+        Подписывает action для Hyperliquid L1 с EIP-712.
+        Для cancel action использует специальную структуру EIP-712.
+        """
         try:
             # Проверим наличие аккаунта
             if not self.account:
@@ -194,6 +197,14 @@ class HyperliquidBrowser:
             # Проверка соответствия адреса
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+            
+            action_type = action.get("type")
+            
+            # Для cancel action используем специальную структуру EIP-712
+            if action_type == "cancel":
+                return self._sign_cancel_action(action, nonce, is_mainnet)
+            
+            # Для других типов действий (order, etc.) используем старый метод
             
             def normalize_number(n):
                 if isinstance(n, str):
@@ -234,13 +245,6 @@ class HyperliquidBrowser:
 
             # Нормализация и кодирование
             normalized_action = normalize_action(action)
-            
-            # Отладочный вывод для cancel action
-            if isinstance(action, dict) and action.get('type') == 'cancel':
-                import json
-                logger.info(f"[DEBUG] Normalized cancel action: {json.dumps(normalized_action, indent=2, default=str)}")
-                logger.info(f"[DEBUG] Normalized action keys order: {list(normalized_action.keys())}")
-            
             action_bytes = msgpack.packb(normalized_action, use_bin_type=True)
             
             # Создание буфера данных
@@ -253,11 +257,6 @@ class HyperliquidBrowser:
             
             # Хеширование данных
             action_hash = keccak(bytes(data))
-            
-            # Отладочный вывод для cancel action
-            if isinstance(action, dict) and action.get('type') == 'cancel':
-                logger.info(f"[DEBUG] Action hash (hex): {action_hash.hex()}")
-                logger.info(f"[DEBUG] Nonce: {nonce}")
             
             # Логирование только при ошибках
             
@@ -313,14 +312,92 @@ class HyperliquidBrowser:
                 "v": signature.v
             }
             
-            # Отладочный вывод для cancel action
-            if isinstance(action, dict) and action.get('type') == 'cancel':
-                logger.info(f"[DEBUG] Signature: r={signature_dict['r'][:10]}..., s={signature_dict['s'][:10]}..., v={signature_dict['v']}")
-            
             return signature_dict
             
         except Exception as e:
             self.log_message(f"Failed to sign L1 action: {e}", level="ERROR")
+            raise
+    
+    def _sign_cancel_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
+        """
+        Специальная подпись для cancel action с правильной структурой EIP-712.
+        Основано на Perplexity примере и официальной документации Hyperliquid.
+        """
+        try:
+            import json
+            
+            # Определяем chainId для Arbitrum
+            chain_id = 42161 if is_mainnet else 421614
+            
+            logger.info(f"[DEBUG] Signing cancel action with wallet: {self.wallet_address}")
+            logger.info(f"[DEBUG] ChainId: {chain_id}")
+            
+            # Формируем typed data для EIP-712 (специально для cancel)
+            typed_data = {
+                "domain": {
+                    "name": "Exchange",
+                    "version": "1",
+                    "chainId": chain_id,
+                    "verifyingContract": "0x0000000000000000000000000000000000000000"
+                },
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
+                    ],
+                    "Cancel": [
+                        {"name": "a", "type": "uint32"},
+                        {"name": "o", "type": "uint64"}
+                    ],
+                    "CancelRequest": [
+                        {"name": "cancels", "type": "Cancel[]"},
+                        {"name": "nonce", "type": "uint64"}
+                    ]
+                },
+                "primaryType": "CancelRequest",
+                "message": {
+                    "cancels": action["cancels"],
+                    "nonce": nonce
+                }
+            }
+            
+            logger.info(f"[DEBUG] EIP-712 cancel message: {json.dumps(typed_data['message'], indent=2)}")
+            
+            # Кодируем typed data
+            encoded_data = encode_structured_data(typed_data)
+            
+            # Подписываем используя приватный ключ
+            signed_message = self.account.sign_message(encoded_data)
+            
+            # Формируем результат
+            signature = {
+                "r": "0x" + signed_message.r.to_bytes(32, 'big').hex(),
+                "s": "0x" + signed_message.s.to_bytes(32, 'big').hex(),
+                "v": signed_message.v
+            }
+            
+            logger.info(f"[DEBUG] Cancel signature created: r={signature['r'][:10]}..., s={signature['s'][:10]}..., v={signature['v']}")
+            
+            # Проверяем что подпись валидна
+            from eth_account.messages import _hash_eip191_message
+            recovered_address = self.account.recover_message(encoded_data, signature=signed_message)
+            
+            if recovered_address.lower() != self.wallet_address.lower():
+                logger.error(f"[ERROR] Signature verification failed! Expected {self.wallet_address}, got {recovered_address}")
+                raise Exception(f"Signature verification failed: address mismatch")
+            
+            logger.info(f"[DEBUG] ✅ Signature verified OK for address {self.wallet_address}")
+            
+            return signature
+            
+        except Exception as e:
+            logger.error(f"Failed to sign cancel action: {e}")
             raise
 
     async def _sign_message(self, message: dict) -> str:
@@ -1378,16 +1455,8 @@ class HyperliquidBrowser:
             nonce = int(time.time() * 1000)
             expires_after = nonce + 14000  # expiresAfter = nonce + 14 секунд (как в веб-терминале)
             
-            # Отладочный вывод структуры action
-            import json
-            logger.info(f"[DEBUG] Order ID: {order_id} (type: {type(order_id).__name__})")
-            logger.info(f"[DEBUG] Asset ID: {asset_id} (type: {type(asset_id).__name__})")
-            logger.info(f"[DEBUG] Cancel action structure: {json.dumps(cancel_action, indent=2)}")
-            logger.info(f"[DEBUG] Cancel action keys order: {list(cancel_action.keys())}")
-            logger.info(f"[DEBUG] Wallet address: {self.wallet_address}")
-            logger.info(f"[DEBUG] Account address: {self.account.address if self.account else 'No account'}")
-            
             # Подписываем action через sign_l1_action (EIP-712)
+            # Для cancel будет использован специальный метод _sign_cancel_action
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
             # Формируем финальный payload с expiresAfter и isFrontend (как в браузере для api-ui)
@@ -1399,10 +1468,6 @@ class HyperliquidBrowser:
                 "signature": signature,
                 "vaultAddress": None
             }
-            
-            # Отладочный вывод финального payload
-            logger.info(f"[DEBUG] Final cancel payload keys order: {list(cancel_payload.keys())}")
-            logger.info(f"[DEBUG] URL: {url}")
             
             # Используем тот же метод отправки, что и для обычных ордеров
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
