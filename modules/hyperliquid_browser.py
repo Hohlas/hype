@@ -386,7 +386,10 @@ class HyperliquidBrowser:
             
             # Проверяем что подпись валидна
             from eth_account import Account
-            recovered_address = Account.recover_message(encoded_data, signature=signed_message)
+            recovered_address = Account.recover_message(
+                encoded_data,
+                vrs=(signed_message.v, signed_message.r, signed_message.s)
+            )
             
             if recovered_address.lower() != self.wallet_address.lower():
                 logger.error(f"[ERROR] Signature verification failed! Expected {self.wallet_address}, got {recovered_address}")
