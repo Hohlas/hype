@@ -1338,79 +1338,40 @@ class HyperliquidBrowser:
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
             
-            # ВАЖНО: Если передан coin напрямую из ордера API, используем его БЕЗ преобразования!
-            # API возвращает ордера с полем coin, и для отмены нужно использовать ТОЧНО такое же значение
-            if isinstance(token_name_or_asset_id, str) and token_name_or_asset_id.startswith("@"):
-                # Это coin из API в формате "@142" - используем его КАК ЕСТЬ, без преобразования!
-                self.log_message(f"🔍 DEBUG: Using coin from API as-is: {token_name_or_asset_id}", level="INFO")
-                
-                cancel_payload = {
-                    "action": {
-                        "type": "cancel",
-                        "cancels": [{
-                            "coin": token_name_or_asset_id,  # Используем КАК ЕСТЬ из API
-                            "oid": order_id
-                        }]
-                    },
-                    "nonce": int(time.time() * 1000),
-                }
-                
-                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
-                
-                if response.status == 200:
-                    try:
-                        result = await response.json()
-                        self.log_message(f"✅ SUCCESS! Order cancelled using coin as-is: {token_name_or_asset_id}", level="INFO")
-                        return result
-                    except Exception:
-                        response_text = await response.text()
-                        self.log_message(f"✅ SUCCESS! Order cancelled (no JSON response)", level="INFO")
-                        return {"status": "ok"}
-                elif response.status == 422 or response.status == 404:
-                    self.log_message(f"Order {order_id} not found or already cancelled (status {response.status})", level="INFO")
-                    return {"status": "ok", "message": "Order not found or already cancelled"}
-                else:
-                    try:
-                        response_text = await response.text()
-                    except Exception:
-                        response_text = f"Status {response.status}"
-                    raise Exception(f"Failed to cancel order: {response.status}, {response_text[:200]}")
-            
-            # Если не формат "@XXX", пробуем разные варианты последовательно
+            # Построить список вариантов для попытки
             variants_to_try = []
             
             if isinstance(token_name_or_asset_id, str):
                 if token_name_or_asset_id.startswith("@"):
-                    # Вариант 1: строка "@142" как есть
-                    variants_to_try.append((token_name_or_asset_id, "string @142 as-is"))
-                    # Вариант 2: базовый ID 142
+                    # Формат "@142" - пробуем его первым, потом числовые варианты
+                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
                     base_id = int(token_name_or_asset_id[1:])
-                    variants_to_try.append((base_id, "base ID 142"))
-                    # Вариант 3: spot asset ID 10142
-                    variants_to_try.append((10000 + base_id, "spot ID 10142"))
-                    # Вариант 4: строка "10142"
-                    variants_to_try.append((str(10000 + base_id), "string '10142'"))
+                    variants_to_try.append((base_id, f"base ID {base_id}"))
+                    variants_to_try.append((10000 + base_id, f"spot ID {10000 + base_id}"))
+                    variants_to_try.append((str(10000 + base_id), f"string '{10000 + base_id}'"))
                 elif "-SPOT" in token_name_or_asset_id:
-                    # Вариант 1: строка "BTC-SPOT" как есть
-                    variants_to_try.append((token_name_or_asset_id, "string 'BTC-SPOT' as-is"))
-                    # Вариант 2: spot asset ID через API
+                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
                     spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
                     variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
                     variants_to_try.append((spot_asset_id - 10000, f"base ID from API {spot_asset_id - 10000}"))
+                    variants_to_try.append((f"@{spot_asset_id - 10000}", f"@-format from API"))
                 else:
-                    # Название токена -> пробуем добавить "-SPOT"
+                    # Обычное имя типа 'BTC'
                     variants_to_try.append((f"{token_name_or_asset_id}-SPOT", f"string '{token_name_or_asset_id}-SPOT'"))
                     spot_asset_id = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
                     variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
+                    variants_to_try.append((f"@{spot_asset_id - 10000}", f"@-format from API"))
             elif isinstance(token_name_or_asset_id, int):
                 if token_name_or_asset_id >= 10000:
                     # Spot asset ID
                     variants_to_try.append((token_name_or_asset_id, f"spot ID {token_name_or_asset_id}"))
                     variants_to_try.append((token_name_or_asset_id - 10000, f"base ID {token_name_or_asset_id - 10000}"))
+                    variants_to_try.append((f"@{token_name_or_asset_id - 10000}", f"@-format"))
                 else:
-                    # Базовый ID
+                    # Base ID
                     variants_to_try.append((token_name_or_asset_id, f"base ID {token_name_or_asset_id}"))
                     variants_to_try.append((10000 + token_name_or_asset_id, f"spot ID {10000 + token_name_or_asset_id}"))
+                    variants_to_try.append((f"@{token_name_or_asset_id}", f"@-format"))
             
             # Пробуем каждый вариант
             for i, (coin_value, description) in enumerate(variants_to_try, 1):
@@ -1433,12 +1394,31 @@ class HyperliquidBrowser:
                 if response.status == 200:
                     try:
                         result = await response.json()
-                        self.log_message(f"✅ SUCCESS! Variant {i} worked: {description}", level="INFO")
-                        return result  # Успех! Возвращаем результат
+                        
+                        # ВАЖНО: Проверяем, есть ли ошибки в JSON ответе!
+                        # API может вернуть 200, но с ошибкой в response.data.statuses
+                        statuses = result.get("response", {}).get("data", {}).get("statuses", [])
+                        
+                        if statuses and isinstance(statuses, list) and len(statuses) > 0:
+                            status_obj = statuses[0]
+                            if isinstance(status_obj, dict) and "error" in status_obj:
+                                error_msg = status_obj["error"]
+                                self.log_message(f"❌ Variant {i} failed with API error in response: {error_msg}", level="INFO")
+                                # Пробуем следующий вариант
+                                if i < len(variants_to_try):
+                                    continue
+                                else:
+                                    raise Exception(f"All variants failed. Last error: {error_msg}")
+                        
+                        # Нет ошибок в ответе - успех!
+                        self.log_message(f"✅ SUCCESS! Order {order_id} cancelled using variant {i} ({description})", level="INFO")
+                        return result
+                        
                     except Exception as json_error:
                         response_text = await response.text()
                         logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
-                        self.log_message(f"✅ SUCCESS! Variant {i} worked: {description} (no JSON)", level="INFO")
+                        # Если не удалось распарсить JSON, но статус 200 - считаем успехом
+                        self.log_message(f"✅ SUCCESS! Order {order_id} cancelled (no JSON), variant {i}", level="INFO")
                         return {"status": "ok"}
                 elif response.status == 422 or response.status == 404:
                     # Ордер не найден с этим вариантом - пробуем следующий
