@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct, encode_structured_data
+from eth_account.messages import encode_defunct
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -284,8 +284,18 @@ class HyperliquidBrowser:
             }
             
             # Кодируем и подписываем
-            encoded_data = encode_structured_data(structured_data)
-            signed_message = self.account.sign_message(encoded_data)
+            # Пробуем использовать sign_typed_data напрямую (если доступен)
+            try:
+                signed_message = self.account.sign_typed_data(structured_data)
+            except AttributeError:
+                # Fallback: используем encode_structured_data если доступен
+                try:
+                    from eth_account.messages import encode_structured_data
+                    encoded_data = encode_structured_data(structured_data)
+                    signed_message = self.account.sign_message(encoded_data)
+                except ImportError:
+                    # Если ничего не доступно, используем старый метод
+                    raise Exception("Neither sign_typed_data nor encode_structured_data available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
