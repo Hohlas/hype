@@ -1338,47 +1338,49 @@ class HyperliquidBrowser:
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
             
-            # Для spot ордеров API требует числовой asset ID в формате 10000 + index
-            # Например, для BTC это 10142 (не просто 142!)
+            # ВАЖНО: Для отмены ордеров нужен БАЗОВЫЙ asset ID (142), а не spot format (10142)!
+            # При создании ордеров используется spot asset ID (10000+base), но для отмены - базовый ID
             coin_value = token_name_or_asset_id
             
             if isinstance(token_name_or_asset_id, str):
                 if token_name_or_asset_id.startswith("@"):
-                    # Формат "@142" -> нужно преобразовать в spot asset ID: 10000 + 142 = 10142
+                    # Формат "@142" -> используем БАЗОВЫЙ ID: 142 (не 10142!)
                     base_id = int(token_name_or_asset_id[1:])
-                    coin_value = 10000 + base_id
-                    self.log_message(f"🔍 DEBUG: Converted {token_name_or_asset_id} -> {coin_value}", level="INFO")
+                    coin_value = base_id  # Используем базовый ID без добавления 10000
+                    self.log_message(f"🔍 DEBUG: Converted {token_name_or_asset_id} -> {coin_value} (base ID)", level="INFO")
                 elif "-SPOT" in token_name_or_asset_id:
-                    # Формат "BTC-SPOT" -> получаем asset ID через API
-                    coin_value = await self._get_spot_asset_id(token_name_or_asset_id)
-                    self.log_message(f"🔍 DEBUG: Got asset_id from API for {token_name_or_asset_id} -> {coin_value}", level="INFO")
+                    # Формат "BTC-SPOT" -> получаем spot asset ID через API, затем извлекаем базовый ID
+                    spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
+                    coin_value = spot_asset_id - 10000  # Извлекаем базовый ID
+                    self.log_message(f"🔍 DEBUG: Got spot_asset_id {spot_asset_id} for {token_name_or_asset_id} -> base ID {coin_value}", level="INFO")
                 else:
-                    # Название токена (например, "BTC") -> добавляем "-SPOT" и получаем asset ID
-                    coin_value = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
-                    self.log_message(f"🔍 DEBUG: Got asset_id from API for {token_name_or_asset_id}-SPOT -> {coin_value}", level="INFO")
+                    # Название токена (например, "BTC") -> получаем spot asset ID и извлекаем базовый
+                    spot_asset_id = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
+                    coin_value = spot_asset_id - 10000  # Извлекаем базовый ID
+                    self.log_message(f"🔍 DEBUG: Got spot_asset_id {spot_asset_id} for {token_name_or_asset_id}-SPOT -> base ID {coin_value}", level="INFO")
             elif isinstance(token_name_or_asset_id, int):
-                # Если это уже числовой ID, проверяем формат
-                if token_name_or_asset_id < 10000:
-                    # Похоже на базовый ID (например, 142), преобразуем в spot format
-                    coin_value = 10000 + token_name_or_asset_id
-                    self.log_message(f"🔍 DEBUG: Converted int {token_name_or_asset_id} -> {coin_value}", level="INFO")
+                # Если это уже числовой ID
+                if token_name_or_asset_id >= 10000:
+                    # Spot asset ID (10142) -> извлекаем базовый ID (142)
+                    coin_value = token_name_or_asset_id - 10000
+                    self.log_message(f"🔍 DEBUG: Converted spot ID {token_name_or_asset_id} -> base ID {coin_value}", level="INFO")
                 else:
-                    # Уже в формате spot asset ID
+                    # Уже базовый ID
                     coin_value = token_name_or_asset_id
-                    self.log_message(f"🔍 DEBUG: Using int as-is: {coin_value}", level="INFO")
+                    self.log_message(f"🔍 DEBUG: Using base ID as-is: {coin_value}", level="INFO")
             
             cancel_payload = {
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "coin": coin_value,  # Числовой spot asset ID (например, 10142)
+                        "coin": coin_value,  # БАЗОВЫЙ asset ID (например, 142, не 10142)
                         "oid": order_id
                     }]
                 },
                 "nonce": int(time.time() * 1000),
             }
             
-            self.log_message(f"🔍 DEBUG: Sending cancel with coin={coin_value}, oid={order_id}", level="INFO")
+            self.log_message(f"🔍 DEBUG: Sending cancel with coin={coin_value} (base ID), oid={order_id}", level="INFO")
             
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
             
