@@ -1796,9 +1796,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 try:
                                     # Получаем coin из ордера (может быть "@142", "BTC-SPOT" или другой формат)
-                                    # Метод cancel_order сам определит правильный формат asset ID
+                                    # Также передаем token_name для вариантов с названиями токенов
                                     order_coin = order.get("coin", token_name)
-                                    result = await client.browser.cancel_order(order_coin, order_id)
+                                    
+                                    # DEBUG: логируем, что передаем
+                                    client.browser.log_message(
+                                        f"🔍 DEBUG: Attempting to cancel order - order_coin={order_coin}, token_name={token_name}, oid={order_id}",
+                                        level="INFO"
+                                    )
+                                    
+                                    # Передаем и order_coin, и token_name для максимального количества вариантов
+                                    result = await client.browser.cancel_order(order_coin, order_id, token_name=token_name)
                                     
                                     # Проверяем результат отмены
                                     if result and result.get("status") == "error":

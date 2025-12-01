@@ -1323,13 +1323,14 @@ class HyperliquidBrowser:
             logger.error(f"Failed to create order: {e}")
             raise
             
-    async def cancel_order(self, token_name_or_asset_id, order_id: int):
+    async def cancel_order(self, token_name_or_asset_id, order_id: int, token_name: str = None):
         """
         Отмена ордера
         
         Args:
             token_name_or_asset_id: Имя токена (str), формат "@142" (str) или числовой asset ID (int)
             order_id: ID ордера для отмены
+            token_name: Дополнительное имя токена (например, "BTC") для пробования вариантов
         """
         try:
             # Используем стандартный endpoint для всех типов торговли
@@ -1341,14 +1342,49 @@ class HyperliquidBrowser:
             # Построить список вариантов для попытки
             variants_to_try = []
             
+            # Если передан дополнительный token_name, добавляем его варианты
+            if token_name:
+                variants_to_try.append((token_name, f"token name '{token_name}'"))
+                variants_to_try.append((f"{token_name}-SPOT", f"token name '{token_name}-SPOT'"))
+                # Для BTC также пробуем UBTC
+                if token_name == "BTC":
+                    variants_to_try.append(("UBTC", "token name 'UBTC'"))
+                    variants_to_try.append(("UBTC-SPOT", "token name 'UBTC-SPOT'"))
+            
             if isinstance(token_name_or_asset_id, str):
                 if token_name_or_asset_id.startswith("@"):
-                    # Формат "@142" - пробуем его первым, потом числовые варианты
-                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
+                    # Формат "@142" - пробуем разные варианты
                     base_id = int(token_name_or_asset_id[1:])
+                    
+                    # Вариант 1: строка "@142" как есть
+                    variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
+                    
+                    # Вариант 2: базовый ID 142 (число)
                     variants_to_try.append((base_id, f"base ID {base_id}"))
+                    
+                    # Вариант 3: spot ID 10142 (число)
                     variants_to_try.append((10000 + base_id, f"spot ID {10000 + base_id}"))
+                    
+                    # Вариант 4: строка "10142"
                     variants_to_try.append((str(10000 + base_id), f"string '{10000 + base_id}'"))
+                    
+                    # Вариант 5: попробуем определить токен по base_id и использовать его название
+                    # Маппинг base_id -> токен (для BTC base_id = 142)
+                    base_id_to_token = {
+                        142: "BTC",
+                        2: "ETH",
+                        1: "USDC"
+                    }
+                    token_name = base_id_to_token.get(base_id)
+                    if token_name:
+                        # Вариант 5: "BTC"
+                        variants_to_try.append((token_name, f"token name '{token_name}'"))
+                        # Вариант 6: "BTC-SPOT"
+                        variants_to_try.append((f"{token_name}-SPOT", f"token name '{token_name}-SPOT'"))
+                        # Вариант 7: "UBTC" (для BTC)
+                        if token_name == "BTC":
+                            variants_to_try.append(("UBTC", "token name 'UBTC'"))
+                            variants_to_try.append(("UBTC-SPOT", "token name 'UBTC-SPOT'"))
                 elif "-SPOT" in token_name_or_asset_id:
                     variants_to_try.append((token_name_or_asset_id, f"string '{token_name_or_asset_id}' as-is"))
                     spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
