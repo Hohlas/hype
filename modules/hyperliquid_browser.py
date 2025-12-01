@@ -1476,18 +1476,32 @@ class HyperliquidBrowser:
                 self.log_message(f"🔍 DEBUG: Wallet address: {self.wallet_address}, Account address: {self.account.address if self.account else 'None'}", level="INFO")
                 self.log_message(f"🔍 DEBUG: Cancel payload (with signature): {json.dumps(cancel_payload, indent=2)}", level="INFO")
                 
-                # Отправляем напрямую через session (как в реальном запросе биржи)
-                # БЕЗ заголовка X-Wallet-Address, т.к. адрес определяется из подписи
+                # Отправляем напрямую через session с заголовками как в реальном запросе браузера
                 if not self.session:
                     await self.start_session()
                 
+                # Заголовки точно как в curl запросе из браузера
                 headers = {
-                    'Content-Type': 'application/json',
                     'Accept': '*/*',
+                    'Accept-Language': 'ru,en;q=0.9',
+                    'Connection': 'keep-alive',
+                    'Content-Type': 'application/json',
+                    'DNT': '1',
+                    'Origin': 'https://app.hyperliquid.xyz',
+                    'Referer': 'https://app.hyperliquid.xyz/',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-site',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 YaBrowser/25.10.0.0 Safari/537.36',
+                    'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'sec-gpc': '1',
                 }
                 
                 # Отправляем напрямую через session (без использования send_request)
-                response_obj = await self.session.post(url, json=cancel_payload, headers=headers)
+                # Используем data вместо json, чтобы точно соответствовать curl --data-raw
+                response_obj = await self.session.post(url, data=json.dumps(cancel_payload), headers=headers)
                 response_text = await response_obj.text()
                 
                 # Создаем объект-обертку для совместимости с остальным кодом
