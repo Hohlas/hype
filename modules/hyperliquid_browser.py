@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_structured_data
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -285,13 +285,9 @@ class HyperliquidBrowser:
             # Отладочный вывод структуры данных
             logger.info(f"[DEBUG] Structured data: {json.dumps(structured_data, indent=2, default=lambda x: x.hex() if isinstance(x, bytes) else str(x))}")
             
-            # Используем encode_structured_data (стандартный способ)
-            try:
-                from eth_account.messages import encode_structured_data
-                encoded_data = encode_structured_data(structured_data)
-                signed_message = self.account.sign_message(encoded_data)
-            except ImportError:
-                raise Exception("encode_structured_data not available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
+            # Используем encode_structured_data (импортирован в начале файла)
+            encoded_data = encode_structured_data(structured_data)
+            signed_message = self.account.sign_message(encoded_data)
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
