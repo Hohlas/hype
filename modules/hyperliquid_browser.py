@@ -1328,39 +1328,42 @@ class HyperliquidBrowser:
         Отмена ордера
         
         Args:
-            token_name_or_asset_id: Имя токена (str) или числовой asset ID (int)
+            token_name_or_asset_id: Имя токена (str), формат "@142" (str) или числовой asset ID (int)
             order_id: ID ордера для отмены
         """
         try:
             # Используем стандартный endpoint для всех типов торговли
             url = f"{self.BASE_URL}/exchange"
             
-            # API требует числовой asset ID, а не строку
-            # Если передан числовой ID, используем его напрямую
-            # Если передан строковый формат "@142", преобразуем в число
-            if isinstance(token_name_or_asset_id, int):
-                asset_id = token_name_or_asset_id
-            elif isinstance(token_name_or_asset_id, str):
+            # Для spot ордеров API требует числовой asset ID в формате 10000 + index
+            # Например, для BTC это 10142 (не просто 142!)
+            coin_value = token_name_or_asset_id
+            
+            if isinstance(token_name_or_asset_id, str):
                 if token_name_or_asset_id.startswith("@"):
-                    # Формат "@142" -> 142
-                    asset_id = int(token_name_or_asset_id[1:])
+                    # Формат "@142" -> нужно преобразовать в spot asset ID: 10000 + 142 = 10142
+                    base_id = int(token_name_or_asset_id[1:])
+                    coin_value = 10000 + base_id
+                elif "-SPOT" in token_name_or_asset_id:
+                    # Формат "BTC-SPOT" -> получаем asset ID через API
+                    coin_value = await self._get_spot_asset_id(token_name_or_asset_id)
                 else:
-                    # Название токена (например, "BTC") -> используем маппинг
-                    token_mapping = {
-                        "BTC": 142,
-                        "ETH": 2,
-                        "USDC": 1,
-                        "UBTC": 142
-                    }
-                    asset_id = token_mapping.get(token_name_or_asset_id, token_name_or_asset_id)
-            else:
-                asset_id = token_name_or_asset_id
+                    # Название токена (например, "BTC") -> добавляем "-SPOT" и получаем asset ID
+                    coin_value = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
+            elif isinstance(token_name_or_asset_id, int):
+                # Если это уже числовой ID, проверяем формат
+                if token_name_or_asset_id < 10000:
+                    # Похоже на базовый ID (например, 142), преобразуем в spot format
+                    coin_value = 10000 + token_name_or_asset_id
+                else:
+                    # Уже в формате spot asset ID
+                    coin_value = token_name_or_asset_id
             
             cancel_payload = {
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "coin": asset_id,  # API требует числовой asset ID
+                        "coin": coin_value,  # Числовой spot asset ID (например, 10142)
                         "oid": order_id
                     }]
                 },

@@ -1784,29 +1784,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     continue
                                 
                                 try:
-                                    # Получаем coin из ордера (может быть "@142" или другой формат)
+                                    # Получаем coin из ордера (может быть "@142", "BTC-SPOT" или другой формат)
+                                    # Метод cancel_order сам определит правильный формат asset ID
                                     order_coin = order.get("coin", token_name)
-                                    
-                                    # Преобразуем coin в числовой asset ID для API
-                                    # API требует числовой ID (например, 142), а не строку "@142"
-                                    if isinstance(order_coin, str):
-                                        # Если это строка вида "@142", убираем "@" и преобразуем в число
-                                        if order_coin.startswith("@"):
-                                            asset_id_for_cancel = int(order_coin[1:])
-                                        else:
-                                            # Если это название токена (например, "BTC"), используем маппинг
-                                            token_mapping_numeric = {
-                                                "BTC": 142,
-                                                "ETH": 2,
-                                                "USDC": 1,
-                                                "UBTC": 142
-                                            }
-                                            asset_id_for_cancel = token_mapping_numeric.get(order_coin, order_coin)
-                                    else:
-                                        # Если это уже число, используем как есть
-                                        asset_id_for_cancel = order_coin
-                                    
-                                    result = await client.browser.cancel_order(asset_id_for_cancel, order_id)
+                                    result = await client.browser.cancel_order(order_coin, order_id)
                                     
                                     # Проверяем результат отмены
                                     # Если result содержит "status": "ok" или пустой, считаем успешным
