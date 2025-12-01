@@ -1323,19 +1323,44 @@ class HyperliquidBrowser:
             logger.error(f"Failed to create order: {e}")
             raise
             
-    async def cancel_order(self, token_name: str, order_id: int):
+    async def cancel_order(self, token_name_or_asset_id, order_id: int):
         """
         Отмена ордера
+        
+        Args:
+            token_name_or_asset_id: Имя токена (str) или числовой asset ID (int)
+            order_id: ID ордера для отмены
         """
         try:
             # Используем стандартный endpoint для всех типов торговли
             url = f"{self.BASE_URL}/exchange"
             
+            # API требует числовой asset ID, а не строку
+            # Если передан числовой ID, используем его напрямую
+            # Если передан строковый формат "@142", преобразуем в число
+            if isinstance(token_name_or_asset_id, int):
+                asset_id = token_name_or_asset_id
+            elif isinstance(token_name_or_asset_id, str):
+                if token_name_or_asset_id.startswith("@"):
+                    # Формат "@142" -> 142
+                    asset_id = int(token_name_or_asset_id[1:])
+                else:
+                    # Название токена (например, "BTC") -> используем маппинг
+                    token_mapping = {
+                        "BTC": 142,
+                        "ETH": 2,
+                        "USDC": 1,
+                        "UBTC": 142
+                    }
+                    asset_id = token_mapping.get(token_name_or_asset_id, token_name_or_asset_id)
+            else:
+                asset_id = token_name_or_asset_id
+            
             cancel_payload = {
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "coin": token_name,  # Используем имя токена как есть (может быть "@142", "BTC-SPOT" или "BTC")
+                        "coin": asset_id,  # API требует числовой asset ID
                         "oid": order_id
                     }]
                 },

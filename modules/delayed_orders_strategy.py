@@ -1768,25 +1768,64 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             
                             if order_price < threshold:
                                 # Ордер устарел - отменяем его
+                                # Сначала проверяем, действительно ли ордер еще существует в списке открытых
+                                order_still_exists = any(
+                                    o.get("oid") == order_id 
+                                    for o in open_orders 
+                                    if o.get("oid")
+                                )
+                                
+                                if not order_still_exists:
+                                    # Ордер уже не существует (исполнен или отменен)
+                                    client.browser.log_message(
+                                        f"ℹ️ Buy Limit at ${order_price:.2f} (oid: {order_id}) already cancelled or executed",
+                                        level="INFO"
+                                    )
+                                    continue
+                                
                                 try:
-                                    # Получаем правильное имя токена из ордера (может быть "BTC-SPOT" или asset ID)
+                                    # Получаем coin из ордера (может быть "@142" или другой формат)
                                     order_coin = order.get("coin", token_name)
-                                    result = await client.browser.cancel_order(order_coin, order_id)
+                                    
+                                    # Преобразуем coin в числовой asset ID для API
+                                    # API требует числовой ID (например, 142), а не строку "@142"
+                                    if isinstance(order_coin, str):
+                                        # Если это строка вида "@142", убираем "@" и преобразуем в число
+                                        if order_coin.startswith("@"):
+                                            asset_id_for_cancel = int(order_coin[1:])
+                                        else:
+                                            # Если это название токена (например, "BTC"), используем маппинг
+                                            token_mapping_numeric = {
+                                                "BTC": 142,
+                                                "ETH": 2,
+                                                "USDC": 1,
+                                                "UBTC": 142
+                                            }
+                                            asset_id_for_cancel = token_mapping_numeric.get(order_coin, order_coin)
+                                    else:
+                                        # Если это уже число, используем как есть
+                                        asset_id_for_cancel = order_coin
+                                    
+                                    result = await client.browser.cancel_order(asset_id_for_cancel, order_id)
                                     
                                     # Проверяем результат отмены
-                                    if result and result.get("status") == "ok":
+                                    # Если result содержит "status": "ok" или пустой, считаем успешным
+                                    if result and (result.get("status") == "ok" or "status" not in result):
                                         client.browser.log_message(
-                                            f"✅ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
+                                            f"✅ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f}, oid: {order_id})",
                                             level="INFO"
                                         )
                                     else:
                                         # Ордер уже не существует или был отменен ранее
                                         client.browser.log_message(
-                                            f"ℹ️ Buy Limit at ${order_price:.2f} already cancelled or not found",
+                                            f"ℹ️ Buy Limit at ${order_price:.2f} (oid: {order_id}) already cancelled or not found",
                                             level="INFO"
                                         )
                                 except Exception as e:
-                                    client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
+                                    client.browser.log_message(
+                                        f"❌ Failed to cancel old Buy Limit order (oid: {order_id}): {e}", 
+                                        level="ERROR"
+                                    )
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
