@@ -198,14 +198,6 @@ class HyperliquidBrowser:
             if self.wallet_address.lower() != self.account.address.lower():
                 raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
             
-            action_type = action.get("type")
-            
-            # Для cancel action используем специальную структуру EIP-712
-            if action_type == "cancel":
-                return self._sign_cancel_action(action, nonce, is_mainnet)
-            
-            # Для других типов действий (order, etc.) используем старый метод
-            
             def normalize_number(n):
                 if isinstance(n, str):
                     if '.' in n:
@@ -260,10 +252,13 @@ class HyperliquidBrowser:
             
             # Логирование только при ошибках
             
-            # Базовая структура EIP-712 (БЕЗ nonce в Agent согласно официальной документации)
+            # Базовая структура EIP-712 с правильным chainId
+            # 42161 для mainnet (Arbitrum), 421614 для testnet
+            chain_id = 42161 if is_mainnet else 421614
+            
             eip712_data = {
                 "domain": {
-                    "chainId": 1337,
+                    "chainId": chain_id,
                     "name": "Exchange",
                     "verifyingContract": "0x0000000000000000000000000000000000000000",
                     "version": "1"
@@ -318,87 +313,6 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to sign L1 action: {e}", level="ERROR")
             raise
     
-    def _sign_cancel_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
-        """
-        Подпись для cancel action согласно официальной документации Hyperliquid.
-        Использует Agent phantom (не включает данные cancel в EIP-712 message).
-        """
-        try:
-            import json
-            
-            # ПРАВИЛЬНО: chainId для Arbitrum mainnet
-            chain_id = 42161 if is_mainnet else 421614
-            
-            logger.info(f"[DEBUG] Signing cancel action with wallet: {self.wallet_address}")
-            logger.info(f"[DEBUG] ChainId: {chain_id}")
-            
-            # EIP-712 typed data согласно официальной документации Hyperliquid
-            # Используем Agent phantom, а не включаем cancels в message
-            typed_data = {
-                "domain": {
-                    "name": "Exchange",
-                    "version": "1",
-                    "chainId": chain_id,
-                    "verifyingContract": "0x0000000000000000000000000000000000000000"
-                },
-                "types": {
-                    "EIP712Domain": [
-                        {"name": "name", "type": "string"},
-                        {"name": "version", "type": "string"},
-                        {"name": "chainId", "type": "uint256"},
-                        {"name": "verifyingContract", "type": "address"}
-                    ],
-                    "Agent": [
-                        {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"}
-                    ]
-                },
-                "primaryType": "Agent",
-                "message": {
-                    "source": "a",  # Согласно документации
-                    "connectionId": "0x" + "00" * 32  # 32 нулевых байта
-                }
-            }
-            
-            logger.info(f"[DEBUG] EIP-712 message (Agent phantom): {json.dumps(typed_data['message'], indent=2)}")
-            
-            # Кодируем typed data
-            encoded_data = encode_structured_data(typed_data)
-            
-            # Подписываем используя приватный ключ
-            signed_message = self.account.sign_message(encoded_data)
-            
-            # Формируем результат
-            signature = {
-                "r": "0x" + signed_message.r.to_bytes(32, 'big').hex(),
-                "s": "0x" + signed_message.s.to_bytes(32, 'big').hex(),
-                "v": signed_message.v
-            }
-            
-            logger.info(f"[DEBUG] Cancel signature created: r={signature['r'][:10]}..., s={signature['s'][:10]}..., v={signature['v']}")
-            
-            # Проверяем что подпись валидна
-            try:
-                from eth_account import Account
-                recovered_address = Account.recover_message(
-                    encoded_data,
-                    vrs=(signed_message.v, signed_message.r, signed_message.s)
-                )
-                
-                if recovered_address.lower() != self.wallet_address.lower():
-                    logger.error(f"[ERROR] Signature verification failed! Expected {self.wallet_address}, got {recovered_address}")
-                    raise Exception(f"Signature verification failed: address mismatch")
-                
-                logger.info(f"[DEBUG] ✅ Signature verified OK for address {self.wallet_address}")
-            except Exception as e:
-                logger.warning(f"[WARNING] Signature verification skipped: {e}")
-            
-            return signature
-            
-        except Exception as e:
-            logger.error(f"Failed to sign cancel action: {e}")
-            raise
-
     async def _sign_message(self, message: dict) -> str:
         """
         Подписание сообщения приватным ключом кошелька (legacy метод)
@@ -1466,9 +1380,6 @@ class HyperliquidBrowser:
                 "vaultAddress": None
             }
             
-            # Отладочный вывод финального payload перед отправкой
-            logger.info(f"[DEBUG] Final payload JSON: {json.dumps(cancel_payload, indent=2)}")
-            
             # Используем тот же метод отправки, что и для обычных ордеров
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
             
@@ -1476,11 +1387,6 @@ class HyperliquidBrowser:
             if response.status == 200:
                 try:
                     result = await response.json()
-                    
-                    # Подробное логирование ответа
-                    logger.info(f"[DEBUG] Response status: {result.get('status')}")
-                    logger.info(f"[DEBUG] Response data: {json.dumps(result, indent=2)[:800]}")
-                    
                 except Exception as json_error:
                     # Если не удалось распарсить JSON, но статус 200
                     response_text = await response.text()
