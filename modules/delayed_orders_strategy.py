@@ -1666,105 +1666,87 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
                 
-                # 2. Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
+                # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
-                    trigger_level = min_tp_price - float(step) * 2
-                    if current_price < trigger_level:
-                        # Используем уже полученный баланс USDC из all_balances
-                        usdc_balance = all_balances.get("USDC", 0.0)
-                        
-                        # Проверяем достаточность средств перед размещением ордера
+                    # Расчет целевой цены для лимитного ордера
+                    target_buy_price = min_tp_price - float(step) * 2
+                    
+                    # Используем уже полученный баланс USDC из all_balances
+                    usdc_balance = all_balances.get("USDC", 0.0)
+                    
+                    # Проверяем, есть ли активные Buy Limit ордера
+                    active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
+                    
+                    if not active_buy_limits:
+                        # Нет активного Buy Limit - размещаем новый лимитный ордер
+                        # Проверка баланса
                         if usdc_balance < usdc_amount:
                             client.browser.log_message(
                                 f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
                                 level="WARNING"
                             )
-                            continue  # Пропускаем этот цикл
-                        
-                        order_result = await client.place_order(
-                            token=token_name,
-                            side="BUY",
-                            order_type="MARKET",
-                            usdc_amount=usdc_amount
-                        )
-                        
-                        # Обновляем баланс после маркет-ордера на покупку
-                        all_balances = await client.browser.get_all_balances()
-                        client._previous_usdc_balance = all_balances.get("USDC", 0.0)
-                        
-                        # Получаем количество токенов из результата ордера
-                        token_amount = order_result.get('quantity', usdc_amount / current_price)
-                        
-                        # Логируем детали размещенного ордера (убрано для чистоты логов)
-                        
-                        # Получаем фактическую цену исполнения из истории сделок
-                        import time
-                        order_timestamp = time.time()
-                        
-                        # Извлекаем фактическую цену исполнения из API ответа
-                        api_price = current_price  # fallback
-                        try:
-                            response_data = order_result.get('response', {})
-                            statuses = response_data.get('data', {}).get('statuses', [])
-                            if statuses and len(statuses) > 0:
-                                first_status = statuses[0]
-                                if 'filled' in first_status:
-                                    filled_data = first_status['filled']
-                                    api_price = float(filled_data.get('avgPx', current_price))
+                        else:
+                            # Размещение лимитного ордера на покупку
+                            try:
+                                order_result = await client.place_order(
+                                    token=token_name,
+                                    side="BUY",
+                                    order_type="LIMIT",
+                                    usdc_amount=usdc_amount,
+                                    price=target_buy_price
+                                )
+                                
+                                if order_result:
                                     client.browser.log_message(
-                                        f"✅ Found actual fill price in API: ${api_price:.2f}", 
+                                        f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
                                         level="INFO"
                                     )
-                                else:
+                                    
+                                    # Отправляем уведомление в Telegram
+                                    await send_tg_notification(
+                                        client,
+                                        f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                        save_to_report=False
+                                    )
+                                    
+                                    # Записываем статистику операции Averaging (лимитный ордер, еще не исполнен)
+                                    try:
+                                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                        total_value = usdc_balance + (btc_balance * current_price)
+                                        # Для лимитного ордера используем целевую цену и расчетное количество
+                                        token_amount = usdc_amount / target_buy_price
+                                        await log_statistics_to_excel(
+                                            client=client,
+                                            operation="Averaging",
+                                            btc_amount=token_amount,
+                                            price=target_buy_price,
+                                            usdc_balance=usdc_balance,
+                                            btc_balance=btc_balance,
+                                            total_value=total_value,
+                                            orders=open_orders
+                                        )
+                                    except Exception as e:
+                                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                            except Exception as e:
+                                client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
+                    else:
+                        # Есть активные Buy Limit ордера - проверяем их актуальность
+                        threshold = min_tp_price - float(step) * 2.5
+                        
+                        for order in active_buy_limits:
+                            order_price = float(order.get("limitPx", 0))
+                            order_id = order.get("oid")
+                            
+                            if order_price < threshold:
+                                # Ордер устарел - отменяем его
+                                try:
+                                    await client.browser.cancel_order(token_name, order_id)
                                     client.browser.log_message(
-                                        f"⚠️ Order not filled yet, using current price: ${current_price:.2f}", 
+                                        f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
                                         level="INFO"
                                     )
-                        except Exception as e:
-                            client.browser.log_message(f"Failed to extract fill price from API: {e}", level="ERROR")
-                        
-                        # Используем фактическую цену из API (история сделок не нужна)
-                        actual_price = api_price
-                        client.browser.log_message(
-                            f"✅ Используем фактическую цену из API: ${actual_price:.2f}", 
-                            level="INFO"
-                        )
-                        
-                        # Логируем разницу между ожидаемой и фактической ценой
-                        if actual_price != current_price:
-                            client.browser.log_message(
-                                f"📊 Price difference: Expected ${current_price:.2f}, Actual ${actual_price:.2f}", 
-                                level="INFO"
-                            )
-                        
-                        # Лог с фактической ценой исполнения
-                        client.browser.log_message(
-                            f"🔍 Averaging {token_amount:.6f}{token_name} / ${actual_price:.2f} | Bal: ${usdc_balance:.2f}",
-                            level="INFO"
-                        )
-                        
-                        # Отправляем уведомление об усреднении
-                        await send_tg_notification(
-                            client,
-                            f"📉 <b>Averaging</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
-                            save_to_report=False
-                        )
-                        
-                        # Записываем статистику операции Averaging с фактической ценой
-                        try:
-                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                            total_value = usdc_balance + (btc_balance * actual_price)
-                            await log_statistics_to_excel(
-                                client=client,
-                                operation="Averaging",
-                                btc_amount=token_amount,
-                                price=actual_price,
-                                usdc_balance=usdc_balance,
-                                btc_balance=btc_balance,
-                                total_value=total_value
-                            )
-                        except Exception as e:
-                            client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                                except Exception as e:
+                                    client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
