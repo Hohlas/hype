@@ -1036,6 +1036,38 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
                 current_price = float(current_price_raw)
                 
+                # Разделяем лимитные ордера на две категории
+                # Маппинг токенов для поиска ордеров
+                token_mapping = {
+                    "BTC": "@142",
+                    "ETH": "@2", 
+                    "USDC": "@1",
+                    "UBTC": "@142"  # UBTC тоже использует @142
+                }
+                asset_id = token_mapping.get(token_name, token_name)
+                
+                # current_tp_orders — лимитные ордера на продажу (токен → USDC)
+                current_tp_orders = []
+                # buy_limit_orders — лимитные ордера на покупку (USDC → токен)
+                buy_limit_orders = []
+                
+                for order in open_orders:
+                    coin = order.get("coin", "")
+                    side = order.get("side", "")
+                    is_buy = order.get("isBuy", True)
+                    limit_price = float(order.get("limitPx", 0))
+                    
+                    # Проверяем, что это ордер для нашего токена и лимитный (есть limitPx > 0)
+                    if coin == asset_id and limit_price > 0:
+                        # Ордер на продажу: side in ["SELL", "S", "A"] или isBuy == False
+                        is_sell = side in ["SELL", "S", "A"] or (not is_buy)
+                        
+                        if is_sell:
+                            current_tp_orders.append(order)
+                        else:
+                            # Ордер на покупку: side in ["BUY", "B"] или isBuy == True
+                            buy_limit_orders.append(order)
+                
                 # Инициализация отслеживания баланса USDC для расчета прибыли
                 if not hasattr(client, '_previous_usdc_balance'):
                     client._previous_usdc_balance = all_balances.get("USDC", 0.0)
