@@ -23,6 +23,9 @@ class HyperliquidClient:
         self.db = db
         self.group_data = group_data
         
+        # Кэш для лимитов токенов (загружается один раз при старте)
+        self.token_limits_cache = {}
+        
     async def calculate_usdc_amount_for_order(self, token_name: str) -> tuple[float, int]:
         """
         Расчет размера ордера в USDC для spot торговли.
@@ -65,9 +68,10 @@ class HyperliquidClient:
             self.browser.log_message(f"Failed to calculate order amount: {e}", level="ERROR")
             return 0.0, 1
             
-    async def get_token_limits(self, token_name: str) -> tuple[float, float]:
+    async def load_token_limits(self, token_name: str) -> tuple[float, float]:
         """
-        Получение лимитов токена для spot торговли.
+        Загрузка лимитов токена из API (вызывается один раз при старте).
+        Сохраняет результат в кэш.
         Возвращает (min_qty, min_notional)
         """
         try:
@@ -108,17 +112,43 @@ class HyperliquidClient:
                         # Устанавливаем очень маленькое значение для тестирования
                         min_qty = 0.0001
                         
-                        min_notional = float(meta.get("minNotional", "5.0"))  # Минимальная номинальная стоимость
+                        # Получаем minNotional из API, если доступно, иначе используем значение из ошибки биржи (10.0)
+                        min_notional = float(meta.get("minNotional", "10.0"))
+                        
+                        # Сохраняем в кэш
+                        self.token_limits_cache[token_name] = (min_qty, min_notional)
+                        
+                        self.browser.log_message(
+                            f"✅ Loaded token limits: {token_name} | min_qty={min_qty}, min_notional={min_notional}",
+                            level="INFO"
+                        )
                         
                         return min_qty, min_notional
             
             # Если токен не найден, используем стандартные значения
+            default_limits = (0.001, 10.0)
+            self.token_limits_cache[token_name] = default_limits
             self.browser.log_message(f"⚠️ Token {token_name} not found in API, using default limits", level="WARNING")
-            return 0.001, 10.0
+            return default_limits
             
         except Exception as e:
-            self.browser.log_message(f"Failed to get token limits: {e}", level="ERROR")
-            return 0.001, 10.0
+            default_limits = (0.001, 10.0)
+            self.token_limits_cache[token_name] = default_limits
+            self.browser.log_message(f"Failed to load token limits: {e}, using defaults", level="ERROR")
+            return default_limits
+    
+    async def get_token_limits(self, token_name: str) -> tuple[float, float]:
+        """
+        Получение лимитов токена из кэша (быстрый доступ без API запроса).
+        Если кэш пуст, загружает лимиты из API.
+        Возвращает (min_qty, min_notional)
+        """
+        # Проверяем кэш
+        if token_name in self.token_limits_cache:
+            return self.token_limits_cache[token_name]
+        
+        # Если кэш пуст, загружаем (fallback для обратной совместимости)
+        return await self.load_token_limits(token_name)
             
     async def place_order(self, token: str, side: str, order_type: str, 
                          quantity: float = None, price: float = None, 

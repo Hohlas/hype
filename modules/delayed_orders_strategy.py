@@ -1037,9 +1037,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Тест DEBUG лога отключен для чистоты логов
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
-        # Получаем лимиты токена (отключено для чистоты логов)
-        # min_qty, min_notional = await client.get_token_limits(token_name)
-        min_qty, min_notional = 0.0001, 5.0  # Используем фиксированные значения
+        # Загружаем лимиты токена один раз при старте (кэшируются в client)
+        min_qty, min_notional = await client.load_token_limits(token_name)
         
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
