@@ -1762,18 +1762,25 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Есть активные Buy Limit ордера - проверяем их актуальность
                         threshold = min_tp_price - float(step) * 2.5
                         
-                        for order in active_buy_limits:
-                            order_price = float(order.get("limitPx", 0))
-                            order_id = order.get("oid")
-                            
-                            if order_price < threshold:
-                                # Ордер устарел - отменяем его
-                                # Сначала проверяем, действительно ли ордер еще существует в списке открытых
-                                order_still_exists = any(
-                                    o.get("oid") == order_id 
-                                    for o in open_orders 
-                                    if o.get("oid")
+                            for order in active_buy_limits:
+                                order_price = float(order.get("limitPx", 0))
+                                order_id = order.get("oid")
+                                order_coin = order.get("coin")
+                                
+                                # DEBUG: выводим информацию об ордере
+                                client.browser.log_message(
+                                    f"🔍 DEBUG: Checking order - coin={order_coin}, price=${order_price:.2f}, oid={order_id}",
+                                    level="INFO"
                                 )
+                                
+                                if order_price < threshold:
+                                    # Ордер устарел - отменяем его
+                                    # Сначала проверяем, действительно ли ордер еще существует в списке открытых
+                                    order_still_exists = any(
+                                        o.get("oid") == order_id 
+                                        for o in open_orders 
+                                        if o.get("oid")
+                                    )
                                 
                                 if not order_still_exists:
                                     # Ордер уже не существует (исполнен или отменен)

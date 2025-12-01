@@ -1335,6 +1335,9 @@ class HyperliquidBrowser:
             # Используем стандартный endpoint для всех типов торговли
             url = f"{self.BASE_URL}/exchange"
             
+            # DEBUG: логируем входные данные
+            self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
+            
             # Для spot ордеров API требует числовой asset ID в формате 10000 + index
             # Например, для BTC это 10142 (не просто 142!)
             coin_value = token_name_or_asset_id
@@ -1344,20 +1347,25 @@ class HyperliquidBrowser:
                     # Формат "@142" -> нужно преобразовать в spot asset ID: 10000 + 142 = 10142
                     base_id = int(token_name_or_asset_id[1:])
                     coin_value = 10000 + base_id
+                    self.log_message(f"🔍 DEBUG: Converted {token_name_or_asset_id} -> {coin_value}", level="INFO")
                 elif "-SPOT" in token_name_or_asset_id:
                     # Формат "BTC-SPOT" -> получаем asset ID через API
                     coin_value = await self._get_spot_asset_id(token_name_or_asset_id)
+                    self.log_message(f"🔍 DEBUG: Got asset_id from API for {token_name_or_asset_id} -> {coin_value}", level="INFO")
                 else:
                     # Название токена (например, "BTC") -> добавляем "-SPOT" и получаем asset ID
                     coin_value = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
+                    self.log_message(f"🔍 DEBUG: Got asset_id from API for {token_name_or_asset_id}-SPOT -> {coin_value}", level="INFO")
             elif isinstance(token_name_or_asset_id, int):
                 # Если это уже числовой ID, проверяем формат
                 if token_name_or_asset_id < 10000:
                     # Похоже на базовый ID (например, 142), преобразуем в spot format
                     coin_value = 10000 + token_name_or_asset_id
+                    self.log_message(f"🔍 DEBUG: Converted int {token_name_or_asset_id} -> {coin_value}", level="INFO")
                 else:
                     # Уже в формате spot asset ID
                     coin_value = token_name_or_asset_id
+                    self.log_message(f"🔍 DEBUG: Using int as-is: {coin_value}", level="INFO")
             
             cancel_payload = {
                 "action": {
@@ -1369,6 +1377,8 @@ class HyperliquidBrowser:
                 },
                 "nonce": int(time.time() * 1000),
             }
+            
+            self.log_message(f"🔍 DEBUG: Sending cancel with coin={coin_value}, oid={order_id}", level="INFO")
             
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
             
