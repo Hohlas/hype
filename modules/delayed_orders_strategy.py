@@ -992,7 +992,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
-        min_qty, min_notional = await client.load_token_limits(token_name)
+        min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
         
         # Получаем информацию о последней покупке из Trade History при старте 
         last_buy_price = None

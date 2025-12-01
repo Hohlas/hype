@@ -24,6 +24,7 @@ class HyperliquidClient:
         self.group_data = group_data
         
         # Кэш для лимитов токенов (загружается один раз при старте)
+        # Формат: {token_name: (min_qty, min_notional, sz_decimals)}
         self.token_limits_cache = {}
         
     async def calculate_usdc_amount_for_order(self, token_name: str) -> tuple[float, int]:
@@ -36,7 +37,7 @@ class HyperliquidClient:
             balance = float(await self.browser.get_available_balance())
             
             # Получаем лимиты токена
-            min_qty, min_notional = await self.get_token_limits(token_name)
+            min_qty, min_notional, _ = await self.get_token_limits(token_name)
             
             # Получаем текущую цену токена
             token_price = float(await self.browser.get_token_price(token_name))
@@ -68,11 +69,11 @@ class HyperliquidClient:
             self.browser.log_message(f"Failed to calculate order amount: {e}", level="ERROR")
             return 0.0, 1
             
-    async def load_token_limits(self, token_name: str) -> tuple[float, float]:
+    async def load_token_limits(self, token_name: str) -> tuple[float, float, int]:
         """
         Загрузка лимитов токена из API (вызывается один раз при старте).
         Сохраняет результат в кэш.
-        Возвращает (min_qty, min_notional)
+        Возвращает (min_qty, min_notional, sz_decimals)
         """
         try:
             # Получаем реальные лимиты от API Hyperliquid
@@ -97,7 +98,7 @@ class HyperliquidClient:
                     if isinstance(meta, dict):
                         # Пробуем разные возможные поля для минимального размера
                         min_qty = None
-                        for field in ["minSz", "minSize", "min_qty", "minQuantity", "szDecimals"]:
+                        for field in ["minSz", "minSize", "min_qty", "minQuantity"]:
                             if field in meta:
                                 try:
                                     min_qty = float(meta[field])
@@ -115,33 +116,40 @@ class HyperliquidClient:
                         # Получаем minNotional из API, если доступно, иначе используем значение из ошибки биржи (10.0)
                         min_notional = float(meta.get("minNotional", "10.0"))
                         
+                        # Получаем szDecimals (precision) для форматирования размера ордеров
+                        sz_decimals = meta.get("szDecimals", 5)  # По умолчанию 5 знаков
+                        if isinstance(sz_decimals, (int, float)):
+                            sz_decimals = int(sz_decimals)
+                        else:
+                            sz_decimals = 5  # Fallback
+                        
                         # Сохраняем в кэш
-                        self.token_limits_cache[token_name] = (min_qty, min_notional)
+                        self.token_limits_cache[token_name] = (min_qty, min_notional, sz_decimals)
                         
                         self.browser.log_message(
-                            f"✅ Loaded token limits: {token_name} | min_qty={min_qty}, min_notional={min_notional}",
+                            f"✅ Loaded token limits: {token_name} | min_qty={min_qty}, min_notional={min_notional}, sz_decimals={sz_decimals}",
                             level="INFO"
                         )
                         
-                        return min_qty, min_notional
+                        return min_qty, min_notional, sz_decimals
             
             # Если токен не найден, используем стандартные значения
-            default_limits = (0.001, 10.0)
+            default_limits = (0.001, 10.0, 5)
             self.token_limits_cache[token_name] = default_limits
             self.browser.log_message(f"⚠️ Token {token_name} not found in API, using default limits", level="WARNING")
             return default_limits
             
         except Exception as e:
-            default_limits = (0.001, 10.0)
+            default_limits = (0.001, 10.0, 5)
             self.token_limits_cache[token_name] = default_limits
             self.browser.log_message(f"Failed to load token limits: {e}, using defaults", level="ERROR")
             return default_limits
     
-    async def get_token_limits(self, token_name: str) -> tuple[float, float]:
+    async def get_token_limits(self, token_name: str) -> tuple[float, float, int]:
         """
         Получение лимитов токена из кэша (быстрый доступ без API запроса).
         Если кэш пуст, загружает лимиты из API.
-        Возвращает (min_qty, min_notional)
+        Возвращает (min_qty, min_notional, sz_decimals)
         """
         # Проверяем кэш
         if token_name in self.token_limits_cache:
@@ -149,6 +157,16 @@ class HyperliquidClient:
         
         # Если кэш пуст, загружаем (fallback для обратной совместимости)
         return await self.load_token_limits(token_name)
+    
+    def get_token_sz_decimals(self, token_name: str) -> int:
+        """
+        Получение precision (sz_decimals) для токена из кэша.
+        Возвращает количество знаков после запятой для форматирования размера ордера.
+        """
+        if token_name in self.token_limits_cache:
+            _, _, sz_decimals = self.token_limits_cache[token_name]
+            return sz_decimals
+        return 5  # Fallback значение
             
     async def place_order(self, token: str, side: str, order_type: str, 
                          quantity: float = None, price: float = None, 
@@ -166,11 +184,15 @@ class HyperliquidClient:
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
+            # Получаем sz_decimals для форматирования размера ордера
+            sz_decimals = self.get_token_sz_decimals(token)
+            
             # Подготовка данных ордера для Hyperliquid API
             order_data = {
                 "coin": f"{token}-SPOT",  # Используем BTC-SPOT для spot торговли
                 "is_buy": side == "BUY",  # true для покупки, false для продажи
                 "sz": str(quantity),  # Size как строка
+                "sz_decimals": sz_decimals,  # Precision для форматирования размера
                 "reduce_only": False  # Reduce only
             }
             

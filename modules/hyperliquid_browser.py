@@ -804,9 +804,10 @@ class HyperliquidBrowser:
                     return str(rounded).rstrip('0').rstrip('.')
                 return str(rounded)
             
-            # Форматируем размер и удаляем trailing zeros
+            # Форматируем размер с использованием precision из API (sz_decimals)
             sz_value = float(order_data.get("sz", "0.001"))
-            sz_str = remove_trailing_zeros(f"{sz_value:.5f}")
+            sz_decimals = order_data.get("sz_decimals", 5)  # По умолчанию 5 знаков
+            sz_str = remove_trailing_zeros(f"{sz_value:.{sz_decimals}f}")
             
             # Форматируем цену и удаляем trailing zeros
             px_value = float(order_data.get("limit_px", 108000))
