@@ -1362,15 +1362,14 @@ class HyperliquidBrowser:
         Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем правильный endpoint (api-ui, а не api)
-            url = "https://api-ui.hyperliquid.xyz/exchange"
+            # Используем тот же endpoint, что и для обычных ордеров
+            url = f"{self.BASE_URL}/exchange"
             
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
             
             # Создаем правильную структуру action согласно реальному запросу
             # ВАЖНО: порядок ключей должен совпадать с браузером для правильной подписи!
-            # Используем OrderedDict или Python 3.7+ сохраняет порядок вставки
             cancel_action = {
                 "cancels": [{
                     "a": asset_id,  # Числовой asset ID (10142)
@@ -1379,10 +1378,8 @@ class HyperliquidBrowser:
                 "type": "cancel"
             }
             
-            # Создаем nonce и expiresAfter
-            current_time_ms = int(time.time() * 1000)
-            nonce = current_time_ms
-            expires_after = current_time_ms + (60 * 1000)  # expiresAfter = nonce + 60 секунд
+            # Создаем nonce
+            nonce = int(time.time() * 1000)
             
             # Отладочный вывод структуры action
             import json
@@ -1394,57 +1391,16 @@ class HyperliquidBrowser:
             # Подписываем action через sign_l1_action (EIP-712)
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload с правильной структурой
+            # Формируем финальный payload (БЕЗ expiresAfter и isFrontend, как в обычных ордерах)
             cancel_payload = {
                 "action": cancel_action,
-                "expiresAfter": expires_after,  # ВАЖНО: это поле требуется!
-                "isFrontend": True,            # ВАЖНО: это поле требуется!
                 "nonce": nonce,
                 "signature": signature,
                 "vaultAddress": None  # Для основного кошелька используем None
             }
             
-            # Отправляем напрямую через session с правильными заголовками
-            if not self.session:
-                await self.start_session()
-            
-            # Заголовки точно как в реальном запросе браузера
-            headers = {
-                'Accept': '*/*',
-                'Accept-Language': 'ru,en;q=0.9',
-                'Connection': 'keep-alive',
-                'Content-Type': 'application/json',
-                'DNT': '1',
-                'Origin': 'https://app.hyperliquid.xyz',
-                'Referer': 'https://app.hyperliquid.xyz/',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-site',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 YaBrowser/25.10.0.0 Safari/537.36',
-                'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'sec-gpc': '1',
-            }
-            
-            # Отправляем напрямую через session (без использования send_request)
-            response_obj = await self.session.post(url, json=cancel_payload, headers=headers)
-            response_text = await response_obj.text()
-            
-            # Создаем объект-обертку для совместимости
-            class ResponseWrapper:
-                def __init__(self, status, text):
-                    self.status = status
-                    self._text = text
-                
-                async def text(self):
-                    return self._text
-                
-                async def json(self):
-                    import json
-                    return json.loads(self._text)
-            
-            response = ResponseWrapper(response_obj.status, response_text)
+            # Используем тот же метод отправки, что и для обычных ордеров
+            response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
             
             # Проверяем статус ответа перед парсингом JSON
             if response.status == 200:
@@ -1452,6 +1408,7 @@ class HyperliquidBrowser:
                     result = await response.json()
                 except Exception as json_error:
                     # Если не удалось распарсить JSON, но статус 200
+                    response_text = await response.text()
                     logger.warning(f"Failed to parse JSON response (status 200): {response_text[:500]}")
                     # Если не JSON, считаем что запрос прошел успешно
                     return {"status": "ok"}
