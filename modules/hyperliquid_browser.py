@@ -15,6 +15,7 @@ from eth_utils import keccak
 import web3
 from loguru import logger
 import settings
+from modules.retry import retry_async
 
 
 class HyperliquidBrowser:
@@ -70,7 +71,7 @@ class HyperliquidBrowser:
         
         # Rate limiting
         self.last_request_time = 0
-        self.min_request_interval = 0.1  # 100ms between requests
+        self.min_request_interval = 0.05  # 50ms between requests (минимум для API)
         
     async def __aenter__(self):
         await self.start_session()
@@ -80,13 +81,22 @@ class HyperliquidBrowser:
         await self.close_sessions()
         
     async def start_session(self):
-        """Инициализация HTTP сессии"""
+        """Инициализация HTTP сессии с увеличенными таймаутами"""
         connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
-        timeout = aiohttp.ClientTimeout(total=30)
+        # Увеличенные таймауты для предотвращения None ответов
+        timeout = aiohttp.ClientTimeout(
+            total=60,  # Общий таймаут 60 секунд
+            connect=30,  # Таймаут подключения 30 секунд
+            sock_read=30  # Таймаут чтения 30 секунд
+        )
         
         if self.proxy:
             connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(
+                total=60,
+                connect=30,
+                sock_read=30
+            )
         
         self.session = aiohttp.ClientSession(
             connector=connector,
@@ -328,25 +338,57 @@ class HyperliquidBrowser:
             
     async def get_spot_account_info(self):
         """
-        Получение информации о spot аккаунте
+        Получение информации о spot аккаунте с retry-логикой
         """
-        try:
-            url = f"{self.BASE_URL}/info"
-            data = {
-                "type": "spotClearinghouseState",
-                "user": self.wallet_address
-            }
-            
-            response = await self.send_request("POST", url, data=data)
-            result = await response.json()
-            
-            if response.status != 200:
-                raise Exception(f'Failed to get spot account info: {result}')
+        async def _get_spot_account_info_internal():
+            try:
+                url = f"{self.BASE_URL}/info"
+                data = {
+                    "type": "spotClearinghouseState",
+                    "user": self.wallet_address
+                }
                 
-            return result
-            
+                response = await self.send_request("POST", url, data=data)
+                
+                # Пытаемся получить JSON, если не получается - получаем текст
+                try:
+                    result = await response.json()
+                except Exception as json_error:
+                    response_text = await response.text()
+                    error_msg = f"Invalid JSON response (status {response.status}): {response_text[:200]}"
+                    raise Exception(error_msg)
+                
+                if response.status != 200:
+                    # Специальная обработка ошибки 429 (Rate Limit)
+                    if response.status == 429:
+                        retry_after = response.headers.get('Retry-After', '10')
+                        error_msg = f"Rate limit exceeded (429). Retry after {retry_after} seconds"
+                        raise Exception(error_msg)
+                    
+                    # Формируем информативное сообщение об ошибке
+                    error_details = result if result is not None else f"Status {response.status}, no response body"
+                    if isinstance(error_details, dict):
+                        error_msg = f"Status {response.status}: {error_details.get('message', error_details)}"
+                    else:
+                        error_msg = f"Status {response.status}: {error_details}"
+                    raise Exception(f'Failed to get spot account info: {error_msg}')
+                
+                if result is None:
+                    raise Exception("API returned None response")
+                    
+                return result
+                
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error: {str(e)}")
+            except Exception as e:
+                # Пробрасываем исключение дальше для retry
+                raise
+        
+        # Используем retry-логику для временных ошибок
+        try:
+            return await retry_async(_get_spot_account_info_internal, max_retries=3, delay=1.0)
         except Exception as e:
-            logger.error(f"Failed to get spot account info: {e}")
+            self.log_message(f"Failed to get spot account info after retries: {e}", level="ERROR")
             raise
             
     async def get_balance(self):
@@ -375,10 +417,10 @@ class HyperliquidBrowser:
             
     async def get_all_balances(self):
         """
-        Получение всех балансов spot аккаунта
+        Получение всех балансов spot аккаунта с retry-логикой
         """
         try:
-            spot_info = await self.get_spot_account_info()
+            spot_info = await self.get_spot_account_info()  # Уже имеет retry-логику
             balances = spot_info.get("balances", [])
             
             result = {}
@@ -457,45 +499,77 @@ class HyperliquidBrowser:
             
     async def get_token_price(self, token_name: str):
         """
-        Получение текущей цены токена
+        Получение текущей цены токена с retry-логикой
         """
-        try:
-            url = f"{self.BASE_URL}/info"
-            data = {
-                "type": "allMids"
-            }
-            
-            response = await self.send_request("POST", url, data=data)
-            result = await response.json()
-            
-            if response.status != 200:
-                raise Exception(f'Failed to get token price: {result}')
-            
-            # Пробуем разные варианты названий токенов
-            possible_keys = [
-                f"{token_name}USD",
-                f"{token_name}USDT", 
-                f"{token_name}",
-                token_name.upper(),
-                token_name.lower(),
-                f"{token_name}-PERP",  # Для futures
-                f"{token_name}-SPOT"   # Для spot
-            ]
-            
-            for key in possible_keys:
-                if key in result:
-                    price = Decimal(str(result[key]))
-                    # Цена найдена
-                    return price
-            
-            # Если не нашли, показываем доступные токены
-            available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key or 'PERP' in key or 'SPOT' in key]
-            # self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens[:10]}...", level="DEBUG")
-            
-            raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens[:10]}...')
+        async def _get_token_price_internal():
+            try:
+                url = f"{self.BASE_URL}/info"
+                data = {
+                    "type": "allMids"
+                }
                 
+                response = await self.send_request("POST", url, data=data)
+                
+                # Пытаемся получить JSON, если не получается - получаем текст
+                try:
+                    result = await response.json()
+                except Exception as json_error:
+                    response_text = await response.text()
+                    error_msg = f"Invalid JSON response (status {response.status}): {response_text[:200]}"
+                    raise Exception(error_msg)
+                
+                if response.status != 200:
+                    # Специальная обработка ошибки 429 (Rate Limit)
+                    if response.status == 429:
+                        retry_after = response.headers.get('Retry-After', '10')
+                        error_msg = f"Rate limit exceeded (429). Retry after {retry_after} seconds"
+                        raise Exception(error_msg)
+                    
+                    # Формируем информативное сообщение об ошибке
+                    error_details = result if result is not None else f"Status {response.status}, no response body"
+                    if isinstance(error_details, dict):
+                        error_msg = f"Status {response.status}: {error_details.get('message', error_details)}"
+                    else:
+                        error_msg = f"Status {response.status}: {error_details}"
+                    raise Exception(f'Failed to get token price: {error_msg}')
+                
+                if result is None:
+                    raise Exception("API returned None response")
+            
+                # Пробуем разные варианты названий токенов
+                possible_keys = [
+                    f"{token_name}USD",
+                    f"{token_name}USDT", 
+                    f"{token_name}",
+                    token_name.upper(),
+                    token_name.lower(),
+                    f"{token_name}-PERP",  # Для futures
+                    f"{token_name}-SPOT"   # Для spot
+                ]
+                
+                for key in possible_keys:
+                    if key in result:
+                        price = Decimal(str(result[key]))
+                        # Цена найдена
+                        return price
+                
+                # Если не нашли, показываем доступные токены
+                available_tokens = [key for key in result.keys() if 'USD' in key or 'USDT' in key or 'PERP' in key or 'SPOT' in key]
+                # self.log_message(f"🔍 DEBUG: Available tokens: {available_tokens[:10]}...", level="DEBUG")
+                
+                raise Exception(f'Token {token_name} not found in price data. Available: {available_tokens[:10]}...')
+                    
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error: {str(e)}")
+            except Exception as e:
+                # Пробрасываем исключение дальше для retry
+                raise
+        
+        # Используем retry-логику для временных ошибок
+        try:
+            return await retry_async(_get_token_price_internal, max_retries=3, delay=1.0)
         except Exception as e:
-            self.log_message(f"Failed to get token price: {e}", level="ERROR")
+            self.log_message(f"Failed to get token price after retries: {e}", level="ERROR")
             raise
             
     async def get_available_assets(self):
@@ -547,28 +621,61 @@ class HyperliquidBrowser:
             
     async def get_account_orders(self):
         """
-        Получение активных ордеров аккаунта для spot торговли
+        Получение активных ордеров аккаунта для spot торговли с retry-логикой
         """
+        async def _get_account_orders_internal():
+            try:
+                url = f"{self.BASE_URL}/info"
+                data = {
+                    "type": "openOrders",
+                    "user": self.wallet_address
+                }
+                
+                response = await self.send_request("POST", url, data=data)
+                
+                # Пытаемся получить JSON, если не получается - получаем текст
+                try:
+                    result = await response.json()
+                except Exception as json_error:
+                    response_text = await response.text()
+                    error_msg = f"Invalid JSON response (status {response.status}): {response_text[:200]}"
+                    raise Exception(error_msg)
+                
+                if response.status != 200:
+                    # Специальная обработка ошибки 429 (Rate Limit)
+                    if response.status == 429:
+                        retry_after = response.headers.get('Retry-After', '10')
+                        error_msg = f"Rate limit exceeded (429). Retry after {retry_after} seconds"
+                        raise Exception(error_msg)
+                    
+                    # Формируем информативное сообщение об ошибке
+                    error_details = result if result is not None else f"Status {response.status}, no response body"
+                    if isinstance(error_details, dict):
+                        error_msg = f"Status {response.status}: {error_details.get('message', error_details)}"
+                    else:
+                        error_msg = f"Status {response.status}: {error_details}"
+                    raise Exception(f'Failed to get account orders: {error_msg}')
+                
+                if result is None:
+                    # Если result None, возвращаем пустой список (не критично)
+                    return []
+            
+                # Возвращаем только список ордеров из ответа
+                orders = result if isinstance(result, list) else result.get('orders', [])
+                return orders
+                
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error: {str(e)}")
+            except Exception as e:
+                # Пробрасываем исключение дальше для retry
+                raise
+        
+        # Используем retry-логику для временных ошибок
         try:
-            url = f"{self.BASE_URL}/info"
-            data = {
-                "type": "openOrders",
-                "user": self.wallet_address
-            }
-            
-            response = await self.send_request("POST", url, data=data)
-            result = await response.json()
-            
-            if response.status != 200:
-                raise Exception(f'Failed to get account orders: {result}')
-            
-            # Возвращаем только список ордеров из ответа
-            orders = result if isinstance(result, list) else result.get('orders', [])
-            return orders
-            
+            return await retry_async(_get_account_orders_internal, max_retries=3, delay=1.0)
         except Exception as e:
-            logger.error(f"Failed to get account orders: {e}")
-            return []
+            self.log_message(f"Failed to get account orders after retries: {e}", level="ERROR")
+            return []  # Возвращаем пустой список при ошибке (не критично)
             
     async def create_order(self, order_data: dict):
         """
@@ -606,6 +713,10 @@ class HyperliquidBrowser:
             response = await self.send_request("POST", url, data=spot_meta_data, build_signature=False)
             
             if response.status != 200:
+                # Специальная обработка ошибки 429 (Rate Limit)
+                if response.status == 429:
+                    retry_after = response.headers.get('Retry-After', '10')
+                    raise Exception(f"Rate limit exceeded (429). Retry after {retry_after} seconds")
                 raise Exception(f"Failed to get spotMeta: {response.status}")
             
             spot_meta = await response.json()
@@ -1289,6 +1400,10 @@ class HyperliquidBrowser:
                     return []
             
             if response.status != 200:
+                # Специальная обработка ошибки 429 (Rate Limit)
+                if response.status == 429:
+                    retry_after = response.headers.get('Retry-After', '10')
+                    raise Exception(f"Rate limit exceeded (429). Retry after {retry_after} seconds")
                 raise Exception(f'Failed to get orders history: {result}')
             
             # Отладочная информация (убрано для чистоты логов)
