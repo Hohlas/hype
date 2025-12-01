@@ -187,7 +187,7 @@ class HyperliquidBrowser:
     def sign_l1_action(self, action: dict, nonce: int, is_mainnet: bool = True) -> dict:
         """
         Подписывает action для Hyperliquid L1 с EIP-712.
-        Для cancel action использует специальную структуру EIP-712.
+        Использует официальный метод sign_typed_data согласно Hyperliquid SDK.
         """
         try:
             # Проверим наличие аккаунта
@@ -252,11 +252,11 @@ class HyperliquidBrowser:
             
             # Логирование только при ошибках
             
-            # Базовая структура EIP-712 с правильным chainId
-            # 42161 для mainnet (Arbitrum), 421614 для testnet
+            # Правильный chainId для mainnet (Arbitrum)
             chain_id = 42161 if is_mainnet else 421614
             
-            eip712_data = {
+            # EIP-712 структура согласно Hyperliquid (Agent phantom)
+            phantom_agent = {
                 "domain": {
                     "chainId": chain_id,
                     "name": "Exchange",
@@ -264,41 +264,31 @@ class HyperliquidBrowser:
                     "version": "1"
                 },
                 "types": {
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
+                    ],
                     "EIP712Domain": [
                         {"name": "name", "type": "string"},
                         {"name": "version", "type": "string"},
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
-                    ],
-                    "Agent": [
-                        {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
-                "primaryType": "Agent"
+                "primaryType": "Agent",
+                "message": {
+                    "source": "a",
+                    "connectionId": action_hash  # bytes, НЕ hex string
+                }
             }
             
-            success = False
-            last_error = None
-            signature = None
-            
-            # Правильная подпись БЕЗ nonce в Agent (согласно официальной документации)
+            # ✅ ПРАВИЛЬНО: используем sign_typed_data (как в официальном SDK)
             try:
-                msg = eip712_data.copy()
-                msg["message"] = {
-                    "source": "a",
-                    "connectionId": action_hash  # Используем сырые байты для EIP-712
-                }
-                # Используем правильную EIP-712 подпись вместо encode_defunct
-                encoded = encode_structured_data(msg)
-                signature = self.account.sign_message(encoded)
-                success = True
-            except Exception as e:
-                last_error = e
-                self.log_message(f"❌ EIP-712 подпись failed: {e}", level="ERROR")
-
-            if not success:
-                raise Exception(f"EIP-712 подпись failed. Ошибка: {last_error}")
+                signature = self.account.sign_typed_data(phantom_agent)
+            except AttributeError:
+                # Fallback для старых версий eth-account
+                # Обновление: pip install --upgrade eth-account>=0.13.5
+                raise Exception("sign_typed_data not available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
