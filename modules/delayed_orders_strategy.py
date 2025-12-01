@@ -1767,9 +1767,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             order_id = order.get("oid")
                             order_coin = order.get("coin")
                             
-                            # DEBUG: выводим информацию об ордере
+                            # DEBUG: выводим ПОЛНУЮ информацию об ордере
                             client.browser.log_message(
-                                f"🔍 DEBUG: Checking order - coin={order_coin}, price=${order_price:.2f}, oid={order_id}",
+                                f"🔍 DEBUG: Full order data: {order}",
+                                level="INFO"
+                            )
+                            client.browser.log_message(
+                                f"🔍 DEBUG: Checking order - coin={order_coin} (type={type(order_coin).__name__}), price=${order_price:.2f}, oid={order_id}",
                                 level="INFO"
                             )
                             

@@ -1338,7 +1338,45 @@ class HyperliquidBrowser:
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
             
-            # Пробуем разные варианты последовательно
+            # ВАЖНО: Если передан coin напрямую из ордера API, используем его БЕЗ преобразования!
+            # API возвращает ордера с полем coin, и для отмены нужно использовать ТОЧНО такое же значение
+            if isinstance(token_name_or_asset_id, str) and token_name_or_asset_id.startswith("@"):
+                # Это coin из API в формате "@142" - используем его КАК ЕСТЬ, без преобразования!
+                self.log_message(f"🔍 DEBUG: Using coin from API as-is: {token_name_or_asset_id}", level="INFO")
+                
+                cancel_payload = {
+                    "action": {
+                        "type": "cancel",
+                        "cancels": [{
+                            "coin": token_name_or_asset_id,  # Используем КАК ЕСТЬ из API
+                            "oid": order_id
+                        }]
+                    },
+                    "nonce": int(time.time() * 1000),
+                }
+                
+                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
+                
+                if response.status == 200:
+                    try:
+                        result = await response.json()
+                        self.log_message(f"✅ SUCCESS! Order cancelled using coin as-is: {token_name_or_asset_id}", level="INFO")
+                        return result
+                    except Exception:
+                        response_text = await response.text()
+                        self.log_message(f"✅ SUCCESS! Order cancelled (no JSON response)", level="INFO")
+                        return {"status": "ok"}
+                elif response.status == 422 or response.status == 404:
+                    self.log_message(f"Order {order_id} not found or already cancelled (status {response.status})", level="INFO")
+                    return {"status": "ok", "message": "Order not found or already cancelled"}
+                else:
+                    try:
+                        response_text = await response.text()
+                    except Exception:
+                        response_text = f"Status {response.status}"
+                    raise Exception(f"Failed to cancel order: {response.status}, {response_text[:200]}")
+            
+            # Если не формат "@XXX", пробуем разные варианты последовательно
             variants_to_try = []
             
             if isinstance(token_name_or_asset_id, str):
