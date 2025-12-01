@@ -1438,9 +1438,9 @@ class HyperliquidBrowser:
         Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем api-ui endpoint как в вашем curl-запросе
-            # С новой правильной EIP-712 структурой это должно работать
-            url = "https://api-ui.hyperliquid.xyz/exchange"
+            # Используем обычный API endpoint (не api-ui)
+            # Подпись передается в payload, не в headers
+            url = f"{self.BASE_URL}/exchange"
             
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
@@ -1455,19 +1455,17 @@ class HyperliquidBrowser:
                 "type": "cancel"
             }
             
-            # Создаем nonce и expiresAfter (как в Perplexity примере)
+            # Создаем nonce
             nonce = int(time.time() * 1000)
-            expires_after = nonce + 14000  # expiresAfter = nonce + 14 секунд (как в веб-терминале)
             
             # Подписываем action через sign_l1_action (EIP-712)
             # Для cancel будет использован специальный метод _sign_cancel_action
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload с expiresAfter и isFrontend (как в браузере для api-ui)
+            # Формируем финальный payload (БЕЗ expiresAfter и isFrontend)
+            # Подпись должна быть ВНУТРИ payload, не в headers
             cancel_payload = {
                 "action": cancel_action,
-                "expiresAfter": expires_after,
-                "isFrontend": True,
                 "nonce": nonce,
                 "signature": signature,
                 "vaultAddress": None
