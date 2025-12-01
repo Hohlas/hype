@@ -385,8 +385,8 @@ class HyperliquidBrowser:
             logger.info(f"[DEBUG] Cancel signature created: r={signature['r'][:10]}..., s={signature['s'][:10]}..., v={signature['v']}")
             
             # Проверяем что подпись валидна
-            from eth_account.messages import _hash_eip191_message
-            recovered_address = self.account.recover_message(encoded_data, signature=signed_message)
+            from eth_account import Account
+            recovered_address = Account.recover_message(encoded_data, signature=signed_message)
             
             if recovered_address.lower() != self.wallet_address.lower():
                 logger.error(f"[ERROR] Signature verification failed! Expected {self.wallet_address}, got {recovered_address}")
