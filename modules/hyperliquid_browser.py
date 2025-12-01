@@ -1357,9 +1357,9 @@ class HyperliquidBrowser:
         Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем api-ui endpoint как в браузере (не api!)
-            # Это важно - api и api-ui могут требовать разные payload
-            url = "https://api-ui.hyperliquid.xyz/exchange"
+            # Используем обычный API endpoint (не api-ui!)
+            # Важно: для cancel используется api.hyperliquid.xyz, как в примере Perplexity
+            url = f"{self.BASE_URL}/exchange"
             
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
@@ -1374,9 +1374,9 @@ class HyperliquidBrowser:
                 "type": "cancel"
             }
             
-            # Создаем nonce и expiresAfter (как в браузере)
+            # Создаем nonce и expiresAfter (как в Perplexity примере)
             nonce = int(time.time() * 1000)
-            expires_after = nonce + (60 * 1000)  # expiresAfter = nonce + 60 секунд
+            expires_after = nonce + 14000  # expiresAfter = nonce + 14 секунд (как в веб-терминале)
             
             # Отладочный вывод структуры action
             import json
@@ -1411,6 +1411,11 @@ class HyperliquidBrowser:
             if response.status == 200:
                 try:
                     result = await response.json()
+                    
+                    # Подробное логирование ответа
+                    logger.info(f"[DEBUG] Response status: {result.get('status')}")
+                    logger.info(f"[DEBUG] Response data: {json.dumps(result, indent=2)[:800]}")
+                    
                 except Exception as json_error:
                     # Если не удалось распарсить JSON, но статус 200
                     response_text = await response.text()
@@ -1423,13 +1428,31 @@ class HyperliquidBrowser:
                     error_msg = result.get("response", "Unknown error")
                     raise Exception(f"API error: {error_msg}")
                 
-                # Проверяем statuses в ответе
-                statuses = result.get("response", {}).get("data", {}).get("statuses", [])
-                if statuses and isinstance(statuses, list) and len(statuses) > 0:
-                    status_obj = statuses[0]
-                    if isinstance(status_obj, dict) and "error" in status_obj:
-                        error_msg = status_obj["error"]
-                        raise Exception(f"API error in response: {error_msg}")
+                # Проверяем успешный ответ
+                if result.get("status") == "ok":
+                    # Проверяем statuses в ответе
+                    response_data = result.get("response", {})
+                    if isinstance(response_data, dict):
+                        statuses = response_data.get("data", {}).get("statuses", [])
+                    else:
+                        statuses = []
+                    
+                    if statuses:
+                        first_status = statuses[0]
+                        
+                        # Успешная отмена
+                        if first_status == "success":
+                            logger.info(f"✅ Order {order_id} cancelled successfully")
+                            return {"status": "ok"}
+                        
+                        # Проверяем на ошибки
+                        if isinstance(first_status, dict) and "error" in first_status:
+                            error_msg = first_status["error"]
+                            raise Exception(f"API error in response: {error_msg}")
+                    
+                    # Если нет статусов, но status=ok
+                    logger.info(f"✅ Order {order_id} cancelled (status=ok)")
+                    return {"status": "ok"}
                 
                 return result
             else:
