@@ -1072,6 +1072,105 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if not hasattr(client, '_previous_usdc_balance'):
                     client._previous_usdc_balance = all_balances.get("USDC", 0.0)
                 
+                # ============================================
+                # МОДУЛЬ SET_TP: Выставление TP-ордеров
+                # ============================================
+                # Этот модуль работает независимо от блоков покупки.
+                # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
+                try:
+                    # Получаем историю торговли (последние 100 сделок)
+                    trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+                    
+                    if trades_history:
+                        # Фильтруем только покупки: USDC → токен
+                        buy_trades = []
+                        for trade in trades_history:
+                            trade_side = trade.get('side', '').upper()
+                            # Ищем покупки
+                            if trade_side in ['BUY', 'B']:
+                                buy_trades.append(trade)
+                        
+                        # Извлекаем данные последней покупки
+                        if buy_trades:
+                            # История уже отсортирована от новых к старым, берем первую
+                            latest_trade = buy_trades[0]
+                            latest_price = float(latest_trade.get('px', 0))
+                            latest_amount = float(latest_trade.get('sz', 0))
+                            latest_timestamp = latest_trade.get('time', 0)
+                            
+                            # Проверяем, является ли покупка новой
+                            # Используем относительную разницу (процент) вместо абсолютной для корректной работы с любыми ценами
+                            # Порог 0.1% (0.001) для избежания ложных срабатываний из-за округления
+                            if latest_price > 0 and latest_amount > 0:
+                                is_new_buy = False
+                                if last_buy_price is None:
+                                    is_new_buy = True
+                                elif last_buy_price > 0:
+                                    # Относительная разница в процентах
+                                    price_diff_percent = abs(latest_price - last_buy_price) / last_buy_price
+                                    if price_diff_percent > 0.0001:  # 0.1% разница
+                                        is_new_buy = True
+                                
+                                if is_new_buy:
+                                    # Обнаружена новая покупка
+                                    client.browser.log_message(
+                                        f"🆕 New buy detected: {latest_amount:.6f} {token_name} @ ${latest_price:.2f}",
+                                        level="INFO"
+                                    )
+                                    
+                                    # Обновляем last_buy_price для отслеживания следующей новой покупки
+                                    last_buy_price = latest_price
+                                    
+                                    # Рассчитываем цену TP
+                                    tp_price = latest_price + float(step)
+                                    
+                                    # Размещение TP-ордера на бирже
+                                    # Количество: latest_amount токенов
+                                    # Лимитная цена: tp_price
+                                    try:
+                                        tp_order_data = {
+                                            "token": token_name,
+                                            "side": "SELL",
+                                            "order_type": "LIMIT",
+                                            "quantity": latest_amount,
+                                            "price": tp_price,
+                                        }
+                                        
+                                        tp_result = await client.place_order(**tp_order_data)
+                                        
+                                        client.browser.log_message(
+                                            f"🎯 Set TP: SELL {latest_amount:.6f} {token_name} @ ${tp_price:.2f}",
+                                            level="INFO"
+                                        )
+                                        
+                                        # Отправляем уведомление в Telegram
+                                        await send_tg_notification(
+                                            client,
+                                            text=f'🎯 set TP: SELL {latest_amount:.6f} {token_name} @ ${tp_price:.2f}',
+                                            save_to_report=False
+                                        )
+                                        
+                                        # Записываем статистику операции Set TP
+                                        try:
+                                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                            total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
+                                            await log_statistics_to_excel(
+                                                client=client,
+                                                operation="Set TP",
+                                                btc_amount=latest_amount,
+                                                price=tp_price,
+                                                usdc_balance=all_balances.get("USDC", 0.0),
+                                                btc_balance=btc_balance,
+                                                total_value=total_value
+                                            )
+                                        except Exception as e:
+                                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
+                                        
+                                    except Exception as e:
+                                        client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
+                except Exception as e:
+                    client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
+                
                 # Отладочная информация отключена для чистоты логов
                 # client.browser.log_message(f"🔍 DEBUG: get_active_tp_orders returned {len(tp_orders)} orders", level="INFO")
                 # if tp_orders:
