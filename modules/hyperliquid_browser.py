@@ -1335,7 +1335,7 @@ class HyperliquidBrowser:
                 "action": {
                     "type": "cancel",
                     "cancels": [{
-                        "coin": token_name,
+                        "coin": token_name,  # Используем имя токена как есть (может быть "@142", "BTC-SPOT" или "BTC")
                         "oid": order_id
                     }]
                 },

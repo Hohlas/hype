@@ -1769,11 +1769,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             if order_price < threshold:
                                 # Ордер устарел - отменяем его
                                 try:
-                                    await client.browser.cancel_order(token_name, order_id)
-                                    client.browser.log_message(
-                                        f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
-                                        level="INFO"
-                                    )
+                                    # Получаем правильное имя токена из ордера (может быть "BTC-SPOT" или asset ID)
+                                    order_coin = order.get("coin", token_name)
+                                    result = await client.browser.cancel_order(order_coin, order_id)
+                                    
+                                    # Проверяем результат отмены
+                                    if result and result.get("status") == "ok":
+                                        client.browser.log_message(
+                                            f"✅ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
+                                            level="INFO"
+                                        )
+                                    else:
+                                        # Ордер уже не существует или был отменен ранее
+                                        client.browser.log_message(
+                                            f"ℹ️ Buy Limit at ${order_price:.2f} already cancelled or not found",
+                                            level="INFO"
+                                        )
                                 except Exception as e:
                                     client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
