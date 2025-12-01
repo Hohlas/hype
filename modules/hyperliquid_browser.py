@@ -1414,7 +1414,12 @@ class HyperliquidBrowser:
             for i, (coin_value, description) in enumerate(variants_to_try, 1):
                 self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value}, type={type(coin_value).__name__})", level="INFO")
                 
-                cancel_payload = {
+                # Пробуем две структуры payload:
+                # 1. С "coin" (как было)
+                # 2. С "assetIndex" (возможно, требуется для spot)
+                
+                # Вариант 1: структура с "coin"
+                cancel_payload_1 = {
                     "action": {
                         "type": "cancel",
                         "cancels": [{
@@ -1425,11 +1430,45 @@ class HyperliquidBrowser:
                     "nonce": int(time.time() * 1000),
                 }
                 
-                # DEBUG: логируем полный payload
-                import json
-                self.log_message(f"🔍 DEBUG: Cancel payload: {json.dumps(cancel_payload, indent=2)}", level="INFO")
+                # Вариант 2: структура с "assetIndex" (если coin_value - число)
+                cancel_payload_2 = None
+                if isinstance(coin_value, int):
+                    cancel_payload_2 = {
+                        "action": {
+                            "type": "cancel",
+                            "cancels": [{
+                                "assetIndex": coin_value,
+                                "oid": order_id
+                            }]
+                        },
+                        "nonce": int(time.time() * 1000),
+                    }
                 
-                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
+                # Пробуем сначала вариант с "coin"
+                import json
+                self.log_message(f"🔍 DEBUG: Cancel payload (coin): {json.dumps(cancel_payload_1, indent=2)}", level="INFO")
+                
+                response = await self.send_request("POST", url, data=cancel_payload_1, build_signature=True)
+                
+                # Если вариант с "coin" не сработал и есть вариант с "assetIndex", пробуем его
+                if (response.status == 422 or response.status == 404) and cancel_payload_2:
+                    self.log_message(f"🔍 DEBUG: Trying assetIndex variant for {description}", level="INFO")
+                    self.log_message(f"🔍 DEBUG: Cancel payload (assetIndex): {json.dumps(cancel_payload_2, indent=2)}", level="INFO")
+                    response = await self.send_request("POST", url, data=cancel_payload_2, build_signature=True)
+                
+                # Если оба варианта не сработали, пробуем упрощенную структуру без вложенного action
+                if response.status == 422 or response.status == 404:
+                    # Вариант 3: упрощенная структура (как в некоторых примерах API)
+                    cancel_payload_3 = {
+                        "cancels": [{
+                            "coin": coin_value,
+                            "oid": order_id
+                        }],
+                        "nonce": int(time.time() * 1000),
+                    }
+                    self.log_message(f"🔍 DEBUG: Trying simplified payload structure for {description}", level="INFO")
+                    self.log_message(f"🔍 DEBUG: Cancel payload (simplified): {json.dumps(cancel_payload_3, indent=2)}", level="INFO")
+                    response = await self.send_request("POST", url, data=cancel_payload_3, build_signature=True)
                 
                 # Проверяем статус ответа
                 if response.status == 200:
