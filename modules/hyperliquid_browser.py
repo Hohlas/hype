@@ -1357,8 +1357,9 @@ class HyperliquidBrowser:
         Использует правильную структуру согласно реальному запросу браузера
         """
         try:
-            # Используем тот же endpoint, что и для обычных ордеров
-            url = f"{self.BASE_URL}/exchange"
+            # Используем api-ui endpoint как в браузере (не api!)
+            # Это важно - api и api-ui могут требовать разные payload
+            url = "https://api-ui.hyperliquid.xyz/exchange"
             
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
@@ -1373,8 +1374,9 @@ class HyperliquidBrowser:
                 "type": "cancel"
             }
             
-            # Создаем nonce
+            # Создаем nonce и expiresAfter (как в браузере)
             nonce = int(time.time() * 1000)
+            expires_after = nonce + (60 * 1000)  # expiresAfter = nonce + 60 секунд
             
             # Отладочный вывод структуры action
             import json
@@ -1388,13 +1390,19 @@ class HyperliquidBrowser:
             # Подписываем action через sign_l1_action (EIP-712)
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload (БЕЗ expiresAfter и isFrontend, как в обычных ордерах)
+            # Формируем финальный payload с expiresAfter и isFrontend (как в браузере для api-ui)
             cancel_payload = {
                 "action": cancel_action,
+                "expiresAfter": expires_after,
+                "isFrontend": True,
                 "nonce": nonce,
                 "signature": signature,
-                "vaultAddress": None  # Для основного кошелька используем None
+                "vaultAddress": None
             }
+            
+            # Отладочный вывод финального payload
+            logger.info(f"[DEBUG] Final cancel payload keys order: {list(cancel_payload.keys())}")
+            logger.info(f"[DEBUG] URL: {url}")
             
             # Используем тот же метод отправки, что и для обычных ордеров
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
