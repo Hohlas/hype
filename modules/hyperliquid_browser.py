@@ -255,8 +255,7 @@ class HyperliquidBrowser:
             # Правильный chainId для mainnet (Arbitrum)
             chain_id = 42161 if is_mainnet else 421614
             
-            # ✅ ПРАВИЛЬНАЯ структура EIP-712 (как в официальном SDK)
-            # Порядок: types -> primaryType -> domain -> message
+            # ✅ ПРАВИЛЬНАЯ структура EIP-712 для encode_structured_data
             structured_data = {
                 "types": {
                     "EIP712Domain": [
@@ -279,23 +278,20 @@ class HyperliquidBrowser:
                 },
                 "message": {
                     "source": "a",
-                    "connectionId": action_hash  # bytes, НЕ hex string!
+                    "connectionId": action_hash  # bytes (32 bytes from keccak)
                 }
             }
             
-            # Кодируем и подписываем
-            # Пробуем использовать sign_typed_data напрямую (если доступен)
+            # Отладочный вывод структуры данных
+            logger.info(f"[DEBUG] Structured data: {json.dumps(structured_data, indent=2, default=lambda x: x.hex() if isinstance(x, bytes) else str(x))}")
+            
+            # Используем encode_structured_data (стандартный способ)
             try:
-                signed_message = self.account.sign_typed_data(structured_data)
-            except AttributeError:
-                # Fallback: используем encode_structured_data если доступен
-                try:
-                    from eth_account.messages import encode_structured_data
-                    encoded_data = encode_structured_data(structured_data)
-                    signed_message = self.account.sign_message(encoded_data)
-                except ImportError:
-                    # Если ничего не доступно, используем старый метод
-                    raise Exception("Neither sign_typed_data nor encode_structured_data available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
+                from eth_account.messages import encode_structured_data
+                encoded_data = encode_structured_data(structured_data)
+                signed_message = self.account.sign_message(encoded_data)
+            except ImportError:
+                raise Exception("encode_structured_data not available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
