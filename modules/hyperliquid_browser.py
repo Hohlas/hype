@@ -71,7 +71,7 @@ class HyperliquidBrowser:
         
         # Rate limiting
         self.last_request_time = 0
-        self.min_request_interval = 0.05  # 50ms between requests (минимум для API)
+        self.min_request_interval = 0.1  # 100ms between requests (увеличено для снижения нагрузки)
         
     async def __aenter__(self):
         await self.start_session()

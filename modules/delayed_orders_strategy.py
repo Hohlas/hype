@@ -1868,11 +1868,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             save_to_report=False
                         )
                 
-                await async_sleep(10)
+                # Задержка между итерациями основного цикла
+                # Увеличена до 15 секунд для снижения нагрузки на API и предотвращения 429 ошибок
+                await async_sleep(15)
                 
             except Exception as e:
-                client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
-                await async_sleep(5)
+                error_str = str(e)
+                # Если получили 429 ошибку, увеличиваем задержку
+                if '429' in error_str or 'Rate limit' in error_str:
+                    client.browser.log_message(f"⚠️ Rate limit detected, waiting 30 seconds...", level="WARNING")
+                    await async_sleep(30)
+                else:
+                    client.browser.log_message(f"❌ Trading error: {e}", level="ERROR")
+                    await async_sleep(10)
                 
     except Exception as e:
         client.browser.log_message(f"❌ Strategy error: {e}", level="ERROR")

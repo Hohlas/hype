@@ -48,13 +48,13 @@ async def retry_async(func, max_retries: int = 3, delay: float = 1.0, *args, **k
             error_str = str(e)
             
             # Специальная обработка ошибки 429 (Too Many Requests)
-            is_429_error = '429' in error_str or 'Too Many Requests' in error_str
+            is_429_error = '429' in error_str or 'Rate limit' in error_str or 'Too Many Requests' in error_str
             
             if attempt < max_retries:
                 if is_429_error:
                     # Для 429 ошибки используем более длинную задержку
-                    # Начинаем с 10 секунд (как указано в документации API)
-                    retry_delay = 10.0 * (2 ** attempt)  # 10s, 20s, 40s
+                    # Начинаем с 15 секунд (увеличено для надежности)
+                    retry_delay = 15.0 * (2 ** attempt)  # 15s, 30s, 60s
                     logger.warning(
                         f"Attempt {attempt + 1} failed with 429 (Rate Limit): {e}. "
                         f"Retrying in {retry_delay:.1f} seconds..."
