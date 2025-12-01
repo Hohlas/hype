@@ -1343,16 +1343,42 @@ class HyperliquidBrowser:
             }
             
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
-            result = await response.json()
             
-            if response.status != 200:
-                raise Exception(f'Failed to cancel order: {result}')
+            # Проверяем статус ответа перед парсингом JSON
+            if response.status == 200:
+                try:
+                    result = await response.json()
+                    return result
+                except Exception as json_error:
+                    # Если не удалось распарсить JSON, но статус 200 - это странно, но не критично
+                    response_text = await response.text()
+                    logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
+                    return {"status": "ok"}
+            else:
+                # Если статус не 200, пытаемся получить текст ответа
+                try:
+                    response_text = await response.text()
+                except Exception:
+                    response_text = f"Status {response.status}, no response body"
                 
-            return result
+                # Проверяем, не является ли это ошибкой "ордер не найден" (это нормально)
+                if response.status == 422 or response.status == 404:
+                    # Ордер уже не существует (отменен или исполнен) - это не ошибка
+                    logger.info(f"Order {order_id} not found or already cancelled (status {response.status})")
+                    return {"status": "ok", "message": "Order not found or already cancelled"}
+                else:
+                    # Другие ошибки - пробрасываем исключение
+                    raise Exception(f'Failed to cancel order: Status {response.status}, Response: {response_text[:200]}')
             
         except Exception as e:
-            logger.error(f"Failed to cancel order: {e}")
-            raise
+            error_str = str(e)
+            # Если это ошибка "ордер не найден", не логируем как ERROR
+            if "422" in error_str or "404" in error_str or "not found" in error_str.lower():
+                logger.info(f"Order {order_id} cancellation: {error_str}")
+                return {"status": "ok", "message": "Order not found or already cancelled"}
+            else:
+                logger.error(f"Failed to cancel order: {e}")
+                raise
             
     async def get_all_orders_history(self, token_name: str, limit: int = 500):
         """
