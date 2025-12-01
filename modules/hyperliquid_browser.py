@@ -252,8 +252,8 @@ class HyperliquidBrowser:
             
             # Логирование только при ошибках
             
-            # Правильный chainId для mainnet (Arbitrum)
-            chain_id = 42161 if is_mainnet else 421614
+            # Правильный chainId для mainnet - это 1337, НЕ 42161!
+            chain_id = 1337 if is_mainnet else 421614
             
             # ✅ Используем encode_typed_data с правильной структурой
             full_message = {
@@ -273,12 +273,12 @@ class HyperliquidBrowser:
                 "domain": {
                     "name": "Exchange",
                     "version": "1",
-                    "chainId": chain_id,
+                    "chainId": chain_id,  # 1337 для mainnet
                     "verifyingContract": "0x0000000000000000000000000000000000000000"
                 },
                 "message": {
                     "source": "a",
-                    "connectionId": action_hash  # bytes (32 bytes from keccak)
+                    "connectionId": "0x" + action_hash.hex()  # HEX STRING с префиксом 0x
                 }
             }
             
