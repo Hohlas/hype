@@ -9,7 +9,7 @@ import hashlib
 import struct
 import msgpack
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_structured_data
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
 import web3
@@ -255,46 +255,43 @@ class HyperliquidBrowser:
             # Правильный chainId для mainnet (Arbitrum)
             chain_id = 42161 if is_mainnet else 421614
             
-            # EIP-712 структура согласно Hyperliquid (Agent phantom)
-            phantom_agent = {
-                "domain": {
-                    "chainId": chain_id,
-                    "name": "Exchange",
-                    "verifyingContract": "0x0000000000000000000000000000000000000000",
-                    "version": "1"
-                },
+            # ✅ ПРАВИЛЬНАЯ структура EIP-712 (как в официальном SDK)
+            # Порядок: types -> primaryType -> domain -> message
+            structured_data = {
                 "types": {
-                    "Agent": [
-                        {"name": "source", "type": "string"},
-                        {"name": "connectionId", "type": "bytes32"}
-                    ],
                     "EIP712Domain": [
                         {"name": "name", "type": "string"},
                         {"name": "version", "type": "string"},
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
                     ]
                 },
                 "primaryType": "Agent",
+                "domain": {
+                    "name": "Exchange",
+                    "version": "1",
+                    "chainId": chain_id,
+                    "verifyingContract": "0x0000000000000000000000000000000000000000"
+                },
                 "message": {
                     "source": "a",
-                    "connectionId": action_hash  # bytes, НЕ hex string
+                    "connectionId": action_hash  # bytes, НЕ hex string!
                 }
             }
             
-            # ✅ ПРАВИЛЬНО: используем sign_typed_data (как в официальном SDK)
-            try:
-                signature = self.account.sign_typed_data(phantom_agent)
-            except AttributeError:
-                # Fallback для старых версий eth-account
-                # Обновление: pip install --upgrade eth-account>=0.13.5
-                raise Exception("sign_typed_data not available. Please upgrade: pip install --upgrade eth-account>=0.13.5")
+            # Кодируем и подписываем
+            encoded_data = encode_structured_data(structured_data)
+            signed_message = self.account.sign_message(encoded_data)
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
-                "r": "0x" + signature.r.to_bytes(32, "big").hex(),
-                "s": "0x" + signature.s.to_bytes(32, "big").hex(),
-                "v": signature.v
+                "r": "0x" + signed_message.r.to_bytes(32, "big").hex(),
+                "s": "0x" + signed_message.s.to_bytes(32, "big").hex(),
+                "v": signed_message.v
             }
             
             return signature_dict
