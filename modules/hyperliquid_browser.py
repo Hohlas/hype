@@ -1338,77 +1338,90 @@ class HyperliquidBrowser:
             # DEBUG: логируем входные данные
             self.log_message(f"🔍 DEBUG cancel_order: token={token_name_or_asset_id} (type={type(token_name_or_asset_id).__name__}), oid={order_id}", level="INFO")
             
-            # ВАЖНО: Для отмены ордеров нужен БАЗОВЫЙ asset ID (142), а не spot format (10142)!
-            # При создании ордеров используется spot asset ID (10000+base), но для отмены - базовый ID
-            coin_value = token_name_or_asset_id
+            # Пробуем разные варианты последовательно
+            variants_to_try = []
             
             if isinstance(token_name_or_asset_id, str):
                 if token_name_or_asset_id.startswith("@"):
-                    # Формат "@142" -> используем БАЗОВЫЙ ID: 142 (не 10142!)
+                    # Вариант 1: строка "@142" как есть
+                    variants_to_try.append((token_name_or_asset_id, "string @142 as-is"))
+                    # Вариант 2: базовый ID 142
                     base_id = int(token_name_or_asset_id[1:])
-                    coin_value = base_id  # Используем базовый ID без добавления 10000
-                    self.log_message(f"🔍 DEBUG: Converted {token_name_or_asset_id} -> {coin_value} (base ID)", level="INFO")
+                    variants_to_try.append((base_id, "base ID 142"))
+                    # Вариант 3: spot asset ID 10142
+                    variants_to_try.append((10000 + base_id, "spot ID 10142"))
+                    # Вариант 4: строка "10142"
+                    variants_to_try.append((str(10000 + base_id), "string '10142'"))
                 elif "-SPOT" in token_name_or_asset_id:
-                    # Формат "BTC-SPOT" -> получаем spot asset ID через API, затем извлекаем базовый ID
+                    # Вариант 1: строка "BTC-SPOT" как есть
+                    variants_to_try.append((token_name_or_asset_id, "string 'BTC-SPOT' as-is"))
+                    # Вариант 2: spot asset ID через API
                     spot_asset_id = await self._get_spot_asset_id(token_name_or_asset_id)
-                    coin_value = spot_asset_id - 10000  # Извлекаем базовый ID
-                    self.log_message(f"🔍 DEBUG: Got spot_asset_id {spot_asset_id} for {token_name_or_asset_id} -> base ID {coin_value}", level="INFO")
+                    variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
+                    variants_to_try.append((spot_asset_id - 10000, f"base ID from API {spot_asset_id - 10000}"))
                 else:
-                    # Название токена (например, "BTC") -> получаем spot asset ID и извлекаем базовый
+                    # Название токена -> пробуем добавить "-SPOT"
+                    variants_to_try.append((f"{token_name_or_asset_id}-SPOT", f"string '{token_name_or_asset_id}-SPOT'"))
                     spot_asset_id = await self._get_spot_asset_id(f"{token_name_or_asset_id}-SPOT")
-                    coin_value = spot_asset_id - 10000  # Извлекаем базовый ID
-                    self.log_message(f"🔍 DEBUG: Got spot_asset_id {spot_asset_id} for {token_name_or_asset_id}-SPOT -> base ID {coin_value}", level="INFO")
+                    variants_to_try.append((spot_asset_id, f"spot ID from API {spot_asset_id}"))
             elif isinstance(token_name_or_asset_id, int):
-                # Если это уже числовой ID
                 if token_name_or_asset_id >= 10000:
-                    # Spot asset ID (10142) -> извлекаем базовый ID (142)
-                    coin_value = token_name_or_asset_id - 10000
-                    self.log_message(f"🔍 DEBUG: Converted spot ID {token_name_or_asset_id} -> base ID {coin_value}", level="INFO")
+                    # Spot asset ID
+                    variants_to_try.append((token_name_or_asset_id, f"spot ID {token_name_or_asset_id}"))
+                    variants_to_try.append((token_name_or_asset_id - 10000, f"base ID {token_name_or_asset_id - 10000}"))
                 else:
-                    # Уже базовый ID
-                    coin_value = token_name_or_asset_id
-                    self.log_message(f"🔍 DEBUG: Using base ID as-is: {coin_value}", level="INFO")
+                    # Базовый ID
+                    variants_to_try.append((token_name_or_asset_id, f"base ID {token_name_or_asset_id}"))
+                    variants_to_try.append((10000 + token_name_or_asset_id, f"spot ID {10000 + token_name_or_asset_id}"))
             
-            cancel_payload = {
-                "action": {
-                    "type": "cancel",
-                    "cancels": [{
-                        "coin": coin_value,  # БАЗОВЫЙ asset ID (например, 142, не 10142)
-                        "oid": order_id
-                    }]
-                },
-                "nonce": int(time.time() * 1000),
-            }
-            
-            self.log_message(f"🔍 DEBUG: Sending cancel with coin={coin_value} (base ID), oid={order_id}", level="INFO")
-            
-            response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
-            
-            # Проверяем статус ответа перед парсингом JSON
-            if response.status == 200:
-                try:
-                    result = await response.json()
-                    return result
-                except Exception as json_error:
-                    # Если не удалось распарсить JSON, но статус 200 - это странно, но не критично
-                    response_text = await response.text()
-                    logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
-                    return {"status": "ok"}
-            else:
-                # Если статус не 200, пытаемся получить текст ответа
-                try:
-                    response_text = await response.text()
-                except Exception:
-                    response_text = f"Status {response.status}, no response body"
+            # Пробуем каждый вариант
+            for i, (coin_value, description) in enumerate(variants_to_try, 1):
+                self.log_message(f"🔍 DEBUG: Trying variant {i}/{len(variants_to_try)}: {description} (coin={coin_value})", level="INFO")
                 
-                # Проверяем, не является ли это ошибкой "ордер не найден" (это нормально)
-                if response.status == 422 or response.status == 404:
-                    # Ордер уже не существует (отменен или исполнен) - это не ошибка
-                    logger.info(f"Order {order_id} not found or already cancelled (status {response.status})")
-                    return {"status": "ok", "message": "Order not found or already cancelled"}
+                cancel_payload = {
+                    "action": {
+                        "type": "cancel",
+                        "cancels": [{
+                            "coin": coin_value,
+                            "oid": order_id
+                        }]
+                    },
+                    "nonce": int(time.time() * 1000),
+                }
+                
+                response = await self.send_request("POST", url, data=cancel_payload, build_signature=True)
+                
+                # Проверяем статус ответа
+                if response.status == 200:
+                    try:
+                        result = await response.json()
+                        self.log_message(f"✅ SUCCESS! Variant {i} worked: {description}", level="INFO")
+                        return result  # Успех! Возвращаем результат
+                    except Exception as json_error:
+                        response_text = await response.text()
+                        logger.warning(f"Failed to parse JSON response (status 200): {response_text[:200]}")
+                        self.log_message(f"✅ SUCCESS! Variant {i} worked: {description} (no JSON)", level="INFO")
+                        return {"status": "ok"}
+                elif response.status == 422 or response.status == 404:
+                    # Ордер не найден с этим вариантом - пробуем следующий
+                    self.log_message(f"❌ Variant {i} failed: order not found (status {response.status})", level="INFO")
+                    if i < len(variants_to_try):
+                        continue  # Пробуем следующий вариант
+                    else:
+                        # Это был последний вариант
+                        self.log_message(f"Order {order_id} not found or already cancelled (tried all variants)", level="INFO")
+                        return {"status": "ok", "message": "Order not found or already cancelled"}
                 else:
-                    # Другие ошибки - пробрасываем исключение
-                    raise Exception(f'Failed to cancel order: Status {response.status}, Response: {response_text[:200]}')
+                    # Другая ошибка - пробуем следующий вариант
+                    try:
+                        response_text = await response.text()
+                    except Exception:
+                        response_text = f"Status {response.status}, no response body"
+                    self.log_message(f"❌ Variant {i} failed: {response.status}, {response_text[:100]}", level="INFO")
+                    if i < len(variants_to_try):
+                        continue
+                    else:
+                        raise Exception(f"Failed to cancel order with all variants: last error {response.status}, {response_text[:200]}")
             
         except Exception as e:
             error_str = str(e)
