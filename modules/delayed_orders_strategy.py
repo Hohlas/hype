@@ -201,7 +201,7 @@ async def get_actual_fill_price_from_history(client, token_name: str, order_time
         return None, None
 
 
-async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sell_size: float, sell_price: float, tp_order_time: int = None):
+async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sell_size: float, sell_price: float, tp_order_time: int = None, sz_decimals: int = None):
     """
     Находит связанную покупку для исполненного TP ордера.
     
@@ -222,6 +222,7 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         sell_size: Размер проданного BTC
         sell_price: Цена продажи
         tp_order_time: Время выставления TP ордера из Open Orders (в миллисекундах), если доступно
+        sz_decimals: Количество знаков после запятой для размера (если не передан, получается из кэша)
     
     Returns:
         dict: Данные покупки с полями px, sz, fee, feeToken, time, oid или None если не найдено
@@ -241,8 +242,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         #    TP ордер создается СРАЗУ ПОСЛЕ покупки, поэтому покупка должна быть ДО времени создания TP
         # 2. Ищем покупки (BUY) в истории сделок, которые:
         #    - Время покупки < время создания TP ордера (trade_time < tp_order_time)
-        #    - Размер покупки совпадает с размером продажи (с допуском tolerance = 0.0001)
-        #    - Не старше 30 дней от времени TP ордера
+        #    - Размер покупки совпадает с размером продажи (с динамическим допуском tolerance = 10^(-sz_decimals))
+        #    - Не старше 5 минут от времени создания TP ордера
         # 3. Если найдено несколько подходящих покупок, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP)
         #    Это гарантирует правильное сопоставление даже при множественных покупках лесенкой
         # 4. Если точного совпадения нет, ищем ближайшую по размеру покупку
@@ -290,7 +291,18 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
         # КРИТИЧНО: TP ордер создается СРАЗУ после покупки (задержка несколько секунд/минут)
         # Поэтому ищем покупку в небольшом временном окне ДО времени создания TP ордера
-        tolerance = 0.00001  # Допустимое отклонение размера (строгое сопоставление)
+        
+        # Получаем sz_decimals для динамического расчета tolerance (если не передан как параметр)
+        if sz_decimals is None:
+            try:
+                sz_decimals = client.get_token_sz_decimals(token_name)
+            except:
+                sz_decimals = 5  # Fallback
+        
+        # Динамический tolerance на основе sz_decimals: минимальная единица измерения размера
+        # Например, для sz_decimals=5 tolerance будет 0.00001, для sz_decimals=3 - 0.001
+        tolerance = 10 ** (-sz_decimals)
+        
         max_time_diff_minutes = 5  # Максимальная разница между покупкой и созданием TP ордера (в минутах)
         # TP ордер создается СРАЗУ после покупки, задержка обычно несколько секунд
         max_time_diff_ms = max_time_diff_minutes * 60 * 1000  # Преобразуем в миллисекунды
@@ -617,6 +629,9 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                 sz_decimals = client.get_token_sz_decimals(token_name)
             except:
                 sz_decimals = 5  # Fallback
+        
+        # Округляем btc_amount до sz_decimals для соответствия формату биржи
+        btc_amount = round(btc_amount, sz_decimals)
         
         # Цена уже нормализована при расчете, но для Excel форматируем как строку без trailing zeros
         def format_price_for_excel(price_value: float, decimals: int) -> str:
@@ -1456,7 +1471,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             # Используем время выставления TP ордера, если доступно
                                             
                                             buy_trade = await find_matching_buy_trade(
-                                                client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time
+                                                client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time, sz_decimals
                                             )
                                             
                                             # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
