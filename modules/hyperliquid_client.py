@@ -207,6 +207,21 @@ class HyperliquidClient:
             # Получаем sz_decimals для форматирования размера ордера
             sz_decimals = self.get_token_sz_decimals(token)
             
+            # Округляем количество до sz_decimals для проверки реальной стоимости
+            rounded_quantity = round(quantity, sz_decimals)
+            
+            # Проверяем минимальную номинальную стоимость после округления
+            # Для LIMIT ордеров используем price, для MARKET тоже price
+            if order_type in ["LIMIT", "MARKET"] and price is not None:
+                min_notional = 10.0  # Минимальная номинальная стоимость 10 USDC
+                actual_notional = rounded_quantity * float(price)
+                
+                if actual_notional < min_notional:
+                    raise ValueError(
+                        f"Order size after rounding ({rounded_quantity:.{sz_decimals}f} * ${price:.2f} = ${actual_notional:.2f}) "
+                        f"is less than minimum ${min_notional:.2f} USDC"
+                    )
+            
             # Подготовка данных ордера для Hyperliquid API
             order_data = {
                 "coin": f"{token}-SPOT",  # Используем BTC-SPOT для spot торговли
