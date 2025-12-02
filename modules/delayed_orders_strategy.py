@@ -79,7 +79,7 @@ def normalize_price(price_value: float, decimals: int) -> float:
 #             client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
 #             # Используем упрощенный расчет на основе STEP
 #             step_profit = sold_amount * float(settings.STEP)
-#             commission = sold_amount * sell_price * 0.0002  # 0.02% комиссия
+#             commission = sold_amount * sell_price * 0.000144  # 0.0144% комиссия
 #             estimated_profit = step_profit - commission
 #             client.browser.log_message(f"💰 Using STEP-based profit estimation: ${estimated_profit:.2f}", level="INFO")
 #             return estimated_profit
@@ -127,8 +127,8 @@ def normalize_price(price_value: float, decimals: int) -> float:
 #         sell_value = sold_amount * sell_price
 #         buy_value = sold_amount * avg_buy_price
 #         
-#         # Примерная комиссия (обычно 0.02% на Hyperliquid)
-#         commission_rate = 0.0002  # 0.02%
+#         # Примерная комиссия (обычно 0.0144% на Hyperliquid)
+#         commission_rate = 0.000144  # 0.0144%
 #         commission = sell_value * commission_rate
 #         
 #         real_profit = sell_value - buy_value - commission
@@ -1469,8 +1469,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 buy_fee_usdc = 0.0
                                                 if buy_fee_token == 'USDC':
                                                     buy_fee_usdc = float(buy_fee_str)
-                                                elif buy_fee_token == 'UBTC' or buy_fee_token == 'BTC':
-                                                    # Если комиссия в BTC, конвертируем в USDC по цене покупки
+                                                elif buy_fee_token == token_name:
+                                                    # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене покупки
                                                     buy_fee_usdc = float(buy_fee_str) * buy_price
                                                 
                                                 # Получаем данные о продаже из Trade History для точной комиссии продажи
@@ -1484,8 +1484,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     
                                                     if sell_fee_token == 'USDC':
                                                         sell_fee_usdc = float(sell_fee_str)
-                                                    elif sell_fee_token == 'UBTC' or sell_fee_token == 'BTC':
-                                                        # Если комиссия в BTC, конвертируем в USDC по цене продажи
+                                                    elif sell_fee_token == token_name:
+                                                        # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене продажи
                                                         sell_fee_usdc = float(sell_fee_str) * tp_price
                                                 
                                                 
@@ -1530,7 +1530,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 # Если не нашли связанную покупку, используем упрощенный расчет
                                                 # (fallback на случай, если не удалось найти покупку)
                                                 step_profit = filled_qty * float(settings.STEP)
-                                                estimated_commission = filled_qty * tp_price * 0.0002  # 0.02% комиссия
+                                                estimated_commission = filled_qty * tp_price * 0.000144  # 0.0144% комиссия
                                                 profit = step_profit - estimated_commission
                                                 
                                                 client.browser.log_message(
