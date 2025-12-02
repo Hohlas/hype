@@ -220,6 +220,7 @@ class HyperliquidClient:
                 self.browser.log_message(
                     f"🔍 rounded_quantity={rounded_quantity:.{sz_decimals}f}, "
                     f"actual_notional=${actual_notional:.2f}, price=${price:.2f}, "
+                    f"notional=${min_notional:.2f}",
                     level="INFO"
                 )
                 
