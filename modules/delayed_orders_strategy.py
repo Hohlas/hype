@@ -1125,6 +1125,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         previous_orders_state = None
         previous_balance_state = None
         
+        # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
+        import time
+        last_status_time = time.time()
+        status_interval = 600  # 10 минут в секундах
+        
         while True:
             try:
                 # Задержка между итерациями основного цикла
@@ -1145,6 +1150,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 ]
                 current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
                 current_price = float(current_price_raw)
+                
+                # Дежурное статусное сообщение каждые 10 минут
+                current_time = time.time()
+                if current_time - last_status_time >= status_interval:
+                    # Получаем балансы
+                    usdc_balance = all_balances.get("USDC", 0.0)
+                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                    
+                    # Подсчитываем количество TP ордеров
+                    tp_count = len(tp_orders) if tp_orders else 0
+                    
+                    # Выводим статусное сообщение
+                    client.browser.log_message(
+                        f"💚 Status | Price: ${current_price:.2f} | "
+                        f"USDC: ${usdc_balance:.2f} | "
+                        f"{token_name}: {btc_balance:.6f} | "
+                        f"TP Orders: {tp_count}",
+                        level="INFO"
+                    )
+                    
+                    last_status_time = current_time
                 
                 # Разделяем лимитные ордера на две категории
                 # Маппинг токенов для поиска ордеров
