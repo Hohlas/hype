@@ -710,31 +710,43 @@ def can_log_warning_message(account_label: str, message_type: str, cooldown_minu
     return False
 
 
-async def check_minimum_order_size(client, token_name: str, usdc_amount: float, min_qty: float, min_notional: float) -> tuple[bool, str]:
+async def check_minimum_order_size(client, token_name: str, usdc_amount: float, min_qty: float, min_notional: float, checked_price: float = None) -> tuple[bool, str]:
     """
     Проверяет, соответствует ли размер ордера минимальным требованиям биржи.
+    
+    Args:
+        client: Клиент Hyperliquid
+        token_name: Название токена
+        usdc_amount: Размер ордера в USDC
+        min_qty: Минимальное количество токенов
+        min_notional: Минимальная номинальная стоимость
+        checked_price: Цена для проверки (если None, используется текущая цена токена)
     """
     try:
-        # Получаем текущую цену токена и баланс
-        token_price = float(await client.browser.get_token_price(token_name))
+        # Получаем цену для проверки (если не передана, используем текущую цену)
+        if checked_price is None:
+            checked_price = float(await client.browser.get_token_price(token_name))
+        else:
+            checked_price = float(checked_price)
+        
         balance = float(await client.browser.get_balance())
         
         # Рассчитываем количество токенов
-        token_qty = usdc_amount / token_price
+        token_qty = usdc_amount / checked_price
         
         # Проверяем минимальное количество
         if token_qty < min_qty:
             return False, f"Quantity {token_qty:.6f} < min {min_qty:.6f} (Free margin: ${balance:.2f}, Order: ${usdc_amount:.2f})"
         
-        # Проверяем минимальную номинальную стоимость
-        real_notional = token_qty * token_price
+        # Проверяем минимальную номинальную стоимость по цене проверки
+        real_notional = token_qty * checked_price
         
         # Добавляем запас 10% для учета возможных изменений цены и округления
         safety_margin = 1.1
         safe_notional = real_notional * safety_margin
         
         if safe_notional < min_notional:
-            return False, f"Notional ${safe_notional:.2f} < min ${min_notional:.2f} (Free margin: ${balance:.2f}, Order: ${usdc_amount:.2f}, Price: ${token_price:.2f})"
+            return False, f"Notional ${safe_notional:.2f} < min ${min_notional:.2f} (Free margin: ${balance:.2f}, Order: ${usdc_amount:.2f}, Price: ${checked_price:.2f})"
         
         return True, "OK"
         
@@ -750,12 +762,18 @@ async def safe_place_order(client, **kwargs):
     try:
         # Проверяем минимальный размер ордера, если переданы лимиты
         if kwargs.get('min_qty') and kwargs.get('min_notional') and kwargs.get('usdc_amount'):
+            # Для LIMIT ордеров используем цену лимитного ордера, для остальных - текущую цену
+            checked_price = None
+            if kwargs.get('order_type') == 'LIMIT' and kwargs.get('price'):
+                checked_price = float(kwargs['price'])
+            
             is_valid, reason = await check_minimum_order_size(
                 client, 
                 kwargs.get('token'), 
                 float(kwargs['usdc_amount']), 
                 float(kwargs['min_qty']), 
-                float(kwargs['min_notional'])
+                float(kwargs['min_notional']),
+                checked_price=checked_price
             )
             
             if not is_valid:
@@ -1816,12 +1834,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             )
                         else:
                             # Проверка минимального размера ордера перед созданием
+                            # Для LIMIT ордера используем цену лимитного ордера для проверки
                             is_valid, reason = await check_minimum_order_size(
                                 client,
                                 token_name,
                                 usdc_amount,
                                 min_qty,
-                                min_notional
+                                min_notional,
+                                checked_price=target_buy_price
                             )
                             
                             if not is_valid:
