@@ -284,7 +284,7 @@ class HyperliquidBrowser:
                 },
                 "message": {
                     "source": "a",
-                    "connectionId": "0x" + action_hash.hex()  # HEX STRING с префиксом 0x
+                    "connectionId": action_hash  # bytes напрямую (не hex строка!)
                 }
             }
             
@@ -1363,14 +1363,15 @@ class HyperliquidBrowser:
             # Получаем числовой asset ID для токена
             asset_id = await self._get_spot_asset_id(f"{token_name}-SPOT")
             
-            # Создаем правильную структуру action согласно реальному запросу
-            # ВАЖНО: порядок ключей должен совпадать с браузером для правильной подписи!
+            # Создаем правильную структуру action
+            # Пробуем порядок как для order: type первым, затем cancels
+            # Это может быть важно для правильной сериализации в msgpack
             cancel_action = {
+                "type": "cancel",
                 "cancels": [{
                     "a": asset_id,  # Числовой asset ID (10142)
                     "o": order_id   # Order ID (не "oid"!)
-                }],
-                "type": "cancel"
+                }]
             }
             
             # Создаем nonce
@@ -1380,14 +1381,28 @@ class HyperliquidBrowser:
             # Для cancel будет использован специальный метод _sign_cancel_action
             signature = self.sign_l1_action(cancel_action, nonce, is_mainnet=True)
             
-            # Формируем финальный payload (БЕЗ expiresAfter и isFrontend)
-            # Подпись должна быть ВНУТРИ payload, не в headers
+            # Формируем финальный payload
+            # Структура идентична созданию ордеров для сравнения
             cancel_payload = {
                 "action": cancel_action,
                 "nonce": nonce,
-                "signature": signature,
-                "vaultAddress": None
+                "signature": signature
             }
+            
+            # Добавляем vaultAddress только если он не None (как в некоторых API)
+            # Но для основного кошелька обычно None, так что пробуем без него
+            # Если не сработает, вернем None обратно
+            
+            # Отладочный вывод полного payload перед отправкой
+            logger.info(f"[DEBUG] Cancel payload before send: {json.dumps(cancel_payload, indent=2, default=str)}")
+            logger.info(f"[DEBUG] Cancel payload keys order: {list(cancel_payload.keys())}")
+            logger.info(f"[DEBUG] Cancel action keys order: {list(cancel_action.keys())}")
+            logger.info(f"[DEBUG] URL: {url}")
+            
+            # Сравнение: для создания ордера используется та же структура
+            # Проверяем, может быть проблема в порядке ключей action?
+            logger.info(f"[DEBUG] Action structure comparison:")
+            logger.info(f"  Cancel action: {json.dumps(cancel_action, indent=2, default=str)}")
             
             # Используем тот же метод отправки, что и для обычных ордеров
             response = await self.send_request("POST", url, data=cancel_payload, build_signature=False)
