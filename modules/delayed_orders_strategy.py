@@ -1161,12 +1161,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Подсчитываем количество TP ордеров
                     tp_count = len(tp_orders) if tp_orders else 0
                     
+                    # Формируем информацию о последней покупке
+                    last_buy_info = f"LastBuy at {last_buy_price:.2f}" if last_buy_price else "LastBuy: N/A"
+                    
                     # Выводим статусное сообщение
                     client.browser.log_message(
-                        f"💚 Status | Price: ${current_price:.2f} | "
-                        f"USDC: ${usdc_balance:.2f} | "
-                        f"{token_name}: {btc_balance:.6f} | "
-                        f"TP Orders: {tp_count}",
+                        f"💚 Price: ${current_price:.2f}, USDC: ${usdc_balance:.2f}, "
+                        f"{token_name}: {btc_balance:.6f}, TP Orders: {tp_count}, {last_buy_info}",
                         level="INFO"
                     )
                     
