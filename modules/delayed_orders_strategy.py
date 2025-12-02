@@ -1113,10 +1113,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         last_buy_price = float(trade.get('px', 0))
                         last_buy_size = float(trade.get('sz', 0))
                         if last_buy_price > 0 and last_buy_size > 0:
-                            client.browser.log_message(
-                                f"📊 Last buy: {last_buy_size:.6f} {token_name} @ ${last_buy_price:.2f}",
-                                level="INFO"
-                            )
                             break
         except Exception as e:
             client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
@@ -1127,8 +1123,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
-        last_status_time = time.time()
         status_interval = 600  # 10 минут в секундах
+        last_status_time = 0  # Установлено в 0, чтобы статус выводился сразу при запуске
         
         while True:
             try:
