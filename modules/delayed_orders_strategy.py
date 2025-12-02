@@ -1815,56 +1815,71 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 level="WARNING"
                             )
                         else:
-                            # Размещение лимитного ордера на покупку
-                            try:
-                                order_result = await client.place_order(
-                                    token=token_name,
-                                    side="BUY",
-                                    order_type="LIMIT",
-                                    usdc_amount=usdc_amount,
-                                    price=target_buy_price
+                            # Проверка минимального размера ордера перед созданием
+                            is_valid, reason = await check_minimum_order_size(
+                                client,
+                                token_name,
+                                usdc_amount,
+                                min_qty,
+                                min_notional
+                            )
+                            
+                            if not is_valid:
+                                client.browser.log_message(
+                                    f"⚠️ Buy Limit order skipped: {reason}",
+                                    level="WARNING"
                                 )
-                                
-                                if order_result:
-                                    client.browser.log_message(
-                                        f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                        level="INFO"
+                            else:
+                                # Размещение лимитного ордера на покупку
+                                try:
+                                    order_result = await client.place_order(
+                                        token=token_name,
+                                        side="BUY",
+                                        order_type="LIMIT",
+                                        usdc_amount=usdc_amount,
+                                        price=target_buy_price
                                     )
                                     
-                                    # Отправляем уведомление в Telegram
-                                    await send_tg_notification(
-                                        client,
-                                        f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                        save_to_report=False
-                                    )
-                                    
-                                    # Записываем статистику операции Averaging (лимитный ордер, еще не исполнен)
-                                    try:
-                                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                                        total_value = usdc_balance + (btc_balance * current_price)
-                                        # Для лимитного ордера используем целевую цену и расчетное количество
-                                        token_amount = usdc_amount / target_buy_price
-                                        await log_statistics_to_excel(
-                                            client=client,
-                                            operation="set BuyLimit",
-                                            btc_amount=token_amount,
-                                            price=target_buy_price,
-                                            usdc_balance=usdc_balance,
-                                            btc_balance=btc_balance,
-                                            total_value=total_value,
-                                            orders=open_orders,
-                                            sz_decimals=sz_decimals,
-                                            token_name=token_name
+                                    if order_result:
+                                        client.browser.log_message(
+                                            f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                            level="INFO"
                                         )
-                                    except Exception as e:
-                                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
-                                    
-                                    # Прерываем цикл после создания Averaging ордера
-                                    # Это дает время ордеру появиться в API перед следующей итерацией
-                                    continue
-                                    
-                            except Exception as e:
-                                client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
+                                        
+                                        # Отправляем уведомление в Telegram
+                                        await send_tg_notification(
+                                            client,
+                                            f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                            save_to_report=False
+                                        )
+                                        
+                                        # Записываем статистику операции Averaging (лимитный ордер, еще не исполнен)
+                                        try:
+                                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                            total_value = usdc_balance + (btc_balance * current_price)
+                                            # Для лимитного ордера используем целевую цену и расчетное количество
+                                            token_amount = usdc_amount / target_buy_price
+                                            await log_statistics_to_excel(
+                                                client=client,
+                                                operation="set BuyLimit",
+                                                btc_amount=token_amount,
+                                                price=target_buy_price,
+                                                usdc_balance=usdc_balance,
+                                                btc_balance=btc_balance,
+                                                total_value=total_value,
+                                                orders=open_orders,
+                                                sz_decimals=sz_decimals,
+                                                token_name=token_name
+                                            )
+                                        except Exception as e:
+                                            client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                                        
+                                        # Прерываем цикл после создания Averaging ордера
+                                        # Это дает время ордеру появиться в API перед следующей итерацией
+                                        continue
+                                        
+                                except Exception as e:
+                                    client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                     else:
                         # Есть активные Buy Limit ордера - проверяем их актуальность
                         threshold = min_tp_price - float(step) * 2.5
