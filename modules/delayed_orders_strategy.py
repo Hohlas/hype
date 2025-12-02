@@ -387,7 +387,7 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
-            f"⚠️ No exact match found for sell size {sell_size:.6f} BTC, searching for closest match before TP order time ({tp_datetime_str})...",
+            f"⚠️ No exact match found for sell size {sell_size:.6f} {token_name}, searching for closest match before TP order time ({tp_datetime_str})...",
             level="WARNING"
         )
         
@@ -455,8 +455,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             closest_buy = closest_buy_preferred
             min_diff = min_diff_preferred
             client.browser.log_message(
-                f"✅ Found preferred buy (size >= sell or within 10%): {closest_buy['sz']:.6f} BTC "
-                f"(diff: {min_diff:.6f} BTC, {min_diff/sell_size*100:.1f}%)",
+                f"✅ Found preferred buy (size >= sell or within 10%): {closest_buy['sz']:.6f} {token_name} "
+                f"(diff: {min_diff:.6f} {token_name}, {min_diff/sell_size*100:.1f}%)",
                 level="INFO"
             )
         
@@ -479,15 +479,15 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             size_diff_pct = (min_diff / sell_size * 100) if sell_size > 0 else 0
             
             client.browser.log_message(
-                f"⚠️ Using closest buy trade (NO EXACT MATCH): {closest_buy['sz']:.6f} BTC @ ${closest_buy['px']:.2f} | "
-                f"Size diff: {min_diff:.6f} BTC ({size_diff_pct:.1f}%)",
+                f"⚠️ Using closest buy trade (NO EXACT MATCH): {closest_buy['sz']:.6f} {token_name} @ ${closest_buy['px']:.2f} | "
+                f"Size diff: {min_diff:.6f} {token_name} ({size_diff_pct:.1f}%)",
                 level="WARNING"
             )
             
             # Предупреждение, если размер покупки сильно отличается от размера продажи
             if closest_buy['sz'] < sell_size * 0.9 or closest_buy['sz'] > sell_size * 1.1:
                 client.browser.log_message(
-                    f"⚠️ WARNING: Buy size ({closest_buy['sz']:.6f} BTC) differs significantly from sell size ({sell_size:.6f} BTC)! "
+                    f"⚠️ WARNING: Buy size ({closest_buy['sz']:.6f} {token_name}) differs significantly from sell size ({sell_size:.6f} {token_name})! "
                     f"Profit calculation may be inaccurate!",
                     level="WARNING"
                 )
@@ -502,7 +502,7 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
-            f"❌ Could not find matching buy trade for sell size {sell_size:.6f} BTC before TP order time ({tp_datetime_str})",
+            f"❌ Could not find matching buy trade for sell size {sell_size:.6f} {token_name} before TP order time ({tp_datetime_str})",
             level="ERROR"
         )
         return None
@@ -512,17 +512,20 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         return None
 
 
-def initialize_statistics_file():
+def initialize_statistics_file(token_name: str = "BTC"):
     """
     Инициализирует файл статистики с правильной структурой колонок при старте программы.
     Вызывается один раз при запуске стратегии.
+    
+    Args:
+        token_name: Название торгуемого токена (по умолчанию "BTC")
     """
     stats_file = "hype_stat.xlsx"
     
-    # Определяем список колонок
+    # Определяем список колонок (используем token_name для универсальности)
     expected_columns = [
-        'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
-        'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
+        'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount', 
+        'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value'
     ]
     
     # Проверяем, существует ли файл
@@ -628,12 +631,12 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Подготавливаем данные для записи
         new_row = {
             'Timestamp': timestamp,
-            'Current BTC Price': current_token_price,
+            f'Current {token_name} Price': current_token_price,
             'Operation': operation,
-            'BTC Amount': btc_amount,
+            f'{token_name} Amount': btc_amount,
             'Operation Price': formatted_price,
             'USDC Balance': usdc_balance,
-            'BTC Balance': btc_balance,
+            f'{token_name} Balance': btc_balance,
             'Limit Profit': limit_profit,
             'Total Value': total_value
         }
@@ -1094,7 +1097,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
         # Инициализируем файл статистики при старте (создаем, если не существует)
-        initialize_statistics_file()
+        initialize_statistics_file(token_name)
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
@@ -1494,7 +1497,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 sell_revenue = sell_total - sell_fee_usdc
                                                 
                                                 client.browser.log_message(
-                                                    f"  💵 SELL: {filled_qty:.6f} BTC × ${tp_price:.2f} = ${sell_total:.2f} "
+                                                    f"  💵 SELL: {filled_qty:.6f} {token_name} × ${tp_price:.2f} = ${sell_total:.2f} "
                                                     f"| Fee: ${sell_fee_usdc:.4f} ({sell_fee_token}) | "
                                                     f"Net revenue: ${sell_revenue:.2f}",
                                                     level="INFO"
@@ -1505,7 +1508,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 buy_cost = buy_total + buy_fee_usdc
                                                 
                                                 client.browser.log_message(
-                                                    f"  💵 BUY: {buy_size:.6f} BTC × ${buy_price:.2f} = ${buy_total:.2f} "
+                                                    f"  💵 BUY: {buy_size:.6f} {token_name} × ${buy_price:.2f} = ${buy_total:.2f} "
                                                     f"| Fee: ${buy_fee_usdc:.4f} ({buy_fee_token}) | "
                                                     f"Total cost: ${buy_cost:.2f}",
                                                     level="INFO"
@@ -1561,12 +1564,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             # Формируем сообщение согласно требованиям
                                             # Используем фактический размер исполнения из Trade History
                                             client.browser.log_message(
-                                                f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}BTC | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}",
+                                                f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}{token_name} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}",
                                                 level="INFO"
                                             )
                                             
                                             # Отправляем уведомление в Telegram согласно требованиям
-                                            profit_message = f'🎯 hype: Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}BTC = ${total_usd_value:.2f}'
+                                            profit_message = f'🎯 hype: Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}'
                                             await send_tg_notification(
                                                 client,
                                                 text=profit_message,
@@ -1649,14 +1652,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         if coin == "USDC":
                             token_balances.append(f"{balance:.2f}USD")
                             total_usd_value += balance
-                        elif coin == token_name or coin == "UBTC":  # BTC токен (может быть BTC или UBTC)
+                        elif coin == token_name:
                             try:
-                                # Используем уже полученную цену current_price для расчета стоимости BTC
+                                # Используем уже полученную цену current_price для расчета стоимости токена
                                 usd_value = balance * current_price
                                 total_usd_value += usd_value
-                                token_balances.append(f"{balance:.6f}BTC")
+                                token_balances.append(f"{balance:.6f}{token_name}")
                             except Exception as e:
-                                token_balances.append(f"{balance:.6f}BTC")
+                                token_balances.append(f"{balance:.6f}{token_name}")
                     
                     # Формируем строку балансов
                     balance_str = " + ".join(token_balances)
