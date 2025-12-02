@@ -512,6 +512,51 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         return None
 
 
+def initialize_statistics_file():
+    """
+    Инициализирует файл статистики с правильной структурой колонок при старте программы.
+    Вызывается один раз при запуске стратегии.
+    """
+    stats_file = "hype_stat.xlsx"
+    
+    # Определяем список колонок
+    expected_columns = [
+        'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
+        'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
+    ]
+    
+    # Проверяем, существует ли файл
+    if not os.path.exists(stats_file):
+        # Создаем новый пустой DataFrame с заголовками и сохраняем
+        df = pd.DataFrame(columns=expected_columns)
+        df.to_excel(stats_file, index=False)
+        logger.info(f"✅ Created statistics file: {stats_file}")
+    else:
+        # Файл существует - проверяем структуру
+        try:
+            df = pd.read_excel(stats_file)
+            
+            # Если столбец "Limit Profit" отсутствует, добавляем его
+            if 'Limit Profit' not in df.columns:
+                if 'Total Value' in df.columns:
+                    total_value_idx = df.columns.get_loc('Total Value')
+                    df.insert(total_value_idx, 'Limit Profit', 0.0)
+                else:
+                    df['Limit Profit'] = 0.0
+                df.to_excel(stats_file, index=False)
+                logger.info(f"✅ Updated statistics file structure: added 'Limit Profit' column")
+            
+            # Убеждаемся, что все ожидаемые колонки присутствуют
+            missing_columns = [col for col in expected_columns if col not in df.columns]
+            if missing_columns:
+                for col in missing_columns:
+                    df[col] = None
+                df.to_excel(stats_file, index=False)
+                logger.info(f"✅ Updated statistics file structure: added missing columns")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to check statistics file structure: {e}")
+
+
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
                                  usdc_balance: float, btc_balance: float, total_value: float, 
                                  orders=None, sz_decimals: int = None, token_name: str = "BTC"):
@@ -520,7 +565,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
     
     Args:
         client: HyperliquidClient instance
-        operation: Тип операции (First Position/Averaging/Pyramiding/set TP/Take Profit)
+        operation: Тип операции (First Position/set BuyLimit/Pyramiding/set TP/Take Profit)
         btc_amount: Объем BTC операции
         price: Цена по которой проводилась операция
         usdc_balance: Баланс USDC
@@ -632,8 +677,12 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Убеждаемся, что колонки в обоих DataFrame совпадают и в правильном порядке
         df = df.reindex(columns=expected_columns, fill_value=None)
         
-        # Конкатенируем с явным указанием колонок для избежания предупреждения
-        df = pd.concat([df, new_df], ignore_index=True, sort=False)
+        # Конкатенируем с явным указанием колонок
+        # Если df пустой (нет строк), используем new_df напрямую, иначе конкатенируем
+        if len(df) == 0:
+            df = new_df
+        else:
+            df = pd.concat([df, new_df], ignore_index=True, sort=False)
         
         # Сохраняем в Excel файл
         df.to_excel(stats_file, index=False)
@@ -1025,6 +1074,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         # Тест DEBUG лога отключен для чистоты логов
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
+        
+        # Инициализируем файл статистики при старте (создаем, если не существует)
+        initialize_statistics_file()
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
@@ -1800,7 +1852,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         token_amount = usdc_amount / target_buy_price
                                         await log_statistics_to_excel(
                                             client=client,
-                                            operation="Averaging",
+                                            operation="set BuyLimit",
                                             btc_amount=token_amount,
                                             price=target_buy_price,
                                             usdc_balance=usdc_balance,
