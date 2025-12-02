@@ -631,7 +631,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                 sz_decimals = 5  # Fallback
         
         # Округляем btc_amount до sz_decimals для соответствия формату биржи
-        btc_amount = round(btc_amount, sz_decimals)
+        # Убеждаемся, что это число (float), а не строка
+        btc_amount = float(round(float(btc_amount), sz_decimals))
         
         # Цена уже нормализована при расчете, но для Excel форматируем как строку без trailing zeros
         def format_price_for_excel(price_value: float, decimals: int) -> str:
