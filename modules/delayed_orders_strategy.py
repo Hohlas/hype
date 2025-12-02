@@ -1022,6 +1022,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         while True:
             try:
+                # Задержка между итерациями основного цикла
+                # Перемещена в начало для того, чтобы после создания ордеров была пауза
+                # и они успели появиться в API перед следующей итерацией
+                await async_sleep(15)
+                
                 # DEBUG лог отключен для чистоты логов
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
@@ -1175,6 +1180,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 f"📊 Updated min_tp_price to ${min_tp_price:.2f}",
                                                 level="INFO"
                                             )
+                                        
+                                        # Прерываем цикл после создания TP ордера
+                                        # Это дает время ордеру появиться в API перед следующей итерацией
+                                        continue
                                         
                                     except Exception as e:
                                         client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
@@ -1695,6 +1704,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
                     
+                    # Прерываем цикл после создания First Position ордера
+                    # Это дает время ордеру появиться в API перед следующей итерацией
+                    continue
+                    
                 # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
                     # Расчет целевой цены для лимитного ордера
@@ -1756,6 +1769,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         )
                                     except Exception as e:
                                         client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                                    
+                                    # Прерываем цикл после создания Averaging ордера
+                                    # Это дает время ордеру появиться в API перед следующей итерацией
+                                    continue
+                                    
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                     else:
@@ -1879,9 +1897,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             save_to_report=False
                         )
                         
-                # Задержка между итерациями основного цикла
-                # Увеличена до 15 секунд для снижения нагрузки на API и предотвращения 429 ошибок
-                await async_sleep(15)
+                        # Прерываем цикл после создания Pyramiding ордера
+                        # Это дает время ордеру появиться в API перед следующей итерацией
+                        # (цикл и так вернется к началу естественным образом, но continue явно показывает намерение)
+                        continue
                 
             except Exception as e:
                 error_str = str(e)
