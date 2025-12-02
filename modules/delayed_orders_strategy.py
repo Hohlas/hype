@@ -590,6 +590,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         sz_decimals: Количество знаков после запятой для форматирования цены (из API)
         token_name: Название торгуемого токена (по умолчанию "BTC")
     """
+    from datetime import datetime  # Явный импорт для избежания конфликтов областей видимости
     try:
         # Получаем текущую цену токена
         current_token_price = float(await client.browser.get_token_price(token_name))
@@ -1173,6 +1174,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Формируем информацию о последней покупке
                     if last_buy_price and last_buy_timestamp:
                         # Преобразуем timestamp из миллисекунд в читаемый формат
+                        from datetime import datetime  # Явный импорт для избежания конфликтов областей видимости
                         buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
                         buy_time_str = buy_datetime.strftime('%H:%M:%S')
                         last_buy_info = f"LastBuy: {last_buy_price:.2f} at {buy_time_str}"
