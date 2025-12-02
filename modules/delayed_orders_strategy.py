@@ -1183,8 +1183,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     # Выводим статусное сообщение
                     client.browser.log_message(
-                        f"💚 Price: ${current_price:.2f}, USDC: ${usdc_balance:.2f}, "
-                        f"{token_name}: {btc_balance:.6f}, TP Orders: {tp_count}, {last_buy_info}",
+                        f"💚 Price: {current_price:.2f}, USDC:{usdc_balance:.2f}, "
+                        f"{token_name}:{btc_balance:.6f}, {last_buy_info}",
                         level="INFO"
                     )
                     
