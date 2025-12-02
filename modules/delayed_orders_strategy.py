@@ -1750,7 +1750,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         token=token_name,
                         side="BUY",
                         order_type="MARKET",
-                        usdc_amount=usdc_amount
+                        usdc_amount=usdc_amount,
+                        price=current_price
                     )
                     
                     # Обновляем баланс после маркет-ордера на покупку
@@ -1952,7 +1953,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             token=token_name,
                             side="BUY",
                             order_type="MARKET",
-                            usdc_amount=usdc_amount
+                            usdc_amount=usdc_amount,
+                            price=current_price
                         )
                         
                         # Обновляем баланс после маркет-ордера на покупку

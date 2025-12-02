@@ -173,14 +173,34 @@ class HyperliquidClient:
                          usdc_amount: float = None, stop_price: float = None, **kwargs):
         """
         Размещение ордера на Hyperliquid
+        
+        Args:
+            token: Название токена
+            side: Сторона ордера (BUY/SELL)
+            order_type: Тип ордера (LIMIT/MARKET/STOP_MARKET/STOP_LIMIT)
+            quantity: Количество токенов (опционально, если указан usdc_amount)
+            price: Цена ордера (обязательно для LIMIT и MARKET)
+            usdc_amount: Сумма в USDC (опционально, если указан quantity)
+            stop_price: Цена стопа (для STOP_MARKET/STOP_LIMIT)
         """
         try:
-            # Получаем текущую цену токена
-            token_price = float(await self.browser.get_token_price(token))
+            # Цена обязательна для LIMIT и MARKET ордеров
+            if price is None:
+                if order_type in ["LIMIT", "MARKET"]:
+                    raise ValueError(f"price is required for {order_type} orders")
             
             # Определяем количество токенов
             if quantity is None and usdc_amount is not None:
-                quantity = usdc_amount / token_price
+                # Используем переданную цену для расчета количества
+                # Для STOP_MARKET используем stop_price если price не передан
+                price_for_calculation = price
+                if price_for_calculation is None and order_type == "STOP_MARKET" and stop_price is not None:
+                    price_for_calculation = stop_price
+                
+                if price_for_calculation is None:
+                    raise ValueError("price or stop_price is required for calculating quantity from usdc_amount")
+                
+                quantity = usdc_amount / float(price_for_calculation)
             elif quantity is None:
                 raise ValueError("Either quantity or usdc_amount must be provided")
                 
@@ -198,11 +218,11 @@ class HyperliquidClient:
             
             # Определяем тип ордера и соответствующие параметры
             if order_type == "LIMIT":
-                order_data["limit_px"] = str(price) if price else str(token_price)
+                order_data["limit_px"] = str(price)
                 order_data["order_type"] = {"limit": {"tif": "Gtc"}}
             elif order_type == "MARKET":
-                # Для маркет ордеров используем текущую цену
-                order_data["limit_px"] = str(token_price)
+                # Для маркет ордеров используем переданную цену
+                order_data["limit_px"] = str(price)
                 order_data["order_type"] = {"market": {}}
             elif order_type == "STOP_MARKET":
                 # Временно используем лимитные ордера вместо стоп-маркет
