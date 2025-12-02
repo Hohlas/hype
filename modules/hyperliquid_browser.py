@@ -237,7 +237,11 @@ class HyperliquidBrowser:
 
             # Нормализация и кодирование
             normalized_action = normalize_action(action)
+            logger.info(f"[DEBUG] Normalized action: {json.dumps(normalized_action, indent=2, default=str)}")
+            
             action_bytes = msgpack.packb(normalized_action, use_bin_type=True)
+            logger.info(f"[DEBUG] Action bytes (hex): {action_bytes.hex()}")
+            logger.info(f"[DEBUG] Nonce: {nonce}")
             
             # Создание буфера данных
             total_size = len(action_bytes) + 9
@@ -247,10 +251,12 @@ class HyperliquidBrowser:
             data[len(action_bytes):len(action_bytes) + 8] = nonce_bytes
             data[-1] = 0
             
+            logger.info(f"[DEBUG] Full data buffer (hex): {data.hex()}")
+            
             # Хеширование данных
             action_hash = keccak(bytes(data))
-            
-            # Логирование только при ошибках
+            logger.info(f"[DEBUG] Action hash (connectionId): 0x{action_hash.hex()}")
+            logger.info(f"[DEBUG] Expected wallet: {self.wallet_address}")
             
             # Правильный chainId для mainnet - это 1337, НЕ 42161!
             chain_id = 1337 if is_mainnet else 421614
@@ -291,6 +297,17 @@ class HyperliquidBrowser:
             
             # Подписываем
             signed_message = self.account.sign_message(signable_message)
+            
+            # Проверяем восстановленный адрес из подписи
+            from eth_account import Account
+            recovered_address = Account.recover_message(signable_message, signature=signed_message.signature)
+            logger.info(f"[DEBUG] Recovered address from signature: {recovered_address}")
+            
+            if recovered_address.lower() != self.wallet_address.lower():
+                logger.error(f"[ERROR] Address mismatch! Expected: {self.wallet_address}, Got: {recovered_address}")
+                # НЕ выбрасываем ошибку, просто логируем для отладки
+            else:
+                logger.info(f"[DEBUG] ✅ Signature verification OK!")
 
             # Возвращаем подпись в нужном формате
             signature_dict = {
