@@ -747,7 +747,8 @@ class HyperliquidBrowser:
                     meta = token.get("meta", {})
                     if isinstance(meta, dict):
                         self.btc_tick_size = float(meta.get("tick", "0.5"))
-                    self.log_message(f"✅ Found {symbol_base} token: {token_name} (tick: {self.btc_tick_size})", level="INFO")
+                    # Сообщение о найденном токене отключено
+                    # self.log_message(f"✅ Found {symbol_base} token: {token_name} (tick: {self.btc_tick_size})", level="INFO")
                     break
             
             if btc_token_index is None:

@@ -899,14 +899,14 @@ async def create_tp_order(client, token_name: str, entry_price: Decimal, order_q
         tp_result = await client.place_order(**tp_order_data)
         
         client.browser.log_message(
-            f"🎯 set TP: SELL {order_qty:.6f} {token_name} @ ${tp_price:.2f}",
+            f"🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}",
             level="INFO"
         )
         
         # Отправляем уведомление в Telegram
         await send_tg_notification(
             client,
-            text=f'🎯 set TP: SELL {order_qty:.6f} {token_name} @ ${tp_price:.2f}',
+            text=f'🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}',
             save_to_report=False
         )
         
@@ -1270,14 +1270,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         tp_result = await client.place_order(**tp_order_data)
                                         
                                         client.browser.log_message(
-                                            f"🎯 Set TP: SELL {latest_amount:.6f} {token_name} @ ${tp_price:.2f}",
+                                            f"🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}",
                                             level="INFO"
                                         )
                                         
                                         # Отправляем уведомление в Telegram
                                         await send_tg_notification(
                                             client,
-                                            text=f'🎯 set TP: SELL {latest_amount:.6f} {token_name} @ ${tp_price:.2f}',
+                                            text=f'🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}',
                                             save_to_report=False
                                         )
                                         
