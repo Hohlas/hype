@@ -1113,6 +1113,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Получаем информацию о последней покупке из Trade History при старте 
         last_buy_price = None
         last_buy_size = None
+        last_buy_timestamp = None
         try:
             trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
             if trades_history:
@@ -1123,6 +1124,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if trade_side in ['BUY', 'B']:
                         last_buy_price = float(trade.get('px', 0))
                         last_buy_size = float(trade.get('sz', 0))
+                        last_buy_timestamp = trade.get('time', 0)
                         if last_buy_price > 0 and last_buy_size > 0:
                             break
         except Exception as e:
@@ -1169,7 +1171,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_count = len(tp_orders) if tp_orders else 0
                     
                     # Формируем информацию о последней покупке
-                    last_buy_info = f"LastBuy: {last_buy_price:.2f}" if last_buy_price else "LastBuy: N/A"
+                    if last_buy_price and last_buy_timestamp:
+                        # Преобразуем timestamp из миллисекунд в читаемый формат
+                        buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
+                        buy_time_str = buy_datetime.strftime('%H:%M:%S')
+                        last_buy_info = f"LastBuy: {last_buy_price:.2f} at {buy_time_str}"
+                    else:
+                        last_buy_info = "LastBuy: N/A"
                     
                     # Выводим статусное сообщение
                     client.browser.log_message(
@@ -1244,24 +1252,24 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             latest_timestamp = latest_trade.get('time', 0)
                             
                             # Проверяем, является ли покупка новой
-                            # Используем относительную разницу (процент) вместо абсолютной для корректной работы с любыми ценами
-                            # Порог 0.1% (0.001) для избежания ложных срабатываний из-за округления
+                            # Используем timestamp для определения новых покупок, чтобы каждая покупка получала TP
+                            # даже если цена совпадает с предыдущей покупкой
                             if latest_price > 0 and latest_amount > 0:
                                 is_new_buy = False
-                                if last_buy_price is None:
+                                if last_buy_timestamp is None:
+                                    # Первая покупка - всегда новая
                                     is_new_buy = True
-                                elif last_buy_price > 0:
-                                    # Относительная разница в процентах
-                                    price_diff_percent = abs(latest_price - last_buy_price) / last_buy_price
-                                    if price_diff_percent > 0.0001:  # 0.1% разница
-                                        is_new_buy = True
+                                elif latest_timestamp > last_buy_timestamp:
+                                    # Покупка с более поздним timestamp - новая покупка
+                                    is_new_buy = True
                                 
                                 if is_new_buy:
                                     # Обнаружена новая покупка
                                     # Лог убран по запросу пользователя
                                     
-                                    # Обновляем last_buy_price для отслеживания следующей новой покупки
+                                    # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
                                     last_buy_price = latest_price
+                                    last_buy_timestamp = latest_timestamp
                                     
                                     # Рассчитываем цену TP
                                     tp_price = normalize_price(latest_price + float(step), sz_decimals)
