@@ -1206,10 +1206,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 if is_new_buy:
                                     # Обнаружена новая покупка
-                                    client.browser.log_message(
-                                        f"🆕 New buy detected: {latest_amount:.6f} {token_name} @ ${latest_price:.2f}",
-                                        level="INFO"
-                                    )
+                                    # Лог убран по запросу пользователя
                                     
                                     # Обновляем last_buy_price для отслеживания следующей новой покупки
                                     last_buy_price = latest_price
@@ -1265,10 +1262,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         # Это предотвращает повторное размещение Averaging ордера
                                         if min_tp_price == 0 or tp_price < min_tp_price:
                                             min_tp_price = tp_price
-                                            client.browser.log_message(
-                                                f"📊 Updated min_tp_price to ${min_tp_price:.2f}",
-                                                level="INFO"
-                                            )
+                                            # Лог убран по запросу пользователя
                                         
                                         # Прерываем цикл после создания TP ордера
                                         # Это дает время ордеру появиться в API перед следующей итерацией
