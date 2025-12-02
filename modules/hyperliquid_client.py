@@ -217,9 +217,32 @@ class HyperliquidClient:
                 actual_notional = rounded_quantity * float(price)
                 
                 if actual_notional < min_notional:
-                    raise ValueError(
-                        f"Order size after rounding ({rounded_quantity:.{sz_decimals}f} * ${price:.2f} = ${actual_notional:.2f}) "
-                        f"is less than minimum ${min_notional:.2f} USDC"
+                    # Автоматически увеличиваем количество до минимума
+                    # Рассчитываем минимальное количество и округляем вверх
+                    import math
+                    min_quantity_needed = min_notional / float(price)
+                    precision_step = 10 ** (-sz_decimals)
+                    # Округляем вверх до следующего шага precision
+                    min_quantity_needed = math.ceil(min_quantity_needed / precision_step) * precision_step
+                    # Округляем до sz_decimals для точности
+                    min_quantity_needed = round(min_quantity_needed, sz_decimals)
+                    
+                    # Убеждаемся, что после округления все еще >= минимума
+                    final_notional = min_quantity_needed * float(price)
+                    while final_notional < min_notional:
+                        # Увеличиваем на один шаг precision пока не достигнем минимума
+                        min_quantity_needed += precision_step
+                        min_quantity_needed = round(min_quantity_needed, sz_decimals)
+                        final_notional = min_quantity_needed * float(price)
+                    
+                    quantity = min_quantity_needed
+                    rounded_quantity = quantity  # Обновляем для дальнейшего использования
+                    
+                    # Логируем корректировку размера
+                    self.browser.log_message(
+                        f"⚠️ Order size adjusted: {rounded_quantity:.{sz_decimals}f} * ${price:.2f} = ${final_notional:.2f} "
+                        f"(minimum ${min_notional:.2f} USDC)",
+                        level="INFO"
                     )
             
             # Подготовка данных ордера для Hyperliquid API
