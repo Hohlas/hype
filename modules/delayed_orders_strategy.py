@@ -1130,7 +1130,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Задержка между итерациями основного цикла
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
-                await async_sleep(15)
+                await async_sleep(10)
                 
                 # DEBUG лог отключен для чистоты логов
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
