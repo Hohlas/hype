@@ -239,11 +239,11 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         
         # ОПИСАНИЕ АЛГОРИТМА ПОИСКА ПОКУПКИ:
         # 1. Используем время СОЗДАНИЯ TP ордера из Open Orders как верхнюю границу
-        #    TP ордер создается СРАЗУ ПОСЛЕ покупки, поэтому покупка должна быть ДО времени создания TP
+        #    TP ордер создается СРАЗУ ПОСЛЕ покупки (~15 секунд), поэтому покупка должна быть ДО времени создания TP
         # 2. Ищем покупки (BUY) в истории сделок, которые:
         #    - Время покупки < время создания TP ордера (trade_time < tp_order_time)
         #    - Размер покупки совпадает с размером продажи (с динамическим допуском tolerance = 10^(-sz_decimals))
-        #    - Не старше 5 минут от времени создания TP ордера
+        #    - Не старше 1 минуты от времени создания TP ордера (окно поиска с запасом)
         # 3. Если найдено несколько подходящих покупок, берем самую ПОСЛЕДНЮЮ (ближайшую к времени TP)
         #    Это гарантирует правильное сопоставление даже при множественных покупках лесенкой
         # 4. Если точного совпадения нет, ищем ближайшую по размеру покупку
@@ -303,8 +303,9 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         # Например, для sz_decimals=5 tolerance будет 0.00001, для sz_decimals=3 - 0.001
         tolerance = 10 ** (-sz_decimals)
         
-        max_time_diff_minutes = 5  # Максимальная разница между покупкой и созданием TP ордера (в минутах)
-        # TP ордер создается СРАЗУ после покупки, задержка обычно несколько секунд
+        max_time_diff_minutes = 1  # Максимальная разница между покупкой и созданием TP ордера (в минутах)
+        # TP ордер создается СРАЗУ после покупки, задержка обычно ~15 секунд
+        # 1 минута - достаточный запас для учета возможных задержек
         max_time_diff_ms = max_time_diff_minutes * 60 * 1000  # Преобразуем в миллисекунды
         
         
@@ -376,11 +377,11 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             time_diff_sec = time_diff_ms / 1000
             time_diff_min = time_diff_sec / 60
             
-            # Проверка: если разница больше нескольких минут, это подозрительно
-            if time_diff_min > 5:
+            # Проверка: если разница больше max_time_diff_minutes, это подозрительно
+            if time_diff_min > max_time_diff_minutes:
                 client.browser.log_message(
                     f"⚠️ WARNING: Time difference is {time_diff_min:.1f} minutes! "
-                    f"Expected: few seconds/minutes. This may indicate wrong buy trade match!",
+                    f"Expected: ~15 seconds (max {max_time_diff_minutes} min). This may indicate wrong buy trade match!",
                     level="WARNING"
                 )
             
@@ -1448,22 +1449,29 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         
                                         # Обрабатываем только если сделка свежая (< 5 минут) или время не определено
                                         if should_process:
-                                            # Получаем время выставления TP ордера из saved order или из Trade History
+                                            # Получаем время СОЗДАНИЯ TP ордера из saved order
+                                            # ВАЖНО: используем время создания, а НЕ время исполнения!
+                                            # Если времени создания нет, используем STEP-based estimation
                                             tp_order_time = executed_order.get('timestamp')
-                                            
-                                            # Используем время исполнения из Trade History, если доступно
-                                            if sell_trade_from_history and sell_trade_from_history.get('time'):
-                                                tp_order_time = sell_trade_from_history.get('time')
                                             
                                             if tp_order_time:
                                                 # Конвертируем в читаемый формат для проверки
                                                 from datetime import datetime
                                                 tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
-                                                client.browser.log_message(
-                                                    f"📅 TP order executed at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')} | "
-                                                    f"Actual price: ${tp_price:.2f} (limit was ${tp_price_fallback:.2f})",
-                                                    level="INFO"
-                                                )
+                                                
+                                                # Логируем время создания TP ордера
+                                                log_msg = f"📅 TP order created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
+                                                
+                                                # Если есть время исполнения, добавляем его для сравнения
+                                                if sell_trade_from_history and sell_trade_from_history.get('time'):
+                                                    exec_time = sell_trade_from_history.get('time')
+                                                    exec_datetime = datetime.fromtimestamp(exec_time / 1000)
+                                                    time_diff_minutes = (exec_time - tp_order_time) / (1000 * 60)
+                                                    log_msg += f", executed at: {exec_datetime.strftime('%Y-%m-%d %H:%M:%S')} ({time_diff_minutes:.1f} min later)"
+                                                
+                                                log_msg += f" | Executed price: ${tp_price:.2f} (limit was ${tp_price_fallback:.2f})"
+                                                
+                                                client.browser.log_message(log_msg, level="INFO")
                                             else:
                                                 client.browser.log_message(
                                                     f"⚠️ No timestamp found, using current time",
@@ -1550,12 +1558,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             else:
                                                 # Если не нашли связанную покупку, используем упрощенный расчет
                                                 # (fallback на случай, если не удалось найти покупку)
+                                                # Предполагаем, что покупка была на STEP ниже
+                                                buy_price = tp_price - float(settings.STEP)
+                                                
+                                                # Учитываем комиссию И при покупке, И при продаже (0.0144% = 0.000144)
+                                                buy_commission = filled_qty * buy_price * 0.000144  # Комиссия при покупке
+                                                sell_commission = filled_qty * tp_price * 0.000144  # Комиссия при продаже
+                                                
+                                                # Чистая прибыль = STEP - обе комиссии
                                                 step_profit = filled_qty * float(settings.STEP)
-                                                estimated_commission = filled_qty * tp_price * 0.000144  # 0.0144% комиссия
-                                                profit = step_profit - estimated_commission
+                                                profit = step_profit - buy_commission - sell_commission
                                                 
                                                 client.browser.log_message(
-                                                    f"⚠️ Buy trade not found, using STEP-based estimation: ${profit:.2f}",
+                                                    f"⚠️ Buy trade not found, using STEP-based estimation: ${profit:.2f} "
+                                                    f"(STEP profit ${step_profit:.2f} - buy fee ${buy_commission:.2f} - sell fee ${sell_commission:.2f})",
                                                     level="WARNING"
                                                 )
                                             
