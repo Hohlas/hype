@@ -4,8 +4,7 @@ version = "1.2.5"
 # Risk Management
 
 SPOT_TOKEN = "BTC"  # Spot Trading token 
-POSITION_SIZE_PERCENT = 10  # Размер открываемой позиции в % от баланса
-MAX_POSITION_SIZE_PERCENT = 90  # Максимальный размер всех открытых позиций в % от баланса
+POSITION_SIZE_PERCENT = 20  # Размер открываемой позиции в % от баланса
 STEP = 200  # Шаг сетки (TP) в долларах для усреднения
 MAX_GRID_ORDERS = 90  # Максимальное количество ордеров в сетке
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
@@ -13,23 +12,6 @@ AGGR=0.5  # Коэффициент агрессивности торговли (
 # Hyperliquid API Configuration
 HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"        # Основной API
 HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестовая сеть
-
-# Trading Configuration
-TRADE_AMOUNTS = {
-    "percent": [25, 25],  # Процент от баланса для первого и последующих ордеров
-    "fixed": [100, 50],   # Фиксированные суммы в USDC
-}
-
-# Futures Trading Limits (для spot торговли используются как настройки TP)
-FUTURES_LIMITS = {
-    "price_diff_amount": [400.0, 400.0],  # Расстояние TP в долларах
-    "max_averaging_orders": 35,         # Максимальное количество ордеров усреднения
-    "max_pyramiding_orders": 10,        # Максимальное количество ордеров пирамидинга
-}
-
-# Sleep Settings
-SLEEP_AFTER_ACC = [3, 6]  # Пауза между аккаунтами (секунды)
-SLEEP_AFTER_FUTURE = [1, 2]  # Пауза после торговых операций
 
 # Threading
 THREADS = 3  # Количество одновременных потоков

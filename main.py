@@ -1,5 +1,4 @@
 from os import name as os_name
-from random import randint
 from loguru import logger
 from time import sleep
 import asyncio
@@ -97,10 +96,7 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
                     if reports:
                         await TgReport().send_log(logs="\n".join(reports))
 
-                    if module_data["module_info"]["status"] is True:
-                        await async_sleep(randint(*settings.SLEEP_AFTER_ACC))
-                    else:
-                        await async_sleep(10)
+                    await async_sleep(5)
 
 
 async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
@@ -152,10 +148,7 @@ async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
                     if reports:
                         await TgReport().send_log(logs="\n".join(reports))
 
-                    if group_data["module_info"]["status"] is True:
-                        await async_sleep(randint(*settings.SLEEP_AFTER_ACC))
-                    else:
-                        await async_sleep(10)
+                    await async_sleep(5)
 
 
 async def get_account_startup_info(module_data: dict):
