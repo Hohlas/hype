@@ -2,6 +2,8 @@
 version = "1.2.5"
 
 # Risk Management
+
+SPOT_TOKEN = "BTC"  # Spot Trading token 
 POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
 MAX_POSITION_SIZE_PERCENT = 90  # Максимальный размер всех открытых позиций в % от баланса
 STEP = 500  # Шаг сетки (TP) в долларах для усреднения
@@ -60,14 +62,6 @@ WEB3_TESTNET_RPC_URL = "https://sepolia.infura.io/v3/YOUR_INFURA_KEY"  # Для 
 HYPERLIQUID_CHAIN_ID = 42161  # Arbitrum One (mainnet) - сеть Hyperliquid
 HYPERLIQUID_TESTNET_CHAIN_ID = 421614  # Arbitrum Sepolia (testnet)
 
-# Supported Tokens for Spot Trading
-SUPPORTED_SPOT_TOKENS = [
-    #"ETH",   # Ethereum
-    "BTC",   # Bitcoin
-    #"USDC", # USD Coin
-    #"USDT", # Tether
-    # Добавьте другие токены, поддерживаемые Hyperliquid
-]
 
 # Logging
 LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR

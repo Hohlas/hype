@@ -323,7 +323,10 @@ class HyperliquidClient:
             if mode == 0:
                 # Delayed Orders Strategy для spot торговли
                 from modules.delayed_orders_strategy import trade_delayed_orders_strategy
-                return await trade_delayed_orders_strategy(self, "BTC")
+                import settings
+                # Берем токен из настроек
+                token_name = settings.SPOT_TOKEN if hasattr(settings, 'SPOT_TOKEN') and settings.SPOT_TOKEN else "BTC"
+                return await trade_delayed_orders_strategy(self, token_name)
             elif mode == 4:
                 # Cancel Orders
                 from modules.cancel_orders import cancel_all_orders

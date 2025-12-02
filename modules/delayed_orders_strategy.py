@@ -40,6 +40,21 @@ import settings
 _order_skipped_cache = {}
 
 
+def normalize_price(price_value: float, decimals: int) -> float:
+    """
+    Нормализует цену, округляя до указанного количества знаков после запятой.
+    Убирает floating point ошибки округления.
+    
+    Args:
+        price_value: Цена для нормализации
+        decimals: Количество знаков после запятой (sz_decimals из API для конкретного токена)
+        
+    Returns:
+        Нормализованная цена (float, округленная до указанного количества знаков)
+    """
+    return round(price_value, decimals)
+
+
 # async def calculate_real_profit(client, token_name: str, sold_amount: float, sell_price: float) -> float:
 #     """
 #     Рассчитывает реальную прибыль от сделки с учетом комиссии
@@ -498,7 +513,8 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
 
 
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
-                                 usdc_balance: float, btc_balance: float, total_value: float, orders=None):
+                                 usdc_balance: float, btc_balance: float, total_value: float, 
+                                 orders=None, sz_decimals: int = None, token_name: str = "BTC"):
     """
     Записывает статистику операции в Excel файл hype_stat.xlsx
     
@@ -511,10 +527,12 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         btc_balance: Баланс BTC
         total_value: Суммарная стоимость всех активов
         orders: Список открытых ордеров (опционально, если не передан - будет получен внутри функции)
+        sz_decimals: Количество знаков после запятой для форматирования цены (из API)
+        token_name: Название торгуемого токена (по умолчанию "BTC")
     """
     try:
-        # Получаем текущую цену BTC
-        current_btc_price = float(await client.browser.get_token_price("BTC"))
+        # Получаем текущую цену токена
+        current_token_price = float(await client.browser.get_token_price(token_name))
         
         # Если ордера не переданы, получаем их
         if orders is None:
@@ -545,13 +563,30 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Создаем запись статистики
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Получаем sz_decimals из клиента, если не передан
+        if sz_decimals is None:
+            try:
+                sz_decimals = client.get_token_sz_decimals(token_name)
+            except:
+                sz_decimals = 5  # Fallback
+        
+        # Цена уже нормализована при расчете, но для Excel форматируем как строку без trailing zeros
+        def format_price_for_excel(price_value: float, decimals: int) -> str:
+            """Форматирует цену для Excel, убирая trailing zeros"""
+            price_str = f"{price_value:.{decimals}f}"
+            if '.' in price_str:
+                return price_str.rstrip('0').rstrip('.')
+            return price_str
+        
+        formatted_price = format_price_for_excel(price, sz_decimals)
+        
         # Подготавливаем данные для записи
         new_row = {
             'Timestamp': timestamp,
-            'Current BTC Price': current_btc_price,
+            'Current BTC Price': current_token_price,
             'Operation': operation,
             'BTC Amount': btc_amount,
-            'Operation Price': price,
+            'Operation Price': formatted_price,
             'USDC Balance': usdc_balance,
             'BTC Balance': btc_balance,
             'Limit Profit': limit_profit,
@@ -1128,7 +1163,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     last_buy_price = latest_price
                                     
                                     # Рассчитываем цену TP
-                                    tp_price = latest_price + float(step)
+                                    tp_price = normalize_price(latest_price + float(step), sz_decimals)
                                     
                                     # Размещение TP-ордера на бирже
                                     # Количество: latest_amount токенов
@@ -1167,7 +1202,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 price=tp_price,
                                                 usdc_balance=all_balances.get("USDC", 0.0),
                                                 btc_balance=btc_balance,
-                                                total_value=total_value
+                                                total_value=total_value,
+                                                sz_decimals=sz_decimals,
+                                                token_name=token_name
                                             )
                                         except Exception as e:
                                             client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
@@ -1248,7 +1285,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     
                                     # Получаем размер из сохраненного ордера (fallback)
                                     filled_qty = float(executed_order.get("sz", 0))
-                                    tp_price_fallback = float(executed_order.get("limitPx", 0))  # Fallback цена
+                                    tp_price_fallback = normalize_price(float(executed_order.get("limitPx", 0)), sz_decimals)  # Fallback цена
                                     tp_order_id = executed_order.get("oid")
                                     
                                     # Получаем фактический размер исполнения, цену и комиссию из Trade History
@@ -1268,7 +1305,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 # Используем фактическую цену исполнения из Trade History
                                                 actual_price = float(trade.get('px', tp_price_fallback))
                                                 if actual_price > 0:
-                                                    tp_price = actual_price
+                                                    tp_price = normalize_price(actual_price, sz_decimals)
                                                 else:
                                                     tp_price = tp_price_fallback
                                                 sell_trade_from_history = trade
@@ -1427,7 +1464,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     usdc_balance=usdc_balance,
                                                     btc_balance=btc_balance,
                                                     total_value=total_usd_value,
-                                                    orders=open_orders
+                                                    orders=open_orders,
+                                                    sz_decimals=sz_decimals,
+                                                    token_name=token_name
                                                 )
                                             except Exception as e:
                                                 client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
@@ -1658,7 +1697,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     token_amount = order_result.get('quantity', usdc_amount / current_price)
                     
                     # Получаем фактическую цену исполнения из API ответа
-                    actual_price = current_price  # fallback
+                    actual_price = normalize_price(current_price, sz_decimals)  # fallback
                     try:
                         response_data = order_result.get('response', {})
                         statuses = response_data.get('data', {}).get('statuses', [])
@@ -1666,7 +1705,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             first_status = statuses[0]
                             if 'filled' in first_status:
                                 filled_data = first_status['filled']
-                                actual_price = float(filled_data.get('avgPx', current_price))
+                                actual_price = normalize_price(float(filled_data.get('avgPx', current_price)), sz_decimals)
                                 client.browser.log_message(
                                     f"✅ First Position: Actual fill price ${actual_price:.2f} (expected ${current_price:.2f})", 
                                     level="INFO"
@@ -1699,7 +1738,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             price=actual_price,
                             usdc_balance=usdc_balance,
                             btc_balance=btc_balance,
-                            total_value=total_value
+                            total_value=total_value,
+                            sz_decimals=sz_decimals,
+                            token_name=token_name
                         )
                     except Exception as e:
                         client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
@@ -1711,7 +1752,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
                     # Расчет целевой цены для лимитного ордера
-                    target_buy_price = min_tp_price - float(step) * 2
+                    target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
                     
                     # Используем уже полученный баланс USDC из all_balances
                     usdc_balance = all_balances.get("USDC", 0.0)
@@ -1765,7 +1806,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             usdc_balance=usdc_balance,
                                             btc_balance=btc_balance,
                                             total_value=total_value,
-                                            orders=open_orders
+                                            orders=open_orders,
+                                            sz_decimals=sz_decimals,
+                                            token_name=token_name
                                         )
                                     except Exception as e:
                                         client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
@@ -1839,7 +1882,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         token_amount = order_result.get('quantity', usdc_amount / current_price)
                         
                         # Получаем фактическую цену исполнения из API ответа
-                        actual_price = current_price  # fallback
+                        actual_price = normalize_price(current_price, sz_decimals)  # fallback
                         try:
                             response_data = order_result.get('response', {})
                             statuses = response_data.get('data', {}).get('statuses', [])
@@ -1847,7 +1890,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 first_status = statuses[0]
                                 if 'filled' in first_status:
                                     filled_data = first_status['filled']
-                                    actual_price = float(filled_data.get('avgPx', current_price))
+                                    actual_price = normalize_price(float(filled_data.get('avgPx', current_price)), sz_decimals)
                                     client.browser.log_message(
                                         f"✅ Pyramiding: Actual fill price ${actual_price:.2f} (expected ${current_price:.2f})", 
                                         level="INFO"
@@ -1871,7 +1914,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 price=actual_price,
                                 usdc_balance=usdc_balance,
                                 btc_balance=btc_balance,
-                                total_value=total_value
+                                total_value=total_value,
+                                sz_decimals=sz_decimals,
+                                token_name=token_name
                             )
                         except Exception as e:
                             client.browser.log_message(f"Failed to log Pyramiding statistics: {e}", level="ERROR")
@@ -1896,11 +1941,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
-                        
-                        # Прерываем цикл после создания Pyramiding ордера
-                        # Это дает время ордеру появиться в API перед следующей итерацией
-                        # (цикл и так вернется к началу естественным образом, но continue явно показывает намерение)
-                        continue
                 
             except Exception as e:
                 error_str = str(e)
