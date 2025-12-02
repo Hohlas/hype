@@ -1158,7 +1158,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_count = len(tp_orders) if tp_orders else 0
                     
                     # Формируем информацию о последней покупке
-                    last_buy_info = f"LastBuy at {last_buy_price:.2f}" if last_buy_price else "LastBuy: N/A"
+                    last_buy_info = f"LastBuy: {last_buy_price:.2f}" if last_buy_price else "LastBuy: N/A"
                     
                     # Выводим статусное сообщение
                     client.browser.log_message(
