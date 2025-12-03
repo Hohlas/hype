@@ -1758,10 +1758,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Нет активного Buy Limit - размещаем новый лимитный ордер
                         # Проверка баланса
                         if usdc_balance < usdc_amount:
-                            client.browser.log_message(
-                                f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
-                                level="WARNING"
-                            )
+                            if can_log_warning_message(client.label, "insufficient_usdc_averaging", cooldown_minutes=10):
+                                client.browser.log_message(
+                                    f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
+                                    level="WARNING"
+                                )
                         else:
                             # Проверка минимального размера ордера перед созданием
                             # Для LIMIT ордера используем цену лимитного ордера для проверки
