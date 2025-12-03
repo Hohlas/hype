@@ -1100,6 +1100,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if not hasattr(client, '_previous_usdc_balance'):
                     client._previous_usdc_balance = all_balances.get("USDC", 0.0)
                 
+                                
                 # ============================================
                 # МОДУЛЬ SET_TP: Выставление TP-ордеров
                 # ============================================
@@ -1108,104 +1109,93 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 try:
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+                    # Инициализируем переменные для последней покупки
+                    latest_price = None
+                    latest_amount = None
+                    latest_timestamp = None
                     
                     if trades_history:
-                        # Фильтруем только покупки: USDC → токен
-                        buy_trades = []
+                        # История уже отсортирована от новых к старым
                         for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
-                            
-                            # Ищем покупки
+                            # Ищем последнюю покупку
                             if trade_side in ['BUY', 'B']:
-                                buy_trades.append(trade)
-                        
-                        # Извлекаем данные последней покупки
-                        if buy_trades:
-                            # История уже отсортирована от новых к старым, берем первую
-                            latest_trade = buy_trades[0]
-                            latest_price = float(latest_trade.get('px', 0))
-                            latest_amount = float(latest_trade.get('sz', 0))
-                            latest_timestamp = latest_trade.get('time', 0)
-                            
-                            # Проверяем, является ли покупка новой
-                            # Используем timestamp для определения новых покупок, чтобы каждая покупка получала TP
-                            # даже если цена совпадает с предыдущей покупкой
-                            if latest_price > 0 and latest_amount > 0:
-                                is_new_buy = False
-                                if last_buy_timestamp is None:
-                                    # Первая покупка - всегда новая
-                                    is_new_buy = True
-                                elif latest_timestamp > last_buy_timestamp:
-                                    # Покупка с более поздним timestamp - новая покупка
-                                    is_new_buy = True
+                                latest_price = float(trade.get('px', 0))
+                                latest_amount = float(trade.get('sz', 0))
+                                latest_timestamp = trade.get('time', 0)
+                                if latest_price > 0 and latest_amount > 0:
+                                    break
+                    
+                    # Проверяем, есть ли новая покупка только если нашли покупку в истории
+                    if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
+                        is_new_buy = False
+                        if last_buy_timestamp is None:
+                            # Первая покупка - всегда новая
+                            is_new_buy = True
+                        elif latest_timestamp > last_buy_timestamp:
+                            # Покупка с более поздним timestamp - новая покупка
+                            is_new_buy = True
                                 
-                                if is_new_buy:
-                                    # Обнаружена новая покупка
-                                    # Лог убран по запросу пользователя
-                                    
-                                    # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
-                                    last_buy_price = latest_price
-                                    last_buy_timestamp = latest_timestamp
-                                    
-                                    # Рассчитываем цену TP
-                                    tp_price = normalize_price(latest_price + float(step), sz_decimals)
-                                    
-                                    # Размещение TP-ордера на бирже
-                                    # Количество: latest_amount токенов
-                                    # Лимитная цена: tp_price
-                                    try:
-                                        tp_order_data = {
-                                            "token": token_name,
-                                            "side": "SELL",
-                                            "order_type": "LIMIT",
-                                            "quantity": latest_amount,
-                                            "price": tp_price,
-                                        }
-                                        
-                                        tp_result = await client.place_order(**tp_order_data)
-                                        
-                                        client.browser.log_message(
-                                            f"🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}",
-                                            level="INFO"
-                                        )
-                                        
-                                        # Отправляем уведомление в Telegram
-                                        await send_tg_notification(
-                                            client,
-                                            text=f'🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}',
-                                            save_to_report=False
-                                        )
-                                        
-                                        # Записываем статистику операции Set TP
-                                        try:
-                                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                                            total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
-                                            await log_statistics_to_excel(
-                                                client=client,
-                                                operation="Set TP",
-                                                btc_amount=latest_amount,
-                                                price=tp_price,
-                                                usdc_balance=all_balances.get("USDC", 0.0),
-                                                btc_balance=btc_balance,
-                                                total_value=total_value,
-                                                sz_decimals=sz_decimals,
-                                                token_name=token_name
-                                            )
-                                        except Exception as e:
-                                            client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
-                                        
-                                        # Обновляем min_tp_price немедленно, не дожидаясь следующей итерации
-                                        # Это предотвращает повторное размещение Averaging ордера
-                                        if min_tp_price == 0 or tp_price < min_tp_price:
-                                            min_tp_price = tp_price
-                                            # Лог убран по запросу пользователя
-                                        
-                                        # Прерываем цикл после создания TP ордера
-                                        # Это дает время ордеру появиться в API перед следующей итерацией
-                                        continue
-                                        
-                                    except Exception as e:
-                                        client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
+                        if is_new_buy:
+                            # Обнаружена новая покупка                  
+                            # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
+                            last_buy_price = latest_price
+                            last_buy_timestamp = latest_timestamp
+                            
+                            # Рассчитываем цену TP
+                            tp_price = normalize_price(latest_price + float(step), sz_decimals)
+                            
+                            # Размещение TP-ордера на бирже
+                            # Количество: latest_amount токенов
+                            # Лимитная цена: tp_price
+                            try:
+                                tp_order_data = {
+                                    "token": token_name,
+                                    "side": "SELL",
+                                    "order_type": "LIMIT",
+                                    "quantity": latest_amount,
+                                    "price": tp_price,
+                                }
+                                
+                                tp_result = await client.place_order(**tp_order_data)
+                                
+                                client.browser.log_message(
+                                    f"🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}",
+                                    level="INFO"
+                                )
+                                
+                                # Отправляем уведомление в Telegram
+                                await send_tg_notification(
+                                    client,
+                                    text=f'🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}',
+                                    save_to_report=False
+                                )
+                                
+                                # Записываем статистику операции Set TP
+                                try:
+                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                    total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
+                                    await log_statistics_to_excel(
+                                        client=client,
+                                        operation="Set TP",
+                                        btc_amount=latest_amount,
+                                        price=tp_price,
+                                        usdc_balance=all_balances.get("USDC", 0.0),
+                                        btc_balance=btc_balance,
+                                        total_value=total_value,
+                                        sz_decimals=sz_decimals,
+                                        token_name=token_name
+                                    )
+                                except Exception as e:
+                                    client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
+                                
+                                                       
+                                # Прерываем цикл после создания TP ордера
+                                # Это дает время ордеру появиться в API перед следующей итерацией
+                                continue
+                                                
+                            except Exception as e:
+                                client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
                 
@@ -1884,7 +1874,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             order_id = order.get("oid")
                             
                             if order_price < threshold:
-                                # Ордер устарел - отменяем его
+                                # Ордер слишком далеко - отменяем его
                                 try:
                                     await client.browser.cancel_order(token_name, order_id)
                                     client.browser.log_message(
