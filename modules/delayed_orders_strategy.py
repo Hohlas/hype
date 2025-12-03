@@ -55,97 +55,6 @@ def normalize_price(price_value: float, decimals: int) -> float:
     return round(price_value, decimals)
 
 
-# async def calculate_real_profit(client, token_name: str, sold_amount: float, sell_price: float) -> float:
-#     """
-#     Рассчитывает реальную прибыль от сделки с учетом комиссии
-#     (ЗАКОММЕНТИРОВАНО: используем расчет через изменение баланса USDC)
-#     
-#     Args:
-#         client: HyperliquidClient instance
-#         token_name: Название токена (например, "BTC")
-#         sold_amount: Количество проданных токенов
-#         sell_price: Цена продажи
-#     
-#     Returns:
-#         float: Реальная прибыль в USDC
-#     """
-#     try:
-#         # Получаем историю сделок для поиска цены покупки
-#         trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
-#         
-#         # Отладочная информация (убрано для чистоты логов)
-#         
-#         if not trades_history:
-#             client.browser.log_message("⚠️ No trade history found for profit calculation", level="INFO")
-#             # Используем упрощенный расчет на основе STEP
-#             step_profit = sold_amount * float(settings.STEP)
-#             commission = sold_amount * sell_price * 0.000144  # 0.0144% комиссия
-#             estimated_profit = step_profit - commission
-#             client.browser.log_message(f"💰 Using STEP-based profit estimation: ${estimated_profit:.2f}", level="INFO")
-#             return estimated_profit
-#         
-#         # Ищем последние BUY сделки для расчета средней цены покупки
-#         buy_trades = []
-#         total_bought = 0.0
-#         
-#         for trade in trades_history:
-#             side = trade.get('side', '').upper()
-#             if side in ['BUY', 'B']:
-#                 trade_amount = float(trade.get('sz', 0))
-#                 trade_price = float(trade.get('px', 0))
-#                 
-#                 buy_trades.append({
-#                     'amount': trade_amount,
-#                     'price': trade_price,
-#                     'value': trade_amount * trade_price
-#                 })
-#                 total_bought += trade_amount
-#                 
-#                 # Если набрали достаточно для покрытия проданного количества
-#                 if total_bought >= sold_amount:
-#                     break
-#         
-#         if not buy_trades or total_bought < sold_amount:
-#             client.browser.log_message("⚠️ Insufficient buy history for profit calculation", level="INFO")
-#             return 0.0
-#         
-#         # Рассчитываем средневзвешенную цену покупки
-#         weighted_price = 0.0
-#         remaining_to_cover = sold_amount
-#         
-#         for trade in reversed(buy_trades):  # Берем последние сделки
-#             if remaining_to_cover <= 0:
-#                 break
-#                 
-#             amount_to_use = min(trade['amount'], remaining_to_cover)
-#             weighted_price += amount_to_use * trade['price']
-#             remaining_to_cover -= amount_to_use
-#         
-#         avg_buy_price = weighted_price / sold_amount
-#         
-#         # Рассчитываем прибыль
-#         sell_value = sold_amount * sell_price
-#         buy_value = sold_amount * avg_buy_price
-#         
-#         # Примерная комиссия (обычно 0.0144% на Hyperliquid)
-#         commission_rate = 0.000144  # 0.0144%
-#         commission = sell_value * commission_rate
-#         
-#         real_profit = sell_value - buy_value - commission
-#         
-#         client.browser.log_message(
-#             f"💰 Profit calculation: Sold {sold_amount:.6f}BTC @ ${sell_price:.2f} = ${sell_value:.2f}, "
-#             f"Bought @ ${avg_buy_price:.2f} = ${buy_value:.2f}, Commission ${commission:.2f}, "
-#             f"Net profit: ${real_profit:.2f}", 
-#             level="INFO"
-#         )
-#         
-#         return real_profit
-#         
-#     except Exception as e:
-#         client.browser.log_message(f"Failed to calculate real profit: {e}", level="ERROR")
-#         return 0.0
-
 
 async def get_actual_fill_price_from_history(client, token_name: str, order_time: float, timeout: int = 10):
     """
@@ -248,45 +157,15 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         #    Это гарантирует правильное сопоставление даже при множественных покупках лесенкой
         # 4. Если точного совпадения нет, ищем ближайшую по размеру покупку
         
-        from datetime import datetime
-        
         # Определяем верхнюю границу времени для поиска покупки
-        time_limit = None
         
         if tp_order_time:
-            # Используем время СОЗДАНИЯ TP ордера из Open Orders - это правильная верхняя граница
-            time_limit = tp_order_time
-            tp_datetime_readable = datetime.fromtimestamp(tp_order_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            time_limit = tp_order_time # Используем время СОЗДАНИЯ TP ордера из Open Orders - это правильная верхняя граница
         else:
-            # Fallback: если время создания TP ордера не найдено, используем время исполнения продажи
-            sell_trade = None
-            for trade in trades_history:
-                trade_oid = trade.get('oid')
-                trade_side = trade.get('side', '').upper()
-                
-                if trade_oid == tp_order_id and trade_side in ['SELL', 'S', 'A']:
-                    sell_trade = trade
-                    time_limit = trade.get('time', 0)
-                    client.browser.log_message(
-                        f"⚠️ Using sell trade execution time as fallback (TP order creation time not found)",
-                        level="WARNING"
-                    )
-                    break
-            
-            if not sell_trade:
-                # Берем первую продажу в истории как fallback
-                if trades_history:
-                    first_trade = trades_history[0]
-                    if first_trade.get('side', '').upper() in ['SELL', 'S', 'A']:
-                        time_limit = first_trade.get('time', 0)
-                        client.browser.log_message(
-                            f"⚠️ Using first sell trade time as fallback",
-                            level="WARNING"
-                        )
-        
-        if not time_limit:
+            time_limit = None 
             client.browser.log_message("⚠️ No time limit found for buy trade search", level="WARNING")
             return None
+        
         
         # Теперь ищем покупку с таким же объемом, время которой МЕНЬШЕ времени выставления TP ордера
         # КРИТИЧНО: TP ордер создается СРАЗУ после покупки (задержка несколько секунд/минут)
@@ -310,7 +189,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         
         
         # Отладочное логирование: выводим все покупки для анализа
-        from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         buy_trades_for_debug = []
         
@@ -397,7 +275,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         # Если не нашли точное совпадение, ищем максимально близкую покупку ДО времени выставления TP ордера
         # ВАЖНО: При поиске ближайшей покупки предпочитаем покупки с размером >= размера продажи
         # или очень близким к нему (разница не более 10%)
-        from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
             f"⚠️ No exact match found for sell size {sell_size:.6f} {token_name}, searching for closest match before TP order time ({tp_datetime_str})...",
@@ -486,7 +363,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             )
         
         if closest_buy:
-            from datetime import datetime
             buy_datetime = datetime.fromtimestamp(closest_buy['time'] / 1000)
             tp_datetime = datetime.fromtimestamp(time_limit / 1000)
             size_diff_pct = (min_diff / sell_size * 100) if sell_size > 0 else 0
@@ -512,7 +388,6 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
             )
             return closest_buy
         
-        from datetime import datetime
         tp_datetime_str = datetime.fromtimestamp(time_limit / 1000).strftime('%Y-%m-%d %H:%M:%S')
         client.browser.log_message(
             f"❌ Could not find matching buy trade for sell size {sell_size:.6f} {token_name} before TP order time ({tp_datetime_str})",
@@ -591,7 +466,6 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         sz_decimals: Количество знаков после запятой для форматирования цены (из API)
         token_name: Название торгуемого токена (по умолчанию "BTC")
     """
-    from datetime import datetime  # Явный импорт для избежания конфликтов областей видимости
     try:
         # Получаем текущую цену токена
         current_token_price = float(await client.browser.get_token_price(token_name))
@@ -1175,7 +1049,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Формируем информацию о последней покупке
                     if last_buy_price and last_buy_timestamp:
                         # Преобразуем timestamp из миллисекунд в читаемый формат
-                        from datetime import datetime  # Явный импорт для избежания конфликтов областей видимости
                         buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
                         buy_time_str = buy_datetime.strftime('%H:%M:%S')
                         last_buy_info = f"LastBuy: {last_buy_price:.2f} at {buy_time_str}"
@@ -1456,7 +1329,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             
                                             if tp_order_time:
                                                 # Конвертируем в читаемый формат для проверки
-                                                from datetime import datetime
                                                 tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
                                                 
                                                 # Логируем время создания TP ордера
@@ -1543,10 +1415,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 # Чистая прибыль = выручка - затраты
                                                 profit = sell_revenue - buy_cost
                                                 
-                                                client.browser.log_message(
-                                                    f"  💰 PROFIT: ${sell_revenue:.2f} (revenue) - ${buy_cost:.2f} (cost) = ${profit:.2f}",
-                                                    level="INFO"
-                                                )
+                                                # client.browser.log_message(f"  💰 PROFIT: ${sell_revenue:.2f} (revenue) - ${buy_cost:.2f} (cost) = ${profit:.2f}", level="INFO")
                                                 
                                                 # Проверка на аномально большой профит
                                                 if profit > filled_qty * float(settings.STEP) * 2:
@@ -1598,12 +1467,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             # Формируем сообщение согласно требованиям
                                             # Используем фактический размер исполнения из Trade History
                                             client.browser.log_message(
-                                                f"✅ Profit ${profit:.2f} | ${filled_qty:.6f}{token_name} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}",
+                                                f"✅ Profit ${profit:.2f} / {filled_qty:.6f}{token_name}, Eq = {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}",
                                                 level="INFO"
                                             )
                                             
                                             # Отправляем уведомление в Telegram согласно требованиям
-                                            profit_message = f'🎯 hype: Profit ${profit:.2f} | ${usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}'
+                                            profit_message = f'🎯 Hype: PROFIT ${profit:.2f} | {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}'
                                             await send_tg_notification(
                                                 client,
                                                 text=profit_message,
