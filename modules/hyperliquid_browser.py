@@ -1446,10 +1446,20 @@ class HyperliquidBrowser:
             
             # Используем правильный endpoint согласно документации
             import time
+            from datetime import datetime
             current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
             # Устанавливаем очень старое время (10 лет назад) для получения всех сделок
             # API вернет все сделки, затем мы ограничим результат до limit
             start_time = current_time - (10 * 365 * 24 * 60 * 60 * 1000)  # 10 лет назад (все сделки)
+            
+            # Логируем временной диапазон запроса
+            current_time_str = datetime.fromtimestamp(current_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            start_time_str = datetime.fromtimestamp(start_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            self.log_message(
+                f"🔍 DEBUG: Requesting trades: startTime={start_time_str} ({start_time}), "
+                f"endTime={current_time_str} ({current_time})",
+                level="INFO"
+            )
             
             data = {
                 "type": "userFillsByTime",  # Правильный тип согласно документации
