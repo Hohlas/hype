@@ -1680,6 +1680,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 # Размещение лимитного ордера на покупку
                                 client.browser.log_message("🔵 try to set BuyLimit ", level="INFO")
                                 try:
+                                    client.browser.log_message("🔵 try to place_order ", level="INFO")
                                     order_result = await client.place_order(
                                         token=token_name,
                                         side="BUY",
@@ -1693,10 +1694,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
                                         token_amount = usdc_amount / target_buy_price
                                         is_filled = False
-                                        
+                                        client.browser.log_message("🔵 try to order_result ", level="INFO")
                                         try:
                                             response_data = order_result.get('response', {})
                                             statuses = response_data.get('data', {}).get('statuses', [])
+                                            client.browser.log_message("🔵 response_data = " + str(response_data), level="INFO")
+                                            client.browser.log_message("🔵 statuses = " + str(statuses), level="INFO")
                                             if statuses and len(statuses) > 0:
                                                 first_status = statuses[0]
                                                 if 'filled' in first_status:
