@@ -1034,6 +1034,21 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Сортируем по timestamp (от новых к старым) для правильного обновления last_buy_timestamp
                         new_buys.sort(key=lambda x: x['timestamp'], reverse=True)
                         
+                        # Дебаг логирование списка новых покупок
+                        client.browser.log_message(
+                            f"🔍 DEBUG SET_TP: Found {len(new_buys)} new buy(s) to process TP orders:",
+                            level="INFO"
+                        )
+                        for idx, buy in enumerate(new_buys, 1):
+                            buy_datetime = datetime.fromtimestamp(buy['timestamp'] / 1000)
+                            client.browser.log_message(
+                                f"  {idx}. OID: {buy['oid']} | "
+                                f"Price: ${buy['price']:.2f} | "
+                                f"Amount: {buy['amount']:.6f} {token_name} | "
+                                f"Time: {buy_datetime.strftime('%Y-%m-%d %H:%M:%S')}",
+                                level="INFO"
+                            )
+                        
                         # Обновляем last_buy_timestamp на максимальный из новых покупок
                         max_timestamp = max(buy['timestamp'] for buy in new_buys)
                         if last_buy_timestamp is None or max_timestamp > last_buy_timestamp:
