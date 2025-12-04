@@ -889,7 +889,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
-        
+        last_buy_timestamp = 0
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
         status_interval = 600  # 10 минут в секундах
@@ -1005,7 +1005,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 latest_timestamp = trade.get('time', 0)
                                 if latest_price > 0 and latest_amount > 0:
                                     break
-                    latest_timestamp = 0
+                    
                     # Проверяем, есть ли новая покупка только если нашли покупку в истории
                     if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
                         is_new_buy = False
@@ -1767,7 +1767,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         # Это дает время ордеру появиться в API перед следующей итерацией
                                         client.browser.log_message(f"enf of BuyLimit", level="INFO")
                                         continue
-                                        
                                     except Exception as e:
                                         client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                     else:
