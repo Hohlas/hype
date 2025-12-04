@@ -988,8 +988,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
                 try:
                     client.browser.log_message(f"Start of TP set", level="INFO")
-                    # Получаем историю торговли (последние 100 сделок)
+                    # Получаем историю торговли (последние сделки)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
+                    client.browser.log_message(
+                        f"🔍 DEBUG: Received {len(trades_history)} trades from API for {token_name}",
+                        level="INFO"
+                    )
                     # Инициализируем переменные для последней покупки
                     latest_price = None
                     latest_amount = None

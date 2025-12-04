@@ -1489,7 +1489,12 @@ class HyperliquidBrowser:
                     raise Exception(f"Rate limit exceeded (429). Retry after {retry_after} seconds")
                 raise Exception(f'Failed to get orders history: {result}')
             
-            # Отладочная информация (убрано для чистоты логов)
+            # Логируем общее количество сделок от API
+            total_trades = len(result) if isinstance(result, list) else 0
+            self.log_message(
+                f"🔍 DEBUG: API returned {total_trades} total trades (before filtering)",
+                level="INFO"
+            )
                 
             # Фильтруем ордера по токену
             filtered_orders = []
@@ -1511,6 +1516,12 @@ class HyperliquidBrowser:
                 if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
             
+            # Логируем количество после фильтрации
+            self.log_message(
+                f"🔍 DEBUG: After filtering by {token_name} (asset_id={asset_id}): {len(filtered_orders)} trades",
+                level="INFO"
+            )
+            
             # Сортируем сделки по времени (от новых к старым) для гарантии правильного порядка
             # Используем поле 'time' (timestamp в миллисекундах)
             # Фильтруем сделки без времени и сортируем остальные
@@ -1520,12 +1531,28 @@ class HyperliquidBrowser:
             # Сортируем сделки с временем от новых к старым
             trades_with_time.sort(key=lambda x: x.get('time', 0), reverse=True)
             
+            # Логируем информацию о времени сделок
+            if trades_with_time:
+                newest_time = trades_with_time[0].get('time', 0)
+                oldest_time = trades_with_time[-1].get('time', 0) if len(trades_with_time) > 1 else newest_time
+                from datetime import datetime
+                newest_str = datetime.fromtimestamp(newest_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                oldest_str = datetime.fromtimestamp(oldest_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                self.log_message(
+                    f"🔍 DEBUG: Trades time range: newest={newest_str} ({newest_time}), oldest={oldest_str} ({oldest_time})",
+                    level="INFO"
+                )
+            
             # Объединяем: сначала сделки с временем (отсортированные), потом без времени
             filtered_orders = trades_with_time + trades_without_time
                     
-            # self.log_message(f"🔍 DEBUG: Filtered {len(filtered_orders)} trades for {token_name}", level="DEBUG")
             # Возвращаем первые N сделок (самые новые)
-            return filtered_orders[:limit]
+            result_trades = filtered_orders[:limit]
+            self.log_message(
+                f"🔍 DEBUG: Returning {len(result_trades)} trades (limit={limit})",
+                level="INFO"
+            )
+            return result_trades
             
         except Exception as e:
             # Логируем ошибку, но не прерываем работу бота
