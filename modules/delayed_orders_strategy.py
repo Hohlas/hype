@@ -1771,7 +1771,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         
                                         # Прерываем цикл после создания Averaging ордера
                                         # Это дает время ордеру появиться в API перед следующей итерацией
-                                        continue
+                                        # continue
+                                        await async_sleep(5)
                                         
                                 except Exception as e:
                                     client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
