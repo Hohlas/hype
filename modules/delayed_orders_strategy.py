@@ -995,10 +995,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client.browser.log_message("🔍 DEBUG SET_TP: [2] Initialized _processed_buy_trades set", level="INFO")
                     else:
                         client.browser.log_message(
-                            f"🔍 DEBUG SET_TP: [2] _processed_buy_trades already exists, count: {len(client._processed_buy_trades)}",
+                            f"🔍 DEBUG SET_TP: [2] _processed_buy_trades already exists, count:",
                             level="INFO"
                         )
-                    
+                    client.browser.logmessage("DEBUG SET_TP: [2.5] Before trades_history fetch", level="INFO")
                     # Получаем историю торговли (последние 100 сделок)
                     client.browser.log_message("🔍 DEBUG SET_TP: [3] Fetching trades_history...", level="INFO")
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
