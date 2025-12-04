@@ -1112,7 +1112,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Прерываем цикл после создания TP ордеров
                         # Это дает время ордерам появиться в API перед следующей итерацией
                         if new_buys:
-                            continue
+                            await async_sleep(10)
+                            # continue
                                                 
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
