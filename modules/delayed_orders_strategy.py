@@ -897,6 +897,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         while True:
             try:
+                client.browser.log_message("🔄 CYCLE START", level="INFO")  #
                 # Задержка между итерациями основного цикла
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
@@ -906,16 +907,21 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
                 # Получаем данные параллельно для оптимизации
-                import asyncio
-                tasks = [
-                    client.browser.get_token_price(token_name),
-                    client.browser.get_account_orders(),
-                    get_active_tp_orders(client, token_name),
-                    client.browser.get_all_balances()
-                ]
-                current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
-                current_price = float(current_price_raw)
-                
+                try: # Отдельная обработка для получения данных
+                    import asyncio
+                    tasks = [
+                        client.browser.get_token_price(token_name),
+                        client.browser.get_account_orders(),
+                        get_active_tp_orders(client, token_name),
+                        client.browser.get_all_balances()
+                    ]
+                    current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
+                    current_price = float(current_price_raw)
+                except Exception as gather_error:
+                    client.browser.log_message(f"⚠️ Failed to fetch data: {gather_error}", level="ERROR")
+                    await async_sleep(5)
+                    continue  # Пропускаем итерацию, НО внешний try не прерывается
+
                 # Дежурное статусное сообщение каждые 10 минут
                 current_time = time.time()
                 if current_time - last_status_time >= status_interval:
@@ -1409,19 +1415,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")
                 
-        # Получаем историю сделок для анализа (отключено для чистоты логов)
-        # trade_history = await client.browser.get_all_orders_history(token_name, limit=10)
-        # if trade_history:
-        #     client.browser.log_message(f"📈 Recent Trade History ({len(trade_history)} trades):", level="INFO")
-        #     for i, trade in enumerate(trade_history[-4:]):  # Показываем последние 4 сделки
-        #         side = trade.get("side", "UNKNOWN")
-        #         price = trade.get("px", "N/A")
-        #         size = trade.get("sz", "N/A")
-        #         timestamp = trade.get("time", "N/A")
-        #         client.browser.log_message(
-        #             f"  {i+1}. {side} | Price: ${price} | Size: {size} | Time: {timestamp}",
-        #             level="INFO"
-        #         )
+        
                 
                 buy_orders = [order for order in open_orders if order.get("side") in ["BUY", "B"]]
                 sell_orders = [order for order in open_orders if order.get("side") in ["SELL", "S", "A"]]
@@ -1900,8 +1894,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
                             save_to_report=False
                         )
-                
+
             except Exception as e:
+                client.browser.log_message(f"⚠️ GLOBAL EXCEPTION: {e}", level="ERROR")
                 error_str = str(e)
                 # Если получили 429 ошибку, увеличиваем задержку
                 if '429' in error_str or 'Rate limit' in error_str:
