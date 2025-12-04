@@ -4,7 +4,7 @@ version = "1.2.5"
 # Risk Management
 
 SPOT_TOKEN = "BTC"  # Spot Trading token 
-POSITION_SIZE_PERCENT = 20  # Размер открываемой позиции в % от баланса
+POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
 STEP = 200  # Шаг сетки (TP) в долларах для усреднения
 MAX_GRID_ORDERS = 90  # Максимальное количество ордеров в сетке
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)

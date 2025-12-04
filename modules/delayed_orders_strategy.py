@@ -985,69 +985,93 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # МОДУЛЬ SET_TP: Выставление TP-ордеров
                 # ============================================
                 # Этот модуль работает независимо от блоков покупки.
-                # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
+                # Он проверяет историю сделок и выставляет тейк-профит для всех новых покупок.
                 try:
+                    # Инициализируем множество обработанных покупок (если еще не создано)
+                    if not hasattr(client, '_processed_buy_trades'):
+                        client._processed_buy_trades = set()
+                    
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
-                    # Инициализируем переменные для последней покупки
-                    latest_price = None
-                    latest_amount = None
-                    latest_timestamp = None
+                    
+                    # Собираем все новые покупки (timestamp > last_buy_timestamp)
+                    new_buys = []
                     
                     if trades_history:
                         # История уже отсортирована от новых к старым
                         for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
-                            # Ищем последнюю покупку
+                            
+                            # Ищем покупки
                             if trade_side in ['BUY', 'B']:
-                                latest_price = float(trade.get('px', 0))
-                                latest_amount = float(trade.get('sz', 0))
-                                latest_timestamp = trade.get('time', 0)
-                                if latest_price > 0 and latest_amount > 0:
-                                    break
-                    
-                    # Проверяем, есть ли новая покупка только если нашли покупку в истории
-                    if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
-                        is_new_buy = False
-                        if last_buy_timestamp is None:
-                            # Первая покупка - всегда новая
-                            is_new_buy = True
-                        elif latest_timestamp > last_buy_timestamp:
-                            # Покупка с более поздним timestamp - новая покупка
-                            is_new_buy = True
+                                trade_oid = trade.get('oid')
+                                trade_timestamp = trade.get('time', 0)
+                                trade_price = float(trade.get('px', 0))
+                                trade_amount = float(trade.get('sz', 0))
                                 
-                        if is_new_buy:
-                            # Обнаружена новая покупка                  
-                            # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
-                            last_buy_price = latest_price
-                            last_buy_timestamp = latest_timestamp
+                                # Проверяем валидность данных покупки
+                                if trade_price > 0 and trade_amount > 0 and trade_oid:
+                                    # Проверяем, является ли покупка новой
+                                    is_new_buy = False
+                                    if last_buy_timestamp is None:
+                                        # Первая покупка - всегда новая
+                                        is_new_buy = True
+                                    elif trade_timestamp > last_buy_timestamp:
+                                        # Покупка с более поздним timestamp - новая покупка
+                                        is_new_buy = True
+                                    
+                                    # Проверяем, не обработана ли уже эта покупка
+                                    if is_new_buy and trade_oid not in client._processed_buy_trades:
+                                        new_buys.append({
+                                            'oid': trade_oid,
+                                            'price': trade_price,
+                                            'amount': trade_amount,
+                                            'timestamp': trade_timestamp
+                                        })
+                    
+                    # Обрабатываем все новые покупки (от новых к старым)
+                    if new_buys:
+                        # Сортируем по timestamp (от новых к старым) для правильного обновления last_buy_timestamp
+                        new_buys.sort(key=lambda x: x['timestamp'], reverse=True)
+                        
+                        # Обновляем last_buy_timestamp на максимальный из новых покупок
+                        max_timestamp = max(buy['timestamp'] for buy in new_buys)
+                        if last_buy_timestamp is None or max_timestamp > last_buy_timestamp:
+                            last_buy_timestamp = max_timestamp
+                        
+                        # Обрабатываем каждую новую покупку
+                        for buy in new_buys:
+                            trade_oid = buy['oid']
+                            buy_price = buy['price']
+                            buy_amount = buy['amount']
+                            
+                            # Помечаем покупку как обработанную сразу, чтобы избежать дубликатов
+                            client._processed_buy_trades.add(trade_oid)
                             
                             # Рассчитываем цену TP
-                            tp_price = normalize_price(latest_price + float(step), sz_decimals)
+                            tp_price = normalize_price(buy_price + float(step), sz_decimals)
                             
                             # Размещение TP-ордера на бирже
-                            # Количество: latest_amount токенов
-                            # Лимитная цена: tp_price
                             try:
                                 tp_order_data = {
                                     "token": token_name,
                                     "side": "SELL",
                                     "order_type": "LIMIT",
-                                    "quantity": latest_amount,
+                                    "quantity": buy_amount,
                                     "price": tp_price,
                                 }
                                 
                                 tp_result = await client.place_order(**tp_order_data)
                                 
                                 client.browser.log_message(
-                                    f"🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}",
+                                    f"🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
                                     level="INFO"
                                 )
                                 
                                 # Отправляем уведомление в Telegram
                                 await send_tg_notification(
                                     client,
-                                    text=f'🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}',
+                                    text=f'🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f}',
                                     save_to_report=False
                                 )
                                 
@@ -1058,7 +1082,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     await log_statistics_to_excel(
                                         client=client,
                                         operation="Set TP",
-                                        btc_amount=latest_amount,
+                                        btc_amount=buy_amount,
                                         price=tp_price,
                                         usdc_balance=all_balances.get("USDC", 0.0),
                                         btc_balance=btc_balance,
@@ -1069,13 +1093,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 except Exception as e:
                                     client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                                 
-                                                       
-                                # Прерываем цикл после создания TP ордера
-                                # Это дает время ордеру появиться в API перед следующей итерацией
-                                continue
-                                                
+                                # Обновляем last_buy_price на цену последней обработанной покупки
+                                last_buy_price = buy_price
+                                
                             except Exception as e:
-                                client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
+                                client.browser.log_message(f"❌ Failed to create TP order for buy oid {trade_oid}: {e}", level="ERROR")
+                                # Удаляем из обработанных, чтобы попробовать снова на следующей итерации
+                                client._processed_buy_trades.discard(trade_oid)
+                        
+                        # Прерываем цикл после создания TP ордеров
+                        # Это дает время ордерам появиться в API перед следующей итерацией
+                        if new_buys:
+                            continue
+                                                
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
                 
@@ -1202,7 +1232,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 tp_datetime = datetime.fromtimestamp(tp_order_time / 1000)
                                                 
                                                 # Логируем время создания TP ордера
-                                                log_msg = f"📅 TP order created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
+                                                log_msg = f"📅 TP order, created at: {tp_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
                                                 
                                                 # Если есть время исполнения, добавляем его для сравнения
                                                 if sell_trade_from_history and sell_trade_from_history.get('time'):
@@ -1337,7 +1367,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             # Формируем сообщение согласно требованиям
                                             # Используем фактический размер исполнения из Trade History
                                             client.browser.log_message(
-                                                f"✅ Profit ${profit:.2f} / {filled_qty:.6f}{token_name}, Eq = {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}",
+                                                f"✅ Profit ${profit:.2f}, Eq = {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}",
                                                 level="INFO"
                                             )
                                             
@@ -1700,7 +1730,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             )
                                         else:
                                             client.browser.log_message(
-                                                f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                                f"📉 set BuyLimit ${usdc_amount:.2f} at ${target_buy_price:.2f}",
                                                 level="INFO"
                                             )
                                         
