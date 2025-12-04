@@ -1624,10 +1624,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Проверяем, есть ли активные Buy Limit ордера
                     active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
                     
+                    # Защита от повторных ордеров: проверяем время последнего BuyLimit
+                    # Если BuyLimit был исполнен недавно, не выставляем новый сразу
+                    import time
+                    if not hasattr(client, '_last_buy_limit_filled_time'):
+                        client._last_buy_limit_filled_time = 0
+                    
+                    time_since_last_fill = time.time() - client._last_buy_limit_filled_time
+                    min_interval_seconds = 60  # Минимум 60 секунд между BuyLimit ордерами
+                    
                     if not active_buy_limits:
+                        # Проверяем, не был ли недавно исполнен BuyLimit ордер
+                        if time_since_last_fill < min_interval_seconds:
+                            # Недавно был исполнен BuyLimit, пропускаем создание нового
+                            # client.browser.log_message(
+                            #     f"⏰ Skipping BuyLimit: Last fill was {time_since_last_fill:.0f}s ago (min interval: {min_interval_seconds}s)",
+                            #     level="INFO"
+                            # )
+                            pass  # Пропускаем, не логируем для чистоты
                         # Нет активного Buy Limit - размещаем новый лимитный ордер
                         # Проверка баланса
-                        if usdc_balance < usdc_amount:
+                        elif usdc_balance < usdc_amount:
                             if can_log_warning_message(client.label, "insufficient_usdc_averaging", cooldown_minutes=10):
                                 client.browser.log_message(
                                     f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
@@ -1672,7 +1689,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             client.browser.log_message(f"try to get response data", level="INFO")
                                             response_data = order_result.get('response', {})
                                             statuses = response_data.get('data', {}).get('statuses', [])
+                                            # Логируем количество статусов для отладки
+                                            if statuses:
+                                                client.browser.log_message(f"🔍 DEBUG: Got {len(statuses)} statuses in response", level="INFO")
+                                                # Выводим информацию о ВСЕХ статусах для диагностики
+                                                for idx, status in enumerate(statuses):
+                                                    client.browser.log_message(f"🔍 DEBUG: Status[{idx}]: {status.get('oid', 'NO_OID')[:8]}... - {list(status.keys())}", level="INFO")
                                             if statuses and len(statuses) > 0:
+                                                # ВАЖНО: Обрабатываем только ПЕРВЫЙ статус, чтобы не было дублирования
+                                                # Если API возвращает несколько статусов, это могут быть разные ордера
+                                                # Но мы размещали только ОДИН ордер, поэтому берем только первый статус
                                                 first_status = statuses[0]
                                                 if 'filled' in first_status:
                                                     filled_data = first_status['filled']
@@ -1693,6 +1719,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         if is_filled:
                                             all_balances = await client.browser.get_all_balances()
                                             usdc_balance = all_balances.get("USDC", 0.0)
+                                            # Сохраняем время исполнения для защиты от повторных ордеров
+                                            import time
+                                            client._last_buy_limit_filled_time = time.time()
                                         
                                         # Логируем с фактической или расчетной ценой
                                         if is_filled:
