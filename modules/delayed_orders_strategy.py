@@ -1673,10 +1673,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         )
                                         
                                         if order_result:
-                                        # Получаем фактическую цену исполнения из API ответа (если ордер был исполнен сразу)
-                                        actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
-                                        token_amount = usdc_amount / target_buy_price
-                                        is_filled = False
+                                            # Получаем фактическую цену исполнения из API ответа (если ордер был исполнен сразу)
+                                            actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
+                                            token_amount = usdc_amount / target_buy_price
+                                            is_filled = False
                                         
                                         try:
                                             client.browser.log_message(f"try to get response data", level="INFO")
