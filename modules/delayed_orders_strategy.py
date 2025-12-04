@@ -989,7 +989,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 try:
                     client.browser.log_message(f"Start of TP set", level="INFO")
                     # Получаем историю торговли (последние 100 сделок)
-                    trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+                    trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
                     # Инициализируем переменные для последней покупки
                     latest_price = None
                     latest_amount = None
@@ -997,15 +997,52 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     if trades_history:
                         # История уже отсортирована от новых к старым
-                        for trade in trades_history:
+                        client.browser.log_message(f"🔍 DEBUG: Processing {len(trades_history)} trades from history", level="INFO")
+                        for idx, trade in enumerate(trades_history):
                             trade_side = trade.get('side', '').upper()
+                            trade_price = trade.get('px', 'N/A')
+                            trade_size = trade.get('sz', 'N/A')
+                            trade_time = trade.get('time', 'N/A')
+                            trade_oid = trade.get('oid', 'N/A')
+                            trade_coin = trade.get('coin', 'N/A')
+                            
+                            # Логируем все параметры каждого ордера
+                            client.browser.log_message(
+                                f"🔍 DEBUG: Trade[{idx}]: side={trade_side}, price={trade_price}, size={trade_size}, "
+                                f"time={trade_time}, oid={trade_oid}, coin={trade_coin}",
+                                level="INFO"
+                            )
+                            
                             # Ищем последнюю покупку
                             if trade_side in ['BUY', 'B']:
                                 latest_price = float(trade.get('px', 0))
                                 latest_amount = float(trade.get('sz', 0))
                                 latest_timestamp = trade.get('time', 0)
+                                client.browser.log_message(
+                                    f"🔍 DEBUG: Found BUY trade: price={latest_price}, amount={latest_amount}, "
+                                    f"timestamp={latest_timestamp}, oid={trade_oid}",
+                                    level="INFO"
+                                )
                                 if latest_price > 0 and latest_amount > 0:
+                                    client.browser.log_message(
+                                        f"🔍 DEBUG: Valid BUY found, breaking loop. Price={latest_price}, Amount={latest_amount}",
+                                        level="INFO"
+                                    )
                                     break
+                    
+                    # Логируем результат поиска
+                    if latest_timestamp is None or latest_price is None or latest_amount is None:
+                        client.browser.log_message(
+                            f"🔍 DEBUG: No valid BUY trade found in history. latest_timestamp={latest_timestamp}, "
+                            f"latest_price={latest_price}, latest_amount={latest_amount}",
+                            level="INFO"
+                        )
+                    else:
+                        client.browser.log_message(
+                            f"🔍 DEBUG: Found BUY trade summary: price={latest_price}, amount={latest_amount}, "
+                            f"timestamp={latest_timestamp}, last_buy_timestamp={last_buy_timestamp}",
+                            level="INFO"
+                        )
                     
                     # Проверяем, есть ли новая покупка только если нашли покупку в истории
                     if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
@@ -1013,18 +1050,43 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         if last_buy_timestamp is None:
                             # Первая покупка - всегда новая
                             is_new_buy = True
+                            client.browser.log_message(
+                                f"🔍 DEBUG: First BUY detected (last_buy_timestamp is None), is_new_buy=True",
+                                level="INFO"
+                            )
                         elif latest_timestamp > last_buy_timestamp:
                             # Покупка с более поздним timestamp - новая покупка
                             is_new_buy = True
+                            client.browser.log_message(
+                                f"🔍 DEBUG: New BUY detected: latest_timestamp={latest_timestamp} > "
+                                f"last_buy_timestamp={last_buy_timestamp}, is_new_buy=True",
+                                level="INFO"
+                            )
+                        else:
+                            client.browser.log_message(
+                                f"🔍 DEBUG: BUY is NOT new: latest_timestamp={latest_timestamp} <= "
+                                f"last_buy_timestamp={last_buy_timestamp}, is_new_buy=False",
+                                level="INFO"
+                            )
                                 
                         if is_new_buy:
                             # Обнаружена новая покупка                  
                             # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
+                            client.browser.log_message(
+                                f"🔍 DEBUG: Setting TP for new BUY. Updating: last_buy_price={last_buy_price} -> {latest_price}, "
+                                f"last_buy_timestamp={last_buy_timestamp} -> {latest_timestamp}",
+                                level="INFO"
+                            )
                             last_buy_price = latest_price
                             last_buy_timestamp = latest_timestamp
                             
                             # Рассчитываем цену TP
                             tp_price = normalize_price(latest_price + float(step), sz_decimals)
+                            client.browser.log_message(
+                                f"🔍 DEBUG: Calculating TP: latest_price={latest_price}, step={step}, "
+                                f"tp_price={tp_price}, sz_decimals={sz_decimals}",
+                                level="INFO"
+                            )
                             
                             # Размещение TP-ордера на бирже
                             # Количество: latest_amount токенов
@@ -1038,6 +1100,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     "price": tp_price,
                                 }
                                 
+                                client.browser.log_message(
+                                    f"🔍 DEBUG: Placing TP order: {tp_order_data}",
+                                    level="INFO"
+                                )
                                 tp_result = await client.place_order(**tp_order_data)
                                 
                                 client.browser.log_message(
