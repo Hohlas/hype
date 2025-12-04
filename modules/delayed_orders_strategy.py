@@ -1768,8 +1768,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         client.browser.log_message(f"enf of BuyLimit", level="INFO")
                                         continue
                                         
-                                except Exception as e:
-                                    client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
+                                    except Exception as e:
+                                        client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                     else:
                         # Есть активные Buy Limit ордера - проверяем их актуальность
                         threshold = min_tp_price - float(step) * 2.5
