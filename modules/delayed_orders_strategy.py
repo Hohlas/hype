@@ -997,37 +997,109 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Собираем все новые покупки (timestamp > last_buy_timestamp)
                     new_buys = []
                     
+                    # Дебаг: логируем начальное состояние
+                    client.browser.log_message(
+                        f"🔍 DEBUG SET_TP: Starting new_buys collection | "
+                        f"last_buy_timestamp: {last_buy_timestamp} | "
+                        f"processed_buy_trades count: {len(client._processed_buy_trades) if hasattr(client, '_processed_buy_trades') else 0}",
+                        level="INFO"
+                    )
+                    
                     if trades_history:
                         # История уже отсортирована от новых к старым
+                        buy_trades_found = 0
                         for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
                             
                             # Ищем покупки
                             if trade_side in ['BUY', 'B']:
+                                buy_trades_found += 1
                                 trade_oid = trade.get('oid')
                                 trade_timestamp = trade.get('time', 0)
                                 trade_price = float(trade.get('px', 0))
                                 trade_amount = float(trade.get('sz', 0))
                                 
+                                trade_datetime = datetime.fromtimestamp(trade_timestamp / 1000) if trade_timestamp else None
+                                
+                                # Дебаг: логируем каждую найденную покупку
+                                client.browser.log_message(
+                                    f"🔍 DEBUG SET_TP: Found BUY trade #{buy_trades_found} | "
+                                    f"OID: {trade_oid} | "
+                                    f"Price: ${trade_price:.2f} | "
+                                    f"Amount: {trade_amount:.6f} | "
+                                    f"Timestamp: {trade_timestamp} ({trade_datetime.strftime('%Y-%m-%d %H:%M:%S') if trade_datetime else 'N/A'})",
+                                    level="INFO"
+                                )
+                                
                                 # Проверяем валидность данных покупки
                                 if trade_price > 0 and trade_amount > 0 and trade_oid:
                                     # Проверяем, является ли покупка новой
                                     is_new_buy = False
+                                    reason = ""
+                                    
                                     if last_buy_timestamp is None:
                                         # Первая покупка - всегда новая
                                         is_new_buy = True
+                                        reason = "first buy (last_buy_timestamp is None)"
                                     elif trade_timestamp > last_buy_timestamp:
                                         # Покупка с более поздним timestamp - новая покупка
                                         is_new_buy = True
+                                        time_diff = (trade_timestamp - last_buy_timestamp) / 1000  # секунды
+                                        reason = f"timestamp newer (diff: {time_diff:.1f}s)"
+                                    else:
+                                        reason = f"timestamp not newer (trade: {trade_timestamp} <= last: {last_buy_timestamp})"
+                                    
+                                    # Дебаг: логируем результат проверки is_new_buy
+                                    client.browser.log_message(
+                                        f"🔍 DEBUG SET_TP: BUY #{buy_trades_found} | "
+                                        f"is_new_buy: {is_new_buy} | "
+                                        f"Reason: {reason}",
+                                        level="INFO"
+                                    )
                                     
                                     # Проверяем, не обработана ли уже эта покупка
-                                    if is_new_buy and trade_oid not in client._processed_buy_trades:
+                                    is_processed = trade_oid in client._processed_buy_trades if hasattr(client, '_processed_buy_trades') else False
+                                    
+                                    # Дебаг: логируем проверку на обработанность
+                                    client.browser.log_message(
+                                        f"🔍 DEBUG SET_TP: BUY #{buy_trades_found} | "
+                                        f"OID {trade_oid} in processed: {is_processed}",
+                                        level="INFO"
+                                    )
+                                    
+                                    if is_new_buy and not is_processed:
                                         new_buys.append({
                                             'oid': trade_oid,
                                             'price': trade_price,
                                             'amount': trade_amount,
                                             'timestamp': trade_timestamp
                                         })
+                                        client.browser.log_message(
+                                            f"🔍 DEBUG SET_TP: BUY #{buy_trades_found} ADDED to new_buys list",
+                                            level="INFO"
+                                        )
+                                    else:
+                                        skip_reason = "already processed" if is_processed else "not new buy"
+                                        client.browser.log_message(
+                                            f"🔍 DEBUG SET_TP: BUY #{buy_trades_found} SKIPPED ({skip_reason})",
+                                            level="INFO"
+                                        )
+                                else:
+                                    client.browser.log_message(
+                                        f"🔍 DEBUG SET_TP: BUY #{buy_trades_found} INVALID DATA | "
+                                        f"price: {trade_price}, amount: {trade_amount}, oid: {trade_oid}",
+                                        level="INFO"
+                                    )
+                        
+                        client.browser.log_message(
+                            f"🔍 DEBUG SET_TP: Total BUY trades found: {buy_trades_found}, new_buys collected: {len(new_buys)}",
+                            level="INFO"
+                        )
+                    else:
+                        client.browser.log_message(
+                            f"🔍 DEBUG SET_TP: No trades_history available",
+                            level="INFO"
+                        )
                     
                     # Обрабатываем все новые покупки (от новых к старым)
                     if new_buys:
