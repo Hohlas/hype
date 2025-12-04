@@ -889,7 +889,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
-        last_buy_timestamp = 0
+        # last_buy_timestamp = 0
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
         status_interval = 600  # 10 минут в секундах
@@ -987,6 +987,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Этот модуль работает независимо от блоков покупки.
                 # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
                 try:
+                    client.browser.log_message(f"Start of TP set", level="INFO")
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
                     # Инициализируем переменные для последней покупки
