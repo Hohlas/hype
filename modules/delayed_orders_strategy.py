@@ -987,179 +987,74 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Этот модуль работает независимо от блоков покупки.
                 # Он проверяет историю сделок и выставляет тейк-профит для всех новых покупок.
                 try:
-                    client.browser.log_message("🔍 DEBUG SET_TP: [1] Module entry point", level="INFO")
+                    client.browser.log_message("DEBUG SET_TP: [1] Begin", level="INFO")
                     
                     # Инициализируем множество обработанных покупок (если еще не создано)
                     if not hasattr(client, '_processed_buy_trades'):
                         client._processed_buy_trades = set()
-                        client.browser.log_message("🔍 DEBUG SET_TP: [2] Initialized _processed_buy_trades set", level="INFO")
-                    else:
-                        client.browser.log_message(
-                            f"🔍 DEBUG SET_TP: [2] _processed_buy_trades already exists, count:",
-                            level="INFO"
-                        )
-                    client.browser.logmessage("DEBUG SET_TP: [2.5] Before trades_history fetch", level="INFO")
+                    client.browser.log_message("DEBUG SET_TP: [2] ", level="INFO")
                     # Получаем историю торговли (последние 100 сделок)
-                    client.browser.log_message("🔍 DEBUG SET_TP: [3] Fetching trades_history...", level="INFO")
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
-                    client.browser.log_message(
-                        f"🔍 DEBUG SET_TP: [3] trades_history received, count: {len(trades_history) if trades_history else 0}",
-                        level="INFO"
-                    )
-                    
+                    client.browser.log_message("DEBUG SET_TP: [3] ", level="INFO")
                     # Собираем все новые покупки (timestamp > last_buy_timestamp)
                     new_buys = []
-                    client.browser.log_message(
-                        f"🔍 DEBUG SET_TP: [4] Starting new_buys collection | last_buy_timestamp: {last_buy_timestamp}",
-                        level="INFO"
-                    )
-                    
+                    client.browser.log_message("DEBUG SET_TP: [4] ", level="INFO")
                     if trades_history:
                         # История уже отсортирована от новых к старым
-                        buy_trades_found = 0
                         for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
                             
                             # Ищем покупки
                             if trade_side in ['BUY', 'B']:
-                                buy_trades_found += 1
                                 trade_oid = trade.get('oid')
                                 trade_timestamp = trade.get('time', 0)
                                 trade_price = float(trade.get('px', 0))
                                 trade_amount = float(trade.get('sz', 0))
                                 
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [5] Found BUY #{buy_trades_found} | "
-                                    f"OID: {trade_oid} | Price: ${trade_price:.2f} | Amount: {trade_amount:.6f} | "
-                                    f"Timestamp: {trade_timestamp}",
-                                    level="INFO"
-                                )
-                                
                                 # Проверяем валидность данных покупки
                                 if trade_price > 0 and trade_amount > 0 and trade_oid:
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [6] BUY #{buy_trades_found} data is valid",
-                                        level="INFO"
-                                    )
-                                    
                                     # Проверяем, является ли покупка новой
                                     is_new_buy = False
-                                    reason = ""
                                     if last_buy_timestamp is None:
                                         # Первая покупка - всегда новая
                                         is_new_buy = True
-                                        reason = "first buy (last_buy_timestamp is None)"
                                     elif trade_timestamp > last_buy_timestamp:
                                         # Покупка с более поздним timestamp - новая покупка
                                         is_new_buy = True
-                                        time_diff = (trade_timestamp - last_buy_timestamp) / 1000  # секунды
-                                        reason = f"timestamp newer (diff: {time_diff:.1f}s)"
-                                    else:
-                                        reason = f"timestamp not newer (trade: {trade_timestamp} <= last: {last_buy_timestamp})"
-                                    
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [7] BUY #{buy_trades_found} | is_new_buy: {is_new_buy} | Reason: {reason}",
-                                        level="INFO"
-                                    )
                                     
                                     # Проверяем, не обработана ли уже эта покупка
-                                    is_processed = trade_oid in client._processed_buy_trades
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [8] BUY #{buy_trades_found} | OID {trade_oid} in processed: {is_processed}",
-                                        level="INFO"
-                                    )
-                                    
-                                    if is_new_buy and not is_processed:
+                                    if is_new_buy and trade_oid not in client._processed_buy_trades:
                                         new_buys.append({
                                             'oid': trade_oid,
                                             'price': trade_price,
                                             'amount': trade_amount,
                                             'timestamp': trade_timestamp
                                         })
-                                        client.browser.log_message(
-                                            f"🔍 DEBUG SET_TP: [9] BUY #{buy_trades_found} ADDED to new_buys list",
-                                            level="INFO"
-                                        )
-                                    else:
-                                        skip_reason = "already processed" if is_processed else "not new buy"
-                                        client.browser.log_message(
-                                            f"🔍 DEBUG SET_TP: [9] BUY #{buy_trades_found} SKIPPED ({skip_reason})",
-                                            level="INFO"
-                                        )
-                                else:
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [6] BUY #{buy_trades_found} INVALID DATA | "
-                                        f"price: {trade_price}, amount: {trade_amount}, oid: {trade_oid}",
-                                        level="INFO"
-                                    )
-                        
-                        client.browser.log_message(
-                            f"🔍 DEBUG SET_TP: [10] Total BUY trades found: {buy_trades_found}, new_buys collected: {len(new_buys)}",
-                            level="INFO"
-                        )
-                    else:
-                        client.browser.log_message("🔍 DEBUG SET_TP: [10] No trades_history available", level="INFO")
-                    
+                    client.browser.log_message("DEBUG SET_TP: [5] ", level="INFO")
                     # Обрабатываем все новые покупки (от новых к старым)
                     if new_buys:
-                        client.browser.log_message(
-                            f"🔍 DEBUG SET_TP: [11] Processing {len(new_buys)} new buy(s)",
-                            level="INFO"
-                        )
-                        
                         # Сортируем по timestamp (от новых к старым) для правильного обновления last_buy_timestamp
                         new_buys.sort(key=lambda x: x['timestamp'], reverse=True)
-                        client.browser.log_message("🔍 DEBUG SET_TP: [12] Sorted new_buys by timestamp", level="INFO")
                         
                         # Обновляем last_buy_timestamp на максимальный из новых покупок
                         max_timestamp = max(buy['timestamp'] for buy in new_buys)
-                        old_timestamp = last_buy_timestamp
                         if last_buy_timestamp is None or max_timestamp > last_buy_timestamp:
                             last_buy_timestamp = max_timestamp
-                            client.browser.log_message(
-                                f"🔍 DEBUG SET_TP: [13] Updated last_buy_timestamp | "
-                                f"Old: {old_timestamp} | New: {last_buy_timestamp}",
-                                level="INFO"
-                            )
-                        else:
-                            client.browser.log_message(
-                                f"🔍 DEBUG SET_TP: [13] last_buy_timestamp not updated (max: {max_timestamp} <= last: {old_timestamp})",
-                                level="INFO"
-                            )
                         
                         # Обрабатываем каждую новую покупку
-                        for idx, buy in enumerate(new_buys, 1):
+                        for buy in new_buys:
                             trade_oid = buy['oid']
                             buy_price = buy['price']
                             buy_amount = buy['amount']
                             
-                            client.browser.log_message(
-                                f"🔍 DEBUG SET_TP: [14] Processing buy #{idx}/{len(new_buys)} | "
-                                f"OID: {trade_oid} | Price: ${buy_price:.2f} | Amount: {buy_amount:.6f}",
-                                level="INFO"
-                            )
-                            
                             # Помечаем покупку как обработанную сразу, чтобы избежать дубликатов
                             client._processed_buy_trades.add(trade_oid)
-                            client.browser.log_message(
-                                f"🔍 DEBUG SET_TP: [15] Marked buy #{idx} as processed (OID: {trade_oid})",
-                                level="INFO"
-                            )
                             
                             # Рассчитываем цену TP
                             tp_price = normalize_price(buy_price + float(step), sz_decimals)
-                            client.browser.log_message(
-                                f"🔍 DEBUG SET_TP: [16] Calculated TP price: ${tp_price:.2f} (buy_price: ${buy_price:.2f} + step: ${float(step):.2f})",
-                                level="INFO"
-                            )
                             
                             # Размещение TP-ордера на бирже
                             try:
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [17] Creating TP order for buy #{idx}...",
-                                    level="INFO"
-                                )
-                                
                                 tp_order_data = {
                                     "token": token_name,
                                     "side": "SELL",
@@ -1169,10 +1064,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 }
                                 
                                 tp_result = await client.place_order(**tp_order_data)
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [18] TP order created successfully for buy #{idx}",
-                                    level="INFO"
-                                )
                                 
                                 client.browser.log_message(
                                     f"🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
@@ -1180,26 +1071,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 )
                                 
                                 # Отправляем уведомление в Telegram
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [19] Sending Telegram notification for buy #{idx}...",
-                                    level="INFO"
-                                )
                                 await send_tg_notification(
                                     client,
                                     text=f'🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f}',
                                     save_to_report=False
                                 )
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [19] Telegram notification sent for buy #{idx}",
-                                    level="INFO"
-                                )
                                 
                                 # Записываем статистику операции Set TP
                                 try:
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [20] Logging statistics to Excel for buy #{idx}...",
-                                        level="INFO"
-                                    )
                                     btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                                     total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
                                     await log_statistics_to_excel(
@@ -1213,54 +1092,23 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         sz_decimals=sz_decimals,
                                         token_name=token_name
                                     )
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [20] Statistics logged to Excel for buy #{idx}",
-                                        level="INFO"
-                                    )
                                 except Exception as e:
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG SET_TP: [20] Failed to log statistics for buy #{idx}: {e}",
-                                        level="ERROR"
-                                    )
+                                    client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                                 
                                 # Обновляем last_buy_price на цену последней обработанной покупки
                                 last_buy_price = buy_price
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [21] Updated last_buy_price to ${buy_price:.2f} for buy #{idx}",
-                                    level="INFO"
-                                )
                                 
                             except Exception as e:
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [17-21] ERROR creating TP order for buy #{idx} (OID: {trade_oid}): {e}",
-                                    level="ERROR"
-                                )
                                 client.browser.log_message(f"❌ Failed to create TP order for buy oid {trade_oid}: {e}", level="ERROR")
                                 # Удаляем из обработанных, чтобы попробовать снова на следующей итерации
                                 client._processed_buy_trades.discard(trade_oid)
-                                client.browser.log_message(
-                                    f"🔍 DEBUG SET_TP: [22] Removed buy #{idx} (OID: {trade_oid}) from processed set due to error",
-                                    level="INFO"
-                                )
                         
                         # Прерываем цикл после создания TP ордеров
                         # Это дает время ордерам появиться в API перед следующей итерацией
-                        client.browser.log_message(
-                            f"🔍 DEBUG SET_TP: [23] Exiting module with continue (processed {len(new_buys)} buy(s))",
-                            level="INFO"
-                        )
-                        continue
-                    else:
-                        client.browser.log_message(
-                            "🔍 DEBUG SET_TP: [23] No new buys to process, module ends normally",
-                            level="INFO"
-                        )
+                        if new_buys:
+                            continue
                                                 
                 except Exception as e:
-                    client.browser.log_message(
-                        f"🔍 DEBUG SET_TP: [EXCEPTION] Module error: {e}",
-                        level="ERROR"
-                    )
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
                 
                 # Отладочная информация отключена для чистоты логов
