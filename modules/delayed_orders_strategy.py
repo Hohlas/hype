@@ -1653,6 +1653,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             else:
                                 # Размещение лимитного ордера на покупку
                                 try:
+                                    client.browser.log_message(f"try to place_order", level="INFO")
                                     order_result = await client.place_order(
                                         token=token_name,
                                         side="BUY",
@@ -1668,6 +1669,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         is_filled = False
                                         
                                         try:
+                                            client.browser.log_message(f"try to get response data", level="INFO")
                                             response_data = order_result.get('response', {})
                                             statuses = response_data.get('data', {}).get('statuses', [])
                                             if statuses and len(statuses) > 0:
@@ -1741,6 +1743,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         
                                         # Прерываем цикл после создания Averaging ордера
                                         # Это дает время ордеру появиться в API перед следующей итерацией
+                                        client.browser.log_message(f"enf of BuyLimit", level="INFO")
                                         continue
                                         
                                 except Exception as e:
