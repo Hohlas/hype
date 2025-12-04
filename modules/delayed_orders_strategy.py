@@ -1112,8 +1112,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         # Прерываем цикл после создания TP ордеров
                         # Это дает время ордерам появиться в API перед следующей итерацией
                         if new_buys:
-                            await async_sleep(10)
-                            # continue
+                            continue
                                                 
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
@@ -1679,6 +1678,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 )
                             else:
                                 # Размещение лимитного ордера на покупку
+                                client.browser.log_message("🔵 try to set BuyLimit ", level="INFO")
                                 try:
                                     order_result = await client.place_order(
                                         token=token_name,
@@ -1772,6 +1772,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         
                                 except Exception as e:
                                     client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
+                                client.browser.log_message("🔵 BuyLimit module end", level="INFO")    
                     else:
                         # Есть активные Buy Limit ордера - проверяем их актуальность
                         threshold = min_tp_price - float(step) * 2.5
