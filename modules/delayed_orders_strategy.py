@@ -1624,7 +1624,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client._last_buy_limit_filled_time = 0
                     
                     time_since_last_fill = time.time() - client._last_buy_limit_filled_time
-                    min_interval_seconds = 60  # Минимум 60 секунд между BuyLimit ордерами
+                    min_interval_seconds = 20  # Минимум 60 секунд между BuyLimit ордерами
                     
                     if not active_buy_limits:
                         # Проверяем, не был ли недавно исполнен BuyLimit ордер
