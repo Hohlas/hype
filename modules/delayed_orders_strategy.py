@@ -1006,25 +1006,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     latest_amount = None
                     latest_timestamp = None
                     
-                    if hasattr(client, '_pending_tp_orders') and client._pending_tp_orders:
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Found {len(client._pending_tp_orders)} pending TP orders from BuyLimit fills",
-                            level="INFO"
-                        )
-                        # Берем самую новую необработанную покупку
-                        for pending_order in client._pending_tp_orders:
-                            if pending_order.get('source') == 'BuyLimit_immediate_fill':
-                                pending_timestamp = pending_order.get('timestamp', 0)
-                                if latest_timestamp is None or pending_timestamp > latest_timestamp:
-                                    latest_price = pending_order.get('price')
-                                    latest_amount = pending_order.get('amount')
-                                    latest_timestamp = pending_timestamp
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG: Found pending BuyLimit fill: price={latest_price}, "
-                                        f"amount={latest_amount}, timestamp={format_timestamp(latest_timestamp)} ({latest_timestamp}), "
-                                        f"oid={pending_order.get('oid')}",
-                                        level="INFO"
-                                    )
+                    
                     
                     # ПРИОРИТЕТ 2: Если не нашли в сохраненных, проверяем историю сделок (как fallback)
                     if latest_timestamp is None:
