@@ -988,42 +988,32 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
                 try:
                     client.browser.log_message(f"Start of TP set", level="INFO")
-                    
-                    # Вспомогательная функция для преобразования timestamp в читаемый формат
-                    def format_timestamp(ts):
-                        """Преобразует timestamp (мс) в читаемый формат времени"""
-                        if ts == 'N/A' or ts is None:
-                            return 'N/A'
-                        try:
-                            # Timestamp в миллисекундах
-                            dt = datetime.fromtimestamp(ts / 1000)
-                            return dt.strftime('%Y-%m-%d %H:%M:%S')
-                        except:
-                            return str(ts)
-                    
-                    # ПРИОРИТЕТ 1: Проверяем сохраненные исполненные BuyLimit ордера (более надежный источник)
+                    # Получаем историю торговли (последние сделки)
+                    trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
+                    client.browser.log_message(
+                        f"🔍 DEBUG: Received {len(trades_history)} trades from API for {token_name}",
+                        level="INFO"
+                    )
+                    # Инициализируем переменные для последней покупки
                     latest_price = None
                     latest_amount = None
                     latest_timestamp = None
                     
-                    
-                    
-                    # ПРИОРИТЕТ 2: Если не нашли в сохраненных, проверяем историю сделок (как fallback)
-                    if latest_timestamp is None:
-                        client.browser.log_message(
-                            f"🔍 DEBUG: No pending orders found, checking trade history as fallback",
-                            level="INFO"
-                        )
-                        # Получаем историю торговли (последние сделки)
-                        trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
-                        client.browser.log_message(
-                            f"🔍 DEBUG: Received {len(trades_history)} trades from API for {token_name}",
-                            level="INFO"
-                        )
-                    
-                        if trades_history:
-                            # История уже отсортирована от новых к старым
-                            client.browser.log_message(f"🔍 DEBUG: Processing {len(trades_history)} trades from history", level="INFO")
+                    if trades_history:
+                        # История уже отсортирована от новых к старым
+                        # Вспомогательная функция для преобразования timestamp в читаемый формат
+                        def format_timestamp(ts):
+                            """Преобразует timestamp (мс) в читаемый формат времени"""
+                            if ts == 'N/A' or ts is None:
+                                return 'N/A'
+                            try:
+                                # Timestamp в миллисекундах
+                                dt = datetime.fromtimestamp(ts / 1000)
+                                return dt.strftime('%Y-%m-%d %H:%M:%S')
+                            except:
+                                return str(ts)
+                        
+                        client.browser.log_message(f"🔍 DEBUG: Processing {len(trades_history)} trades from history", level="INFO")
                         buy_trades_found = []  # Список всех найденных BUY сделок
                         for idx, trade in enumerate(trades_history):
                             trade_side = trade.get('side', '').upper()
@@ -1078,20 +1068,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             level="INFO"
                                         )
                         
-                        # Логируем все найденные BUY сделки
+                        # Логируем количество найденных BUY сделок
                         if buy_trades_found:
                             client.browser.log_message(
                                 f"🔍 DEBUG: Total BUY trades found: {len(buy_trades_found)}",
                                 level="INFO"
                             )
-                            for buy_trade in buy_trades_found:
-                                buy_time_str = format_timestamp(buy_trade['timestamp'])
-                                client.browser.log_message(
-                                    f"🔍 DEBUG: BUY[{buy_trade['idx']}]: price={buy_trade['price']}, "
-                                    f"amount={buy_trade['amount']}, timestamp={buy_time_str} ({buy_trade['timestamp']}), "
-                                    f"oid={buy_trade['oid']}",
-                                    level="INFO"
-                                )
                         else:
                             client.browser.log_message(
                                 f"🔍 DEBUG: No valid BUY trades found in history",
@@ -1212,17 +1194,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 except Exception as e:
                                     client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                                 
-                                # Удаляем обработанный ордер из списка pending orders
-                                if hasattr(client, '_pending_tp_orders') and client._pending_tp_orders:
-                                    # Удаляем ордер с таким же timestamp (самый надежный способ идентификации)
-                                    client._pending_tp_orders = [
-                                        po for po in client._pending_tp_orders 
-                                        if not (po.get('timestamp') == latest_timestamp and po.get('source') == 'BuyLimit_immediate_fill')
-                                    ]
-                                    client.browser.log_message(
-                                        f"🔍 DEBUG: Removed processed order from pending list. Remaining: {len(client._pending_tp_orders)}",
-                                        level="INFO"
-                                    )
                                                        
                                 # Прерываем цикл после создания TP ордера
                                 # Это дает время ордеру появиться в API перед следующей итерацией
@@ -1854,31 +1825,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     filled_sz = filled_data.get('totalSz', None)
                                                     if filled_sz:
                                                         token_amount = float(filled_sz)
-                                                    
-                                                    # Получаем ID ордера из ответа
-                                                    order_id = first_status.get('resting', {}).get('oid') or first_status.get('oid')
-                                                    
                                                     is_filled = True
                                                     client.browser.log_message(
-                                                        f"✅ BuyLimit: Order filled immediately at ${actual_price:.2f} (limit price ${target_buy_price:.2f}), oid={order_id}", 
-                                                        level="INFO"
-                                                    )
-                                                    
-                                                    # Сохраняем информацию о исполненном ордере для выставления TP
-                                                    if not hasattr(client, '_pending_tp_orders'):
-                                                        client._pending_tp_orders = []
-                                                    
-                                                    import time
-                                                    buy_trade_info = {
-                                                        'oid': order_id,
-                                                        'price': actual_price,
-                                                        'amount': token_amount,
-                                                        'timestamp': int(time.time() * 1000),
-                                                        'source': 'BuyLimit_immediate_fill'
-                                                    }
-                                                    client._pending_tp_orders.append(buy_trade_info)
-                                                    client.browser.log_message(
-                                                        f"🔍 DEBUG: Saved BuyLimit fill for TP: price={actual_price}, amount={token_amount}, oid={order_id}",
+                                                        f"✅ BuyLimit: Order filled immediately at ${actual_price:.2f} (limit price ${target_buy_price:.2f})", 
                                                         level="INFO"
                                                     )
                                         except Exception as e:
