@@ -1452,14 +1452,6 @@ class HyperliquidBrowser:
             # API вернет все сделки, затем мы ограничим результат до limit
             start_time = current_time - (7 * 24 * 60 * 60 * 1000)  # 7 дней назад
             
-            # Логируем временной диапазон запроса
-            current_time_str = datetime.fromtimestamp(current_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            start_time_str = datetime.fromtimestamp(start_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            self.log_message(
-                f"🔍 DEBUG: Requesting trades: startTime={start_time_str} ({start_time}), "
-                f"endTime={current_time_str} ({current_time})",
-                level="INFO"
-            )
             
             data = {
                 "type": "userFillsByTime",  # Правильный тип согласно документации
@@ -1499,12 +1491,6 @@ class HyperliquidBrowser:
                     raise Exception(f"Rate limit exceeded (429). Retry after {retry_after} seconds")
                 raise Exception(f'Failed to get orders history: {result}')
             
-            # Логируем общее количество сделок от API
-            total_trades = len(result) if isinstance(result, list) else 0
-            self.log_message(
-                f"🔍 DEBUG: API returned {total_trades} total trades (before filtering)",
-                level="INFO"
-            )
                 
             # Фильтруем ордера по токену
             filtered_orders = []
@@ -1526,11 +1512,6 @@ class HyperliquidBrowser:
                 if coin == asset_id or coin == token_name or coin == f"{token_name}-SPOT":
                     filtered_orders.append(trade)
             
-            # Логируем количество после фильтрации
-            self.log_message(
-                f"🔍 DEBUG: After filtering by {token_name} (asset_id={asset_id}): {len(filtered_orders)} trades",
-                level="INFO"
-            )
             
             # Сортируем сделки по времени (от новых к старым) для гарантии правильного порядка
             # Используем поле 'time' (timestamp в миллисекундах)
@@ -1541,27 +1522,11 @@ class HyperliquidBrowser:
             # Сортируем сделки с временем от новых к старым
             trades_with_time.sort(key=lambda x: x.get('time', 0), reverse=True)
             
-            # Логируем информацию о времени сделок
-            if trades_with_time:
-                newest_time = trades_with_time[0].get('time', 0)
-                oldest_time = trades_with_time[-1].get('time', 0) if len(trades_with_time) > 1 else newest_time
-                from datetime import datetime
-                newest_str = datetime.fromtimestamp(newest_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
-                oldest_str = datetime.fromtimestamp(oldest_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
-                self.log_message(
-                    f"🔍 DEBUG: Trades time range: newest={newest_str} ({newest_time}), oldest={oldest_str} ({oldest_time})",
-                    level="INFO"
-                )
-            
             # Объединяем: сначала сделки с временем (отсортированные), потом без времени
             filtered_orders = trades_with_time + trades_without_time
                     
             # Возвращаем первые N сделок (самые новые)
             result_trades = filtered_orders[:limit]
-            self.log_message(
-                f"🔍 DEBUG: Returning {len(result_trades)} trades (limit={limit})",
-                level="INFO"
-            )
             return result_trades
             
         except Exception as e:
