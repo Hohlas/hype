@@ -1448,9 +1448,9 @@ class HyperliquidBrowser:
             import time
             from datetime import datetime
             current_time = int(time.time() * 1000)  # Текущее время в миллисекундах
-            # Устанавливаем очень старое время (10 лет назад) для получения всех сделок
+            # Устанавливаем время 7 дней назад для проверки лимита API
             # API вернет все сделки, затем мы ограничим результат до limit
-            start_time = current_time - (10 * 365 * 24 * 60 * 60 * 1000)  # 10 лет назад (все сделки)
+            start_time = current_time - (7 * 24 * 60 * 60 * 1000)  # 7 дней назад
             
             # Логируем временной диапазон запроса
             current_time_str = datetime.fromtimestamp(current_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
