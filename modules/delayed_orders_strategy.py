@@ -987,7 +987,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Этот модуль работает независимо от блоков покупки.
                 # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
                 try:
-                    client.browser.log_message(f"Start of TP set", level="INFO")
+                    # client.browser.log_message(f"Start of TP set", level="INFO")
                     # Получаем историю торговли (последние сделки)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
                     # Инициализируем переменные для последней покупки
@@ -1515,7 +1515,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if not active_buy_limits:
 
                     client.browser.log_message(f"Start of averaging", level="INFO")
-                    await asyncio.sleep(10) # убрать (пауза перед созданием ордера)
+                    # await asyncio.sleep(10) # убрать (пауза перед созданием ордера)
                     # Расчет целевой цены для лимитного ордера
                     if min_tp_price > 0:
                         target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
@@ -1568,12 +1568,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     is_filled = False
                                 
                                 try:
-                                    client.browser.log_message(f"try to get response data", level="INFO")
                                     response_data = order_result.get('response', {})
                                     statuses = response_data.get('data', {}).get('statuses', [])
                                     # Логируем количество статусов для отладки
                                     if statuses:
-                                        client.browser.log_message(f"🔍 DEBUG: Got {len(statuses)} statuses in response", level="INFO")
                                         # Выводим информацию о ВСЕХ статусах для диагностики
                                         for idx, status in enumerate(statuses):
                                             client.browser.log_message(f"🔍 DEBUG: Status[{idx}]: {status.get('oid', 'NO_OID')[:8]}... - {list(status.keys())}", level="INFO")
@@ -1654,7 +1652,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Прерываем цикл после создания Averaging ордера
                                 # Это дает время ордеру появиться в API перед следующей итерацией
-                                client.browser.log_message(f"enf of BuyLimit", level="INFO")
                                 continue
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
