@@ -1270,11 +1270,18 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 buy_fee_str = buy_trade.get('fee', '0')
                                                 buy_fee_token = buy_trade.get('feeToken', '')
                                                 
+                                                # Нормализуем токен комиссии: если начинается с 'U' (кроме USDC), убираем 'U'
+                                                # Примеры: UBTC → BTC, UETH → ETH, UXXX → XXX
+                                                if buy_fee_token.startswith('U') and buy_fee_token != 'USDC':
+                                                    normalized_fee_token = buy_fee_token[1:]  # Убираем первый символ 'U'
+                                                else:
+                                                    normalized_fee_token = buy_fee_token
+                                                
                                                 # Рассчитываем комиссию покупки в USDC
                                                 buy_fee_usdc = 0.0
-                                                if buy_fee_token == 'USDC':
+                                                if buy_fee_token == 'USDC' or normalized_fee_token == 'USDC':
                                                     buy_fee_usdc = float(buy_fee_str)
-                                                elif buy_fee_token == token_name:
+                                                elif normalized_fee_token == token_name or buy_fee_token == token_name:
                                                     # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене покупки
                                                     buy_fee_usdc = float(buy_fee_str) * buy_price
                                                 
@@ -1287,9 +1294,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     sell_fee_str = sell_trade_from_history.get('fee', '0')
                                                     sell_fee_token = sell_trade_from_history.get('feeToken', 'USDC')
                                                     
-                                                    if sell_fee_token == 'USDC':
+                                                    # Нормализуем токен комиссии продажи: если начинается с 'U' (кроме USDC), убираем 'U'
+                                                    # Примеры: UBTC → BTC, UETH → ETH, UXXX → XXX
+                                                    if sell_fee_token.startswith('U') and sell_fee_token != 'USDC':
+                                                        normalized_sell_fee_token = sell_fee_token[1:]  # Убираем первый символ 'U'
+                                                    else:
+                                                        normalized_sell_fee_token = sell_fee_token
+                                                    
+                                                    if sell_fee_token == 'USDC' or normalized_sell_fee_token == 'USDC':
                                                         sell_fee_usdc = float(sell_fee_str)
-                                                    elif sell_fee_token == token_name:
+                                                    elif normalized_sell_fee_token == token_name or sell_fee_token == token_name:
                                                         # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене продажи
                                                         sell_fee_usdc = float(sell_fee_str) * tp_price
                                                 
@@ -1506,14 +1520,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 
                 
-                # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
+                # 1. Усреднение + first buy: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 # Проверяем, есть ли активные Buy Limit ордера
-                active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
-                                
+                active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]       
                 if not active_buy_limits:
-
-                    client.browser.log_message(f"Start of averaging", level="INFO")
-                    # await asyncio.sleep(10) # убрать (пауза перед созданием ордера)
                     # Расчет целевой цены для лимитного ордера
                     if min_tp_price > 0:
                         target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
@@ -1666,7 +1676,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
-                # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
+                # 2. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
                     # Агрессивность пирамидинга: current_price > max_TP_price - STEP * AGGR
                     # По умолчанию AGGR=0.5, если нет в settings
