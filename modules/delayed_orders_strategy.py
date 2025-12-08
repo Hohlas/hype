@@ -1506,321 +1506,199 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     #     level="INFO"
                     # )
                 
-                # Отладочная информация (отключено для чистоты логов)
-                # client.browser.log_message(
-                #     f"🔍 DEBUG: Current=${current_price:.2f}, has_order_below={has_order_below}, min_TP=${min_tp_price:.2f}, max_TP=${max_tp_price:.2f}",
-                #     level="DEBUG"
-                # )
                 
-                # Анализ текущей ситуации
-                if min_tp_price > 0:
-                    trigger_level = min_tp_price - float(step) * 2
-                    # client.browser.log_message(
-                    #     f"📊 Strategy Analysis: min_TP=${min_tp_price:.2f}, trigger_level=${trigger_level:.2f}, current=${current_price:.2f}",
-                    #     level="INFO"
-                    # )
-                    if current_price < trigger_level:
-                        # Лог "AVERAGING TRIGGERED" убран - будет показан в объединенном логе
-                        pass
-                    else:
-                        # Лог "Waiting for averaging trigger" убран для чистоты логов
-                        pass
-                else:
-                    # Выводим сообщение только один раз, если нет TP ордеров
-                    if not hasattr(client, '_no_tp_logged') or not client._no_tp_logged:
-                        client.browser.log_message("🔍 No TP orders found - first run or no positions", level="INFO")
-                        client._no_tp_logged = True
                 
-                # Детальная информация о BUY ордерах (отключено для чистоты логов)
-                # if buy_orders:
-                #     client.browser.log_message(f"🔍 BUY Orders Analysis:", level="DEBUG")
-                #     for order in buy_orders:
-                #         order_price = float(order.get("limitPx", 0))
-                #         is_below = order_price < current_price
-                #         client.browser.log_message(
-                #             f"  BUY ${order_price:.2f} {'BELOW' if is_below else 'ABOVE'} current ${current_price:.2f}",
-                #             level="DEBUG"
-                #         )
-                # else:
-                #     client.browser.log_message("🔍 No BUY orders found", level="DEBUG")
-                
-                # 1. При отсутствии TP ордеров: маркет покупка + TP ордер
-                if min_tp_price == 0 and max_tp_price == 0:
-                    client.browser.log_message(
-                        f"🚀 No TP Orders: creating MARKET BUY at current price ${current_price:.2f}",
-                        level="INFO"
-                    )
-                    
-                    # Получаем баланс USDC для проверки
-                    usdc_balance = all_balances.get("USDC", 0.0)
-                    
-                    # Проверяем достаточность средств перед размещением ордера
-                    if usdc_balance < usdc_amount:
-                        client.browser.log_message(
-                            f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for first position",
-                            level="WARNING"
-                        )
-                        continue  # Пропускаем этот цикл
-                    
-                    # Отправляем уведомление о первой позиции (обновим после получения фактической цены)
-                    await send_tg_notification(
-                        client,
-                        f"🚀 <b>First Position</b>\nBUY {token_name} at ${current_price:.2f}",
-                        save_to_report=False
-                    )
-                    
-                    order_result = await client.place_order(
-                        token=token_name,
-                        side="BUY",
-                        order_type="MARKET",
-                        usdc_amount=usdc_amount,
-                        price=current_price
-                    )
-                    
-                    # Обновляем баланс после маркет-ордера на покупку
-                    all_balances = await client.browser.get_all_balances()
-                    client._previous_usdc_balance = all_balances.get("USDC", 0.0)
-                    
-                    # Получаем количество токенов из результата ордера
-                    token_amount = order_result.get('quantity', usdc_amount / current_price)
-                    
-                    # Получаем фактическую цену исполнения из API ответа
-                    actual_price = normalize_price(current_price, sz_decimals)  # fallback
-                    try:
-                        response_data = order_result.get('response', {})
-                        statuses = response_data.get('data', {}).get('statuses', [])
-                        if statuses and len(statuses) > 0:
-                            first_status = statuses[0]
-                            if 'filled' in first_status:
-                                filled_data = first_status['filled']
-                                actual_price = normalize_price(float(filled_data.get('avgPx', current_price)), sz_decimals)
-                                client.browser.log_message(
-                                    f"✅ First Position: Actual fill price ${actual_price:.2f} (expected ${current_price:.2f})", 
-                                    level="INFO"
-                                )
-                            else:
-                                client.browser.log_message(
-                                    f"⚠️ First Position: Order not filled yet, using current price: ${current_price:.2f}", 
-                                    level="INFO"
-                                )
-                    except Exception as e:
-                        client.browser.log_message(f"Failed to extract First Position fill price from API: {e}", level="ERROR")
-                    
-                    # Отправляем дополнительное уведомление с фактической ценой исполнения
-                    if actual_price != current_price:
-                        await send_tg_notification(
-                            client,
-                            f"✅ <b>First Position Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
-                            save_to_report=False
-                        )
-                    
-                    # Записываем статистику операции First Position с фактической ценой
-                    try:
-                        usdc_balance = all_balances.get("USDC", 0.0)
-                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                        total_value = usdc_balance + (btc_balance * actual_price)
-                        await log_statistics_to_excel(
-                            client=client,
-                            operation="First Position",
-                            btc_amount=token_amount,
-                            price=actual_price,
-                            usdc_balance=usdc_balance,
-                            btc_balance=btc_balance,
-                            total_value=total_value,
-                            sz_decimals=sz_decimals,
-                            token_name=token_name
-                        )
-                    except Exception as e:
-                        client.browser.log_message(f"Failed to log First Position statistics: {e}", level="ERROR")
-                    
-                    # Прерываем цикл после создания First Position ордера
-                    # Это дает время ордеру появиться в API перед следующей итерацией
-                    continue
-                    
                 # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
-                if min_tp_price > 0:
+                # Проверяем, есть ли активные Buy Limit ордера
+                active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
+                
+                
+                
+                
+                
+                # Защита от повторных ордеров: проверяем время последнего BuyLimit
+                # Если BuyLimit был исполнен недавно, не выставляем новый сразу
+                import time
+                if not hasattr(client, '_last_buy_limit_filled_time'):
+                    client._last_buy_limit_filled_time = 0
+                
+                time_since_last_fill = time.time() - client._last_buy_limit_filled_time
+                min_interval_seconds = 20  # Минимум 60 секунд между BuyLimit ордерами
+                
+                if not active_buy_limits:
+
                     client.browser.log_message(f"Start of averaging", level="INFO")
                     await asyncio.sleep(10) # убрать (пауза перед созданием ордера)
                     # Расчет целевой цены для лимитного ордера
-                    target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
-                    
+                    if min_tp_price > 0:
+                        target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
+                    else:
+                        target_buy_price = normalize_price(current_price - float(step), sz_decimals)
+                
                     # Используем уже полученный баланс USDC из all_balances
                     usdc_balance = all_balances.get("USDC", 0.0)
-                    
-                    # Проверяем, есть ли активные Buy Limit ордера
-                    active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
-                    
-                    # Защита от повторных ордеров: проверяем время последнего BuyLimit
-                    # Если BuyLimit был исполнен недавно, не выставляем новый сразу
-                    import time
-                    if not hasattr(client, '_last_buy_limit_filled_time'):
-                        client._last_buy_limit_filled_time = 0
-                    
-                    time_since_last_fill = time.time() - client._last_buy_limit_filled_time
-                    min_interval_seconds = 20  # Минимум 60 секунд между BuyLimit ордерами
-                    
-                    if not active_buy_limits:
-                        # Проверяем, не был ли недавно исполнен BuyLimit ордер
-                        if time_since_last_fill < min_interval_seconds:
-                            # Недавно был исполнен BuyLimit, пропускаем создание нового
-                            # client.browser.log_message(
-                            #     f"⏰ Skipping BuyLimit: Last fill was {time_since_last_fill:.0f}s ago (min interval: {min_interval_seconds}s)",
-                            #     level="INFO"
-                            # )
-                            pass  # Пропускаем создание нового ордера
-                        # Нет активного Buy Limit - размещаем новый лимитный ордер (только если прошло достаточно времени)
-                        elif time_since_last_fill >= min_interval_seconds:
-                            # Проверка баланса
-                            if usdc_balance < usdc_amount:
-                                if can_log_warning_message(client.label, "insufficient_usdc_averaging", cooldown_minutes=10):
-                                    client.browser.log_message(
-                                        f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
-                                        level="WARNING"
-                                    )
-                            else:
-                                # Проверка минимального размера ордера перед созданием
-                                # Для LIMIT ордера используем цену лимитного ордера для проверки
-                                is_valid, reason = await check_minimum_order_size(
-                                    client,
-                                    token_name,
-                                    usdc_amount,
-                                    min_qty,
-                                    min_notional,
-                                    checked_price=target_buy_price
+
+                    # Проверяем, не был ли недавно исполнен BuyLimit ордер
+                    if time_since_last_fill < min_interval_seconds:
+                        # Недавно был исполнен BuyLimit, пропускаем создание нового
+                        # client.browser.log_message(
+                        #     f"⏰ Skipping BuyLimit: Last fill was {time_since_last_fill:.0f}s ago (min interval: {min_interval_seconds}s)",
+                        #     level="INFO"
+                        # )
+                        pass  # Пропускаем создание нового ордера
+                    # Нет активного Buy Limit - размещаем новый лимитный ордер (только если прошло достаточно времени)
+                    elif time_since_last_fill >= min_interval_seconds:
+                        # Проверка баланса
+                        if usdc_balance < usdc_amount:
+                            if can_log_warning_message(client.label, "insufficient_usdc_averaging", cooldown_minutes=10):
+                                client.browser.log_message(
+                                    f"⚠️ Insufficient USDC balance: ${usdc_balance:.2f} < ${usdc_amount:.2f} required for averaging",
+                                    level="WARNING"
                                 )
-                                
-                                if not is_valid:
-                                    client.browser.log_message(
-                                        f"⚠️ Buy Limit order skipped: {reason}",
-                                        level="WARNING"
-                                    )
-                                else:
-                                    # Размещение лимитного ордера на покупку
-                                    try:
-                                        client.browser.log_message(f"try to place_order", level="INFO")
-                                        order_result = await client.place_order(
-                                            token=token_name,
-                                            side="BUY",
-                                            order_type="LIMIT",
-                                            usdc_amount=usdc_amount,
-                                            price=target_buy_price
-                                        )
-                                        
-                                        if order_result:
-                                            # Получаем фактическую цену исполнения из API ответа (если ордер был исполнен сразу)
-                                            actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
-                                            token_amount = usdc_amount / target_buy_price
-                                            is_filled = False
-                                        
-                                        try:
-                                            client.browser.log_message(f"try to get response data", level="INFO")
-                                            response_data = order_result.get('response', {})
-                                            statuses = response_data.get('data', {}).get('statuses', [])
-                                            # Логируем количество статусов для отладки
-                                            if statuses:
-                                                client.browser.log_message(f"🔍 DEBUG: Got {len(statuses)} statuses in response", level="INFO")
-                                                # Выводим информацию о ВСЕХ статусах для диагностики
-                                                for idx, status in enumerate(statuses):
-                                                    client.browser.log_message(f"🔍 DEBUG: Status[{idx}]: {status.get('oid', 'NO_OID')[:8]}... - {list(status.keys())}", level="INFO")
-                                            if statuses and len(statuses) > 0:
-                                                # ВАЖНО: Обрабатываем только ПЕРВЫЙ статус, чтобы не было дублирования
-                                                # Если API возвращает несколько статусов, это могут быть разные ордера
-                                                # Но мы размещали только ОДИН ордер, поэтому берем только первый статус
-                                                first_status = statuses[0]
-                                                if 'filled' in first_status:
-                                                    filled_data = first_status['filled']
-                                                    actual_price = normalize_price(float(filled_data.get('avgPx', target_buy_price)), sz_decimals)
-                                                    # Получаем фактическое количество из ответа, если доступно
-                                                    filled_sz = filled_data.get('totalSz', None)
-                                                    if filled_sz:
-                                                        token_amount = float(filled_sz)
-                                                    is_filled = True
-                                                    client.browser.log_message(
-                                                        f"✅ BuyLimit: Order filled immediately at ${actual_price:.2f} (limit price ${target_buy_price:.2f})", 
-                                                        level="INFO"
-                                                    )
-                                        except Exception as e:
-                                            client.browser.log_message(f"Failed to extract BuyLimit fill price from API: {e}", level="ERROR")
-                                        
-                                        # Обновляем баланс после исполнения ордера (если был исполнен)
-                                        if is_filled:
-                                            all_balances = await client.browser.get_all_balances()
-                                            usdc_balance = all_balances.get("USDC", 0.0)
-                                            # Сохраняем время исполнения для защиты от повторных ордеров
-                                            import time
-                                            client._last_buy_limit_filled_time = time.time()
-                                        
-                                        # Логируем с фактической или расчетной ценой
-                                        if is_filled:
-                                            client.browser.log_message(
-                                                f"📉 BuyLimit filled - ${usdc_amount:.2f} at ${actual_price:.2f}",
-                                                level="INFO"
-                                            )
-                                        else:
-                                            client.browser.log_message(
-                                                f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                                level="INFO"
-                                            )
-                                        
-                                        # Отправляем уведомление в Telegram
-                                        if is_filled:
-                                            await send_tg_notification(
-                                                client,
-                                                f"📉 <b>BuyLimit filled</b>\n${usdc_amount:.2f} at ${actual_price:.2f}",
-                                                save_to_report=False
-                                            )
-                                        else:
-                                            await send_tg_notification(
-                                                client,
-                                                f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                                save_to_report=False
-                                            )
-                                        
-                                        # Записываем статистику операции с фактической ценой исполнения (если ордер был исполнен)
-                                        try:
-                                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                                            total_value = usdc_balance + (btc_balance * current_price)
-                                            # Для лимитного ордера используем целевую цену и расчетное количество
-                                            token_amount = usdc_amount / target_buy_price
-                                            await log_statistics_to_excel(
-                                                client=client,
-                                                operation="set BuyLimit",
-                                                btc_amount=token_amount,
-                                                price=actual_price,  # Используем фактическую цену исполнения, если ордер был исполнен
-                                                usdc_balance=usdc_balance,
-                                                btc_balance=btc_balance,
-                                                total_value=total_value,
-                                                orders=open_orders,
-                                                sz_decimals=sz_decimals,
-                                                token_name=token_name
-                                            )
-                                        except Exception as e:
-                                            client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
-                                        
-                                        # Прерываем цикл после создания Averaging ордера
-                                        # Это дает время ордеру появиться в API перед следующей итерацией
-                                        client.browser.log_message(f"enf of BuyLimit", level="INFO")
-                                        continue
-                                    except Exception as e:
-                                        client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
-                    else:
-                        # Есть активные Buy Limit ордера - проверяем их актуальность
-                        threshold = min_tp_price - float(step) * 2.5
-                        
-                        for order in active_buy_limits:
-                            order_price = float(order.get("limitPx", 0))
-                            order_id = order.get("oid")
+                        else:
+                            # Проверка минимального размера ордера перед созданием
+                            # Для LIMIT ордера используем цену лимитного ордера для проверки
+                            is_valid, reason = await check_minimum_order_size(
+                                client,
+                                token_name,
+                                usdc_amount,
+                                min_qty,
+                                min_notional,
+                                checked_price=target_buy_price
+                            )
                             
-                            if order_price < threshold:
-                                # Ордер слишком далеко - отменяем его
+                            if not is_valid:
+                                client.browser.log_message(
+                                    f"⚠️ Buy Limit order skipped: {reason}",
+                                    level="WARNING"
+                                )
+                            else:
+                                # Размещение лимитного ордера на покупку
                                 try:
-                                    await client.browser.cancel_order(token_name, order_id)
-                                    client.browser.log_message(
-                                        f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
-                                        level="INFO"
+                                    client.browser.log_message(f"try to place_order", level="INFO")
+                                    order_result = await client.place_order(
+                                        token=token_name,
+                                        side="BUY",
+                                        order_type="LIMIT",
+                                        usdc_amount=usdc_amount,
+                                        price=target_buy_price
                                     )
+                                    
+                                    if order_result:
+                                        # Получаем фактическую цену исполнения из API ответа (если ордер был исполнен сразу)
+                                        actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
+                                        token_amount = usdc_amount / target_buy_price
+                                        is_filled = False
+                                    
+                                    try:
+                                        client.browser.log_message(f"try to get response data", level="INFO")
+                                        response_data = order_result.get('response', {})
+                                        statuses = response_data.get('data', {}).get('statuses', [])
+                                        # Логируем количество статусов для отладки
+                                        if statuses:
+                                            client.browser.log_message(f"🔍 DEBUG: Got {len(statuses)} statuses in response", level="INFO")
+                                            # Выводим информацию о ВСЕХ статусах для диагностики
+                                            for idx, status in enumerate(statuses):
+                                                client.browser.log_message(f"🔍 DEBUG: Status[{idx}]: {status.get('oid', 'NO_OID')[:8]}... - {list(status.keys())}", level="INFO")
+                                        if statuses and len(statuses) > 0:
+                                            # ВАЖНО: Обрабатываем только ПЕРВЫЙ статус, чтобы не было дублирования
+                                            # Если API возвращает несколько статусов, это могут быть разные ордера
+                                            # Но мы размещали только ОДИН ордер, поэтому берем только первый статус
+                                            first_status = statuses[0]
+                                            if 'filled' in first_status:
+                                                filled_data = first_status['filled']
+                                                actual_price = normalize_price(float(filled_data.get('avgPx', target_buy_price)), sz_decimals)
+                                                # Получаем фактическое количество из ответа, если доступно
+                                                filled_sz = filled_data.get('totalSz', None)
+                                                if filled_sz:
+                                                    token_amount = float(filled_sz)
+                                                is_filled = True
+                                                client.browser.log_message(
+                                                    f"✅ BuyLimit: Order filled immediately at ${actual_price:.2f} (limit price ${target_buy_price:.2f})", 
+                                                    level="INFO"
+                                                )
+                                    except Exception as e:
+                                        client.browser.log_message(f"Failed to extract BuyLimit fill price from API: {e}", level="ERROR")
+                                    
+                                    # Обновляем баланс после исполнения ордера (если был исполнен)
+                                    if is_filled:
+                                        all_balances = await client.browser.get_all_balances()
+                                        usdc_balance = all_balances.get("USDC", 0.0)
+                                        # Сохраняем время исполнения для защиты от повторных ордеров
+                                        import time
+                                        client._last_buy_limit_filled_time = time.time()
+                                    
+                                    # Логируем с фактической или расчетной ценой
+                                    if is_filled:
+                                        client.browser.log_message(
+                                            f"📉 BuyLimit filled - ${usdc_amount:.2f} at ${actual_price:.2f}",
+                                            level="INFO"
+                                        )
+                                    else:
+                                        client.browser.log_message(
+                                            f"📉 set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                            level="INFO"
+                                        )
+                                    
+                                    # Отправляем уведомление в Telegram
+                                    if is_filled:
+                                        await send_tg_notification(
+                                            client,
+                                            f"📉 <b>BuyLimit filled</b>\n${usdc_amount:.2f} at ${actual_price:.2f}",
+                                            save_to_report=False
+                                        )
+                                    else:
+                                        await send_tg_notification(
+                                            client,
+                                            f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
+                                            save_to_report=False
+                                        )
+                                    
+                                    # Записываем статистику операции с фактической ценой исполнения (если ордер был исполнен)
+                                    try:
+                                        btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                        total_value = usdc_balance + (btc_balance * current_price)
+                                        # Для лимитного ордера используем целевую цену и расчетное количество
+                                        token_amount = usdc_amount / target_buy_price
+                                        await log_statistics_to_excel(
+                                            client=client,
+                                            operation="set BuyLimit",
+                                            btc_amount=token_amount,
+                                            price=actual_price,  # Используем фактическую цену исполнения, если ордер был исполнен
+                                            usdc_balance=usdc_balance,
+                                            btc_balance=btc_balance,
+                                            total_value=total_value,
+                                            orders=open_orders,
+                                            sz_decimals=sz_decimals,
+                                            token_name=token_name
+                                        )
+                                    except Exception as e:
+                                        client.browser.log_message(f"Failed to log Averaging statistics: {e}", level="ERROR")
+                                    
+                                    # Прерываем цикл после создания Averaging ордера
+                                    # Это дает время ордеру появиться в API перед следующей итерацией
+                                    client.browser.log_message(f"enf of BuyLimit", level="INFO")
+                                    continue
                                 except Exception as e:
-                                    client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
+                                    client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
+                else:
+                    # Есть активные Buy Limit ордера - проверяем их актуальность
+                    threshold = min_tp_price - float(step) * 2.5
+                    
+                    for order in active_buy_limits:
+                        order_price = float(order.get("limitPx", 0))
+                        order_id = order.get("oid")
+                        
+                        if order_price < threshold:
+                            # Ордер слишком далеко - отменяем его
+                            try:
+                                await client.browser.cancel_order(token_name, order_id)
+                                client.browser.log_message(
+                                    f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
+                                    level="INFO"
+                                )
+                            except Exception as e:
+                                client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
                 # 3. Пирамидинг: маркет покупка при current_price > max_TP_price - STEP/2
                 if max_tp_price > 0:
