@@ -1106,8 +1106,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                        
                                 # Прерываем цикл после создания TP ордера
                                 # Это дает время ордеру появиться в API перед следующей итерацией
-                                client.browser.log_message(f"End of TP set", level="INFO")
-                                await asyncio.sleep(10)
                                 continue
                                                 
                             except Exception as e:
@@ -1570,15 +1568,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 try:
                                     response_data = order_result.get('response', {})
                                     statuses = response_data.get('data', {}).get('statuses', [])
-                                    # Логируем количество статусов для отладки
-                                    if statuses:
-                                        # Выводим информацию о ВСЕХ статусах для диагностики
-                                        for idx, status in enumerate(statuses):
-                                            client.browser.log_message(f"🔍 DEBUG: Status[{idx}]: {status.get('oid', 'NO_OID')[:8]}... - {list(status.keys())}", level="INFO")
                                     if statuses and len(statuses) > 0:
                                         # ВАЖНО: Обрабатываем только ПЕРВЫЙ статус, чтобы не было дублирования
                                         # Если API возвращает несколько статусов, это могут быть разные ордера
-                                        # Но мы размещали только ОДИН ордер, поэтому берем только первый статус
                                         first_status = statuses[0]
                                         if 'filled' in first_status:
                                             filled_data = first_status['filled']
