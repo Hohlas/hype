@@ -889,7 +889,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
-        last_buy_timestamp = 0 # удалить
+        # last_buy_timestamp = 0 # удалить (ставит тейк на последнюю покупку)
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
         status_interval = 600  # 10 минут в секундах
@@ -1640,7 +1640,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # 2. Усреднение: лимитный ордер на покупку при current_price < min_TP_price - STEP*2
                 if min_tp_price > 0:
                     client.browser.log_message(f"Start of averaging", level="INFO")
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(10) # убрать (пауза перед созданием ордера)
                     # Расчет целевой цены для лимитного ордера
                     target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
                     
