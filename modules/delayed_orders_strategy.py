@@ -889,7 +889,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
-        # last_buy_timestamp = 0
+        last_buy_timestamp = 0 # удалить
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
         status_interval = 600  # 10 минут в секундах
