@@ -1348,9 +1348,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 # Предполагаем, что покупка была на STEP ниже
                                                 buy_price = tp_price - float(settings.STEP)
                                                 
-                                                # Учитываем комиссию И при покупке, И при продаже (0.0144% = 0.000144)
-                                                buy_commission = filled_qty * buy_price * 0.000144  # Комиссия при покупке
-                                                sell_commission = filled_qty * tp_price * 0.000144  # Комиссия при продаже
+                                                # Учитываем комиссию И при покупке, И при продаже (0.0384% = 0.000384)
+                                                buy_commission = filled_qty * buy_price * 0.000384  # Комиссия при покупке
+                                                sell_commission = filled_qty * tp_price * 0.000384  # Комиссия при продаже
                                                 
                                                 # Чистая прибыль = STEP - обе комиссии
                                                 step_profit = filled_qty * float(settings.STEP)
