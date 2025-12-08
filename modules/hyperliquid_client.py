@@ -217,12 +217,12 @@ class HyperliquidClient:
                 actual_notional = rounded_quantity * float(price)
                 
                 # Логирование для отладки
-                self.browser.log_message(
-                    f"🔍 rounded_quantity={rounded_quantity:.{sz_decimals}f}, "
-                    f"actual_notional=${actual_notional:.2f}, price=${price:.2f}, "
-                    f"notional=${min_notional:.2f}",
-                    level="INFO"
-                )
+                # self.browser.log_message(
+                #     f"🔍 rounded_quantity={rounded_quantity:.{sz_decimals}f}, "
+                #     f"actual_notional=${actual_notional:.2f}, price=${price:.2f}, "
+                #     f"notional=${min_notional:.2f}",
+                #     level="INFO"
+                # )
                 
                 if actual_notional < min_notional:
                     # Автоматически увеличиваем количество до минимума
