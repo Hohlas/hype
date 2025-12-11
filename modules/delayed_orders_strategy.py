@@ -633,7 +633,9 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
     Отправляет уведомление в Telegram немедленно (без ожидания окончания работы модуля).
     """
     try:
-        await TgReport().send_log(logs=text)
+        # Добавляем название кошелька перед сообщением для Telegram
+        tg_message = f"{client.label}: {text}"
+        await TgReport().send_log(logs=tg_message)
         
         if save_to_report:
             await client.db.append_report(
