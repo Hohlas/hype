@@ -1065,13 +1065,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     # Проверяем, есть ли новая покупка только если нашли покупку в истории
                     if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
                         is_new_buy = False
+                        
                         if last_buy_timestamp is None:
                             # Первая покупка - всегда новая
                             is_new_buy = True
                         elif latest_timestamp > last_buy_timestamp:
                             # Покупка с более поздним timestamp - новая покупка
                             is_new_buy = True
-                                
+                        client.browser.log_message(
+                            f"🔍 SET_TP: last_buy_timestamp={last_buy_timestamp}, latest_timestamp={latest_timestamp}, is_new_buy={is_new_buy}",level="INFO")        
                         if is_new_buy:
                             # Обнаружена новая покупка                  
                             # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
