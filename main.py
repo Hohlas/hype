@@ -7,6 +7,7 @@ import sys
 from modules.retry import DataBaseError
 from modules.utils import async_sleep, send_warning_notification
 from modules.utils.modes import choose_mode
+from modules.wallet_loader import load_wallets_from_file
 from modules import *
 import settings
 
@@ -206,7 +207,20 @@ async def get_account_startup_info(module_data: dict):
 
 
 async def runner(mode: int):
-    sem = asyncio.Semaphore(settings.THREADS)
+    # Определяем количество потоков
+    threads_count = settings.THREADS
+    if threads_count == 0:
+        # Если THREADS = 0, определяем количество потоков по количеству аккаунтов
+        wallets = load_wallets_from_file("input_data/wallets.txt")
+        unique_accounts = list(set([w['label'] for w in wallets]))
+        threads_count = len(unique_accounts)
+        if threads_count == 0:
+            logger.warning("No accounts found in wallets.txt, using default THREADS = 1")
+            threads_count = 1
+        else:
+            logger.info(f"THREADS = 0, auto-detected {threads_count} threads from {len(unique_accounts)} account(s)")
+    
+    sem = asyncio.Semaphore(threads_count)
     
     if mode in [3]:
         all_groups = db.get_all_groups()

@@ -1,5 +1,5 @@
 # Hyperliquid Bot Settings
-version = "1.2.5"
+version = "1.2.7"
 
 # Risk Management
 
@@ -14,7 +14,7 @@ HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"        # Основной A
 HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестовая сеть
 
 # Threading
-THREADS = 1  # Количество одновременных потоков
+THREADS = 0  # Количество одновременных потоков
 
 # Database Settings (ОПЦИОНАЛЬНО - можно не использовать)
 # Если не используете базу данных, оставьте как есть
