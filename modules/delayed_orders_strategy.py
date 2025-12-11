@@ -916,34 +916,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
                 current_price = float(current_price_raw)
                 
-                # Дежурное статусное сообщение каждые 10 минут
-                current_time = time.time()
-                if current_time - last_status_time >= status_interval:
-                    # Получаем балансы
-                    usdc_balance = all_balances.get("USDC", 0.0)
-                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
-                    
-                    # Подсчитываем количество TP ордеров
-                    tp_count = len(tp_orders) if tp_orders else 0
-                    
-                    # Формируем информацию о последней покупке
-                    if last_buy_price and last_buy_timestamp:
-                        # Преобразуем timestamp из миллисекунд в читаемый формат
-                        buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
-                        buy_time_str = buy_datetime.strftime('%H:%M:%S')
-                        last_buy_info = f"LastBuy: {last_buy_price:.2f} at {buy_time_str}"
-                    else:
-                        last_buy_info = "LastBuy: N/A"
-                    
-                    # Выводим статусное сообщение
-                    client.browser.log_message(
-                        f"💚 Price: {current_price:.2f}, USDC:{usdc_balance:.2f}, "
-                        f"{token_name}:{btc_balance:.6f}, {last_buy_info}",
-                        level="INFO"
-                    )
-                    
-                    last_status_time = current_time
-                
                 # Разделяем лимитные ордера на две категории
                 # Маппинг токенов для поиска ордеров
                 token_mapping = {
@@ -975,6 +947,56 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         else:
                             # Ордер на покупку: side in ["BUY", "B"] или isBuy == True
                             buy_limit_orders.append(order)
+                
+                # Дежурное статусное сообщение каждые 10 минут
+                current_time = time.time()
+                if current_time - last_status_time >= status_interval:
+                    # Получаем балансы
+                    usdc_balance = all_balances.get("USDC", 0.0)
+                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                    
+                    # Подсчитываем количество TP ордеров
+                    tp_count = len(tp_orders) if tp_orders else 0
+                    
+                    # Формируем информацию о последней покупке
+                    if last_buy_price and last_buy_timestamp:
+                        # Преобразуем timestamp из миллисекунд в читаемый формат
+                        buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
+                        buy_time_str = buy_datetime.strftime('%H:%M:%S')
+                        last_buy_info = f"LastBuy={last_buy_price:.2f}"
+                    else:
+                        last_buy_info = "LastBuy=N/A"
+                    
+                    # Вычисляем активные Buy Limit ордера и их цену
+                    # По условиям алгоритма лимитный ордер на покупку всегда только один
+                    active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
+                    if active_buy_limits:
+                        # Берем цену первого (и единственного) Buy Limit ордера
+                        buy_limit_price = float(active_buy_limits[0].get("limitPx", 0))
+                        buy_limit_info = f"BuyLimit={buy_limit_price:.2f}"
+                    else:
+                        buy_limit_info = "BuyLimit=N/A"
+                    
+                    # Вычисляем минимальную цену TP ордеров
+                    min_tp_price = 0.0
+                    if tp_orders:
+                        tp_prices = [float(order.get("limitPx", 0)) for order in tp_orders if float(order.get("limitPx", 0)) > 0]
+                        if tp_prices:
+                            min_tp_price = min(tp_prices)
+                    
+                    if min_tp_price > 0:
+                        min_tp_info = f"min_TP={min_tp_price:.2f}"
+                    else:
+                        min_tp_info = "min_TP=N/A"
+                    
+                    # Выводим статусное сообщение
+                    client.browser.log_message(
+                        f"💚 Price:{current_price:.2f}, USDC:{usdc_balance:.2f}, "
+                        f"{token_name}:{btc_balance:.6f}, {last_buy_info}, {buy_limit_info}, {min_tp_info}",
+                        level="INFO"
+                    )
+                    
+                    last_status_time = current_time
                 
                 # Инициализация отслеживания баланса USDC для расчета прибыли
                 if not hasattr(client, '_previous_usdc_balance'):
