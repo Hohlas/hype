@@ -1550,7 +1550,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if min_tp_price > 0:
                         target_buy_price = normalize_price(min_tp_price - float(step) * 2, sz_decimals)
                     else:
-                        target_buy_price = normalize_price(current_price - float(step), sz_decimals)
+                        # target_buy_price = normalize_price(current_price - float(step), sz_decimals)
+                        target_buy_price = normalize_price(current_price, sz_decimals)
                 
                     # Используем уже полученный баланс USDC из all_balances
                     usdc_balance = all_balances.get("USDC", 0.0)
