@@ -232,9 +232,9 @@ async def runner(mode: int):
                 5: "Parse"
             }
             mode_name = mode_names.get(mode, f"Mode {mode}")
-            await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
+            await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}, THREADS={threads_count}")
             logger.info(f"🚀 Hyperliquid Bot Started, v.{settings.version}")
-            logger.info(f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
+            logger.info(f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}, THREADS={threads_count}")
             
             await asyncio.gather(*[
                 run_pair(group_data=group_data, mode=mode, sem=sem)
@@ -266,8 +266,9 @@ async def runner(mode: int):
                     account_infos.append(info)
             
             # Формируем стартовое сообщение
-            message_lines = [f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
-            log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
+            risk_step_threads_line = f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}, THREADS={threads_count}"
+            message_lines = [f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}", risk_step_threads_line]
+            log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", risk_step_threads_line]
             
             for info in account_infos:
                 account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, LimProfit = ${info['limit_profit']:.0f}"
