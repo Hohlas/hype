@@ -866,10 +866,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
         
-        # Получаем информацию о последней покупке из Trade History при старте 
+        # Загружаем last_buy_timestamp из БД
+        last_buy_timestamp = client.db.get_last_buy_timestamp(client.wallet_address, token_name)
+        
+        # Получаем информацию о последней покупке из Trade History при старте
         last_buy_price = None
         last_buy_size = None
-        last_buy_timestamp = None
+        last_buy_timestamp_from_history = None
         try:
             trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
             if trades_history:
@@ -880,11 +883,20 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if trade_side in ['BUY', 'B']:
                         last_buy_price = float(trade.get('px', 0))
                         last_buy_size = float(trade.get('sz', 0))
-                        last_buy_timestamp = trade.get('time', 0)
+                        last_buy_timestamp_from_history = trade.get('time', 0)
                         if last_buy_price > 0 and last_buy_size > 0:
                             break
         except Exception as e:
             client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
+        
+        # Если в БД нет значения, заполняем БД значением из истории (но не ставим TP)
+        if last_buy_timestamp is None and last_buy_timestamp_from_history is not None:
+            client.db.save_last_buy_timestamp(client.wallet_address, token_name, last_buy_timestamp_from_history)
+            last_buy_timestamp = last_buy_timestamp_from_history
+            client.browser.log_message(
+                f"💾 Initialized last_buy_timestamp from history: {last_buy_timestamp} (no TP will be set for this buy)",
+                level="INFO"
+            )
         
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
@@ -1079,6 +1091,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
                             last_buy_price = latest_price
                             last_buy_timestamp = latest_timestamp
+                            # Сохраняем в БД
+                            client.db.save_last_buy_timestamp(client.wallet_address, token_name, latest_timestamp)
                             
                             # Рассчитываем цену TP
                             tp_price = normalize_price(latest_price + float(step), sz_decimals)

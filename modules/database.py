@@ -25,6 +25,7 @@ class DataBase:
         self.modules_db_name = 'databases/modules.json'
         self.report_db_name = 'databases/report.json'
         self.stats_db_name = 'databases/stats.json'
+        self.last_buy_timestamps_db_name = 'databases/last_buy_timestamps.json'
         self.personal_key = None
         
         # Создаем каталог databases, если его нет
@@ -36,6 +37,7 @@ class DataBase:
             {"name": self.modules_db_name, "default": "{}"},
             {"name": self.report_db_name, "default": "{}"},
             {"name": self.stats_db_name, "default": "{}"},
+            {"name": self.last_buy_timestamps_db_name, "default": "{}"},
         ]:
             if not path.isfile(db["name"]):
                 with open(db["name"], 'w', encoding='utf-8') as f:
@@ -352,3 +354,54 @@ class DataBase:
         
         logger.critical('Dont Forget To Remove Private Keys from wallets.txt!')
         logger.info(f'Created Database for {len(new_modules)} accounts!\n')
+    
+    def get_last_buy_timestamp(self, wallet_address: str, token_name: str) -> int | None:
+        """
+        Получает last_buy_timestamp для кошелька и токена из БД.
+        
+        Args:
+            wallet_address: Адрес кошелька
+            token_name: Название токена (например, "BTC")
+            
+        Returns:
+            timestamp в миллисекундах или None, если не найдено
+        """
+        try:
+            if not path.isfile(self.last_buy_timestamps_db_name):
+                return None
+            
+            with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            key = f"{wallet_address}_{token_name}"
+            return data.get(key)
+        except Exception as e:
+            logger.error(f"Failed to get last_buy_timestamp: {e}")
+            return None
+    
+    def save_last_buy_timestamp(self, wallet_address: str, token_name: str, timestamp: int):
+        """
+        Сохраняет last_buy_timestamp для кошелька и токена в БД.
+        
+        Args:
+            wallet_address: Адрес кошелька
+            token_name: Название токена (например, "BTC")
+            timestamp: timestamp в миллисекундах
+        """
+        try:
+            # Загружаем существующие данные
+            if path.isfile(self.last_buy_timestamps_db_name):
+                with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            
+            # Обновляем значение
+            key = f"{wallet_address}_{token_name}"
+            data[key] = timestamp
+            
+            # Сохраняем обратно
+            with open(self.last_buy_timestamps_db_name, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save last_buy_timestamp: {e}")
