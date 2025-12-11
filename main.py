@@ -207,24 +207,23 @@ async def get_account_startup_info(module_data: dict):
 
 
 async def runner(mode: int):
-    # Определяем количество потоков
+    # Инициализируем threads_count значением из settings
     threads_count = settings.THREADS
-    if threads_count == 0:
-        # Если THREADS = 0, определяем количество потоков по количеству аккаунтов
-        wallets = load_wallets_from_file("input_data/wallets.txt")
-        unique_accounts = list(set([w['label'] for w in wallets]))
-        threads_count = len(unique_accounts)
-        if threads_count == 0:
-            logger.warning("No accounts found in wallets.txt, using default THREADS = 1")
-            threads_count = 1
-        else:
-            logger.info(f"THREADS = 0, auto-detected {threads_count} threads from {len(unique_accounts)} account(s)")
-    
-    sem = asyncio.Semaphore(threads_count)
     
     if mode in [3]:
         all_groups = db.get_all_groups()
         if all_groups != 'No more accounts left':
+            # Для режима 3 (pair trading) определяем threads_count после загрузки групп
+            if threads_count == 0:
+                threads_count = len(all_groups)
+                if threads_count == 0:
+                    logger.warning("No groups found, using default THREADS = 1")
+                    threads_count = 1
+                else:
+                    logger.info(f"THREADS = 0, auto-detected {threads_count} threads from {len(all_groups)} group(s)")
+            
+            sem = asyncio.Semaphore(threads_count)
+            
             # Для режима 3 (pair trading) отправляем простое сообщение
             mode_names = {
                 0: "Averaging Market",
@@ -245,8 +244,8 @@ async def runner(mode: int):
         all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
         
         if all_modules == 'No more accounts left':
-            logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")
-            logger.info("Please check input_data/wallets.txt file - it should contain wallet data in format: label|wallet_address|private_key|proxy")
+            logger.warning("No accounts found in database")
+            logger.info("Please check database - modules should be created from wallets")
         elif not all_modules:
             logger.warning("get_all_modules returned empty list or None")
         else:
@@ -257,6 +256,18 @@ async def runner(mode: int):
                 f'<white>{", ".join(unique_accounts)}</white> | '
                 f'Total modules: <white>{len(all_modules)}</white>'
             )
+            
+            # Определяем количество потоков ПОСЛЕ загрузки модулей из БД
+            # Используем количество модулей (Total modules) вместо уникальных аккаунтов
+            if threads_count == 0:
+                threads_count = len(all_modules)
+                if threads_count == 0:
+                    logger.warning("No modules found, using default THREADS = 1")
+                    threads_count = 1
+                else:
+                    logger.info(f"THREADS = 0, auto-detected {threads_count} threads from {len(all_modules)} module(s)")
+            
+            sem = asyncio.Semaphore(threads_count)
             
             # Получаем информацию о стартовом состоянии аккаунтов
             account_infos = []
