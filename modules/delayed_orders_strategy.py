@@ -1681,7 +1681,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
                 else:
                     # Есть активные Buy Limit ордера - проверяем их актуальность
-                    threshold = min_tp_price - float(step) * 2.5
+                    # threshold = min_tp_price - float(step) * 2.5
+                    threshold = current_price - float(step) * 1.5
                     
                     for order in active_buy_limits:
                         order_price = float(order.get("limitPx", 0))
