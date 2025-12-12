@@ -658,7 +658,8 @@ async def create_tp_order(client, token_name: str, entry_price: Decimal, order_q
         
         # Проверяем баланс токена перед созданием ордера
         all_balances = await client.browser.get_all_balances()
-        token_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+        utoken_name = f"U{token_name}"
+        token_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
         
         # Учитываем комиссию 0.1% - доступно 99.9% баланса
         available_balance = token_balance * 0.999
@@ -970,6 +971,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     "USDC": "@1",
                     "UBTC": "@142"  # UBTC тоже использует @142
                 }
+                # Добавляем U{token_name} в маппинг, если его там нет
+                utoken_name = f"U{token_name}"
+                if utoken_name not in token_mapping:
+                    # Используем тот же asset_id, что и для основного токена
+                    base_asset_id = token_mapping.get(token_name, token_name)
+                    token_mapping[utoken_name] = base_asset_id
                 asset_id = token_mapping.get(token_name, token_name)
                 
                 # current_tp_orders — лимитные ордера на продажу (токен → USDC)
@@ -999,7 +1006,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 if current_time - last_status_time >= status_interval:
                     # Получаем балансы
                     usdc_balance = all_balances.get("USDC", 0.0)
-                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                    utoken_name = f"U{token_name}"
+                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
                     
                     # Подсчитываем количество TP ордеров
                     tp_count = len(tp_orders) if tp_orders else 0
@@ -1105,7 +1113,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             
                             # Проверяем баланс токена перед созданием ордера
                             # all_balances уже получены выше в цикле
-                            token_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            utoken_name = f"U{token_name}"
+                            token_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
                             
                             # Учитываем комиссию 0.1% - доступно 99.9% баланса
                             available_balance = token_balance * 0.9
@@ -1168,7 +1177,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Записываем статистику операции Set TP
                                 try:
-                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                    utoken_name = f"U{token_name}"
+                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
                                     total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
                                     await log_statistics_to_excel(
                                         client=client,
@@ -1251,7 +1261,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     
                                     # Извлекаем балансы
                                     usdc_balance = all_balances.get("USDC", 0.0)
-                                    btc_balance = all_balances.get("UBTC", 0.0)
+                                    utoken_name = f"U{token_name}"
+                                    btc_balance = all_balances.get(utoken_name, 0.0)
                                     
                                     # Рассчитываем общую стоимость
                                     total_usd_value = usdc_balance
@@ -1522,12 +1533,21 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Функция для преобразования asset ID в читаемое название
                 def get_readable_coin_name(coin_id):
+                    utoken_name = f"U{token_name}"
                     asset_mapping = {
                         "@142": "BTC",
                         "@1": "USDC", 
                         "@197": "UBTC",
                         "@2": "ETH"
                     }
+                    # Добавляем маппинг для текущего токена, используя token_mapping из внешней области
+                    asset_id_for_token = token_mapping.get(token_name, token_name)
+                    if asset_id_for_token not in asset_mapping:
+                        asset_mapping[asset_id_for_token] = token_name
+                    # Добавляем маппинг для U{token_name}
+                    asset_id_for_utoken = token_mapping.get(utoken_name, utoken_name)
+                    if asset_id_for_utoken not in asset_mapping:
+                        asset_mapping[asset_id_for_utoken] = utoken_name
                     return asset_mapping.get(coin_id, coin_id)
                 
                 # Создаем текущее состояние ордеров для сравнения
@@ -1724,7 +1744,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Записываем статистику операции с фактической ценой исполнения (если ордер был исполнен)
                                 try:
-                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                                    utoken_name = f"U{token_name}"
+                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
                                     total_value = usdc_balance + (btc_balance * current_price)
                                     # Для лимитного ордера используем целевую цену и расчетное количество
                                     token_amount = usdc_amount / target_buy_price
@@ -1842,7 +1863,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         
                         # Записываем статистику операции Pyramiding с фактической ценой
                         try:
-                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+                            utoken_name = f"U{token_name}"
+                            btc_balance = all_balances.get(token_name, 0.0) or all_balances.get(utoken_name, 0.0)
                             total_value = usdc_balance + (btc_balance * actual_price)
                             await log_statistics_to_excel(
                                 client=client,

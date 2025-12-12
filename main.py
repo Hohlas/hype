@@ -160,19 +160,23 @@ async def get_account_startup_info(module_data: dict):
         client = initialize_account(module_data)
         await client.browser.start_session()
         
+        # Получаем токен из настроек
+        token_name = settings.SPOT_TOKEN if hasattr(settings, 'SPOT_TOKEN') and settings.SPOT_TOKEN else "BTC"
+        utoken_name = f"U{token_name}"
+        
         # Получаем данные параллельно
-        all_balances, orders, btc_price = await asyncio.gather(
+        all_balances, orders, token_price = await asyncio.gather(
             client.browser.get_all_balances(),
             client.browser.get_account_orders(),
-            client.browser.get_token_price("BTC")
+            client.browser.get_token_price(token_name)
         )
         
         # Извлекаем балансы
         usdc_balance = all_balances.get("USDC", 0.0)
-        btc_balance = all_balances.get("UBTC", 0.0) or all_balances.get("BTC", 0.0)
+        token_balance = all_balances.get(utoken_name, 0.0) or all_balances.get(token_name, 0.0)
         
         # Рассчитываем Total Value
-        total_value = usdc_balance + (btc_balance * float(btc_price))
+        total_value = usdc_balance + (token_balance * float(token_price))
         
         # Рассчитываем Limit Profit (сумма Order Value всех лимитных ордеров на продажу)
         limit_profit = 0.0
@@ -197,7 +201,8 @@ async def get_account_startup_info(module_data: dict):
         return {
             "label": module_data["label"],
             "usdc_balance": usdc_balance,
-            "btc_balance": btc_balance,
+            "token_balance": token_balance,
+            "token_name": token_name,
             "total_value": total_value,
             "limit_profit": limit_profit
         }
@@ -282,7 +287,8 @@ async def runner(mode: int):
             log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", risk_step_threads_line]
             
             for info in account_infos:
-                account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, LimProfit = ${info['limit_profit']:.0f}"
+                token_name = info.get('token_name', settings.SPOT_TOKEN if hasattr(settings, 'SPOT_TOKEN') and settings.SPOT_TOKEN else 'BTC')
+                account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['token_balance']:.2f}{token_name} = ${info['total_value']:.0f}, LimProfit = ${info['limit_profit']:.0f}"
                 message_lines.append(account_line)
                 log_lines.append(account_line)
             

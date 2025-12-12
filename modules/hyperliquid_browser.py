@@ -1502,6 +1502,12 @@ class HyperliquidBrowser:
                 "USDC": "@1",
                 "UBTC": "@142"  # UBTC тоже использует @142
             }
+            # Добавляем U{token_name} в маппинг, если его там нет
+            utoken_name = f"U{token_name}"
+            if utoken_name not in token_mapping:
+                # Используем тот же asset_id, что и для основного токена
+                base_asset_id = token_mapping.get(token_name, token_name)
+                token_mapping[utoken_name] = base_asset_id
             
             # Получаем asset ID для токена
             asset_id = token_mapping.get(token_name, token_name)
@@ -1596,6 +1602,12 @@ class HyperliquidBrowser:
                 "USDC": "@1",
                 "UBTC": "@142"  # UBTC тоже использует @142
             }
+            # Добавляем U{token_name} в маппинг, если его там нет
+            utoken_name = f"U{token_name}"
+            if utoken_name not in token_mapping:
+                # Используем тот же asset_id, что и для основного токена
+                base_asset_id = token_mapping.get(token_name, token_name)
+                token_mapping[utoken_name] = base_asset_id
             
             # Получаем asset ID для токена
             asset_id = token_mapping.get(token_name, token_name)
