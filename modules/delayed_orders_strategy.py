@@ -1002,11 +1002,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         min_tp_info = f"min_TP={min_tp_price:.2f}"
                     else:
                         min_tp_info = "min_TP=N/A"
+
+                    if max_tp_price > 0:
+                        max_tp_info = f"max_TP={max_tp_price:.2f}"
+                    else:
+                        max_tp_info = "max_TP=N/A"    
                     
                     # Выводим статусное сообщение
                     client.browser.log_message(
                         f"💚 Price:{current_price:.2f}, USDC:{usdc_balance:.2f}, "
-                        f"{token_name}:{btc_balance:.6f}, {last_buy_info}, {buy_limit_info}, {min_tp_info}",
+                        f"{token_name}:{btc_balance:.6f}, {last_buy_info}, {buy_limit_info}, {min_tp_info}, {max_tp_info}",
                         level="INFO"
                     )
                     
