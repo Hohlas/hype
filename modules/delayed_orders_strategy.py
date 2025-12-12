@@ -1714,6 +1714,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     f"❌ Cancelled old Buy Limit at ${order_price:.2f} (threshold: ${threshold:.2f})",
                                     level="INFO"
                                 )
+                                # Отправляем уведомление в Telegram
+                                await send_tg_notification(
+                                    client,
+                                    f"❌ <b>Cancel BuyLimit</b>\n${order_price:.2f}",
+                                    save_to_report=False
+                                )
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to cancel old Buy Limit order: {e}", level="ERROR")
                 
