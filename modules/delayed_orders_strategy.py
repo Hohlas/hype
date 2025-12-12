@@ -1105,7 +1105,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             
                             # Проверяем баланс токена перед созданием ордера
                             # all_balances уже получены выше в цикле
-                            token_balance = all_balances.get(token_name, 0.0)
+                            token_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                             
                             # Учитываем комиссию 0.1% - доступно 99.9% баланса
                             available_balance = token_balance * 0.999
