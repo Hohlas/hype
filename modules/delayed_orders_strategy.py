@@ -1480,7 +1480,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             )
                                             
                                             # Отправляем уведомление в Telegram согласно требованиям
-                                            profit_message = f'🎯 Hype: PROFIT ${profit:.2f} | {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}'
+                                            profit_message = f'🎯 {client.label}: PROFIT ${profit:.2f} | {usdc_balance:.2f}USDC + {btc_balance:.6f}{token_name} = ${total_usd_value:.2f}'
                                             await send_tg_notification(
                                                 client,
                                                 text=profit_message,

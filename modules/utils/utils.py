@@ -160,7 +160,7 @@ async def send_profit_notification(profit_message: str):
                 profit_text = profit_message
         
         # Добавляем префикс с названием проекта
-        profit_text = f"🎯 hype: {profit_text}"
+        profit_text = f"🎯 HYPE/{profit_text}"
         
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         data = {
