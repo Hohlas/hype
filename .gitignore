@@ -70,7 +70,7 @@ tmp/
 
 # private
 input_data/*
-!input_data/.gitkeep
+!input_data/.tmp
 
 # Statistics folder
 stat/*
