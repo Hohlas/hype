@@ -1016,10 +1016,28 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     if last_buy_timestamps:
                         # Берем последний (самый новый) timestamp из списка
                         latest_timestamp = last_buy_timestamps[0]
-                        # Преобразуем timestamp из миллисекунд в читаемый формат
-                        buy_datetime = datetime.fromtimestamp(latest_timestamp / 1000)
-                        buy_time_str = buy_datetime.strftime('%H:%M:%S')
-                        last_buy_info = f"LastBuy: {len(last_buy_timestamps)} tracked"
+                        
+                        # Получаем историю сделок для поиска цены последней покупки
+                        try:
+                            trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
+                            last_buy_price = None
+                            
+                            if trades_history:
+                                # Ищем покупку с соответствующим timestamp
+                                for trade in trades_history:
+                                    trade_side = trade.get('side', '').upper()
+                                    trade_timestamp = trade.get('time', 0)
+                                    
+                                    if trade_side in ['BUY', 'B'] and trade_timestamp == latest_timestamp:
+                                        last_buy_price = float(trade.get('px', 0))
+                                        break
+                            
+                            if last_buy_price and last_buy_price > 0:
+                                last_buy_info = f"LastBuy={last_buy_price:.2f}"
+                            else:
+                                # Если не нашли цену, показываем количество
+                                last_buy_info = "LastBuy=N/A"
+                        except Exception as e:
                     else:
                         last_buy_info = "LastBuy=N/A"
                     
