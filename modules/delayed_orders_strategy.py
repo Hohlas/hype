@@ -656,26 +656,59 @@ async def create_tp_order(client, token_name: str, entry_price: Decimal, order_q
         # Рассчитываем цену TP согласно стратегии
         tp_price = entry_price + step
         
+        # Проверяем баланс токена перед созданием ордера
+        all_balances = await client.browser.get_all_balances()
+        token_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
+        
+        # Учитываем комиссию 0.1% - доступно 99.9% баланса
+        available_balance = token_balance * 0.999
+        
+        # Если баланс недостаточен, выходим с предупреждением
+        if token_balance <= 0:
+            client.browser.log_message(
+                f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.6f})",
+                level="WARNING"
+            )
+            return
+        
+        # Если количество ордера превышает доступный баланс, уменьшаем его
+        adjusted_qty = Decimal(min(float(order_qty), available_balance))
+        
+        if adjusted_qty < order_qty:
+            client.browser.log_message(
+                f"⚠️ TP order quantity adjusted: {order_qty:.6f} → {adjusted_qty:.6f} {token_name} "
+                f"(available balance: {available_balance:.6f}, total balance: {token_balance:.6f})",
+                level="WARNING"
+            )
+        
+        # Если скорректированное количество слишком мало, не создаем ордер
+        if adjusted_qty <= 0:
+            client.browser.log_message(
+                f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_qty:.6f})",
+                level="WARNING"
+            )
+            return
+        
         # Создаем TP ордер (продажа)
         tp_order_data = {
             "token": token_name,
             "side": "SELL",
             "order_type": "LIMIT",
-            "quantity": float(order_qty),
+            "quantity": float(adjusted_qty),
             "price": float(tp_price),
         }
         
         tp_result = await client.place_order(**tp_order_data)
         
         client.browser.log_message(
-            f"🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}",
+            f"🎯 Set TP: {adjusted_qty:.6f} {token_name} at ${tp_price:.2f}",
             level="INFO"
         )
         
         # Отправляем уведомление в Telegram
         await send_tg_notification(
             client,
-            text=f'🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}',
+            text=f'🎯 Set TP: {adjusted_qty:.6f} {token_name} at ${tp_price:.2f}',
             save_to_report=False
         )
         
@@ -1106,29 +1139,62 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             # Рассчитываем цену TP
                             tp_price = normalize_price(latest_price + float(step), sz_decimals)
                             
+                            # Проверяем баланс токена перед созданием ордера
+                            # all_balances уже получены выше в цикле
+                            token_balance = all_balances.get(token_name, 0.0)
+                            
+                            # Учитываем комиссию 0.1% - доступно 99.9% баланса
+                            available_balance = token_balance * 0.999
+                            
+                            # Если баланс недостаточен, пропускаем создание ордера
+                            if token_balance <= 0:
+                                client.browser.log_message(
+                                    f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.6f})",
+                                    level="WARNING"
+                                )
+                                continue
+                            
+                            # Если количество ордера превышает доступный баланс, уменьшаем его
+                            adjusted_amount = min(latest_amount, available_balance)
+                            
+                            if adjusted_amount < latest_amount:
+                                client.browser.log_message(
+                                    f"⚠️ TP order quantity adjusted: {latest_amount:.6f} → {adjusted_amount:.6f} {token_name} "
+                                    f"(available balance: {available_balance:.6f}, total balance: {token_balance:.6f})",
+                                    level="WARNING"
+                                )
+                            
+                            # Если скорректированное количество слишком мало, не создаем ордер
+                            if adjusted_amount <= 0:
+                                client.browser.log_message(
+                                    f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.6f})",
+                                    level="WARNING"
+                                )
+                                continue
+                            
                             # Размещение TP-ордера на бирже
-                            # Количество: latest_amount токенов
+                            # Количество: adjusted_amount токенов
                             # Лимитная цена: tp_price
                             try:
                                 tp_order_data = {
                                     "token": token_name,
                                     "side": "SELL",
                                     "order_type": "LIMIT",
-                                    "quantity": latest_amount,
+                                    "quantity": adjusted_amount,
                                     "price": tp_price,
                                 }
                                 
                                 tp_result = await client.place_order(**tp_order_data)
                                 
                                 client.browser.log_message(
-                                    f"🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}",
+                                    f"🎯 Set TP: {adjusted_amount:.6f} {token_name} at ${tp_price:.2f}",
                                     level="INFO"
                                 )
                                 
                                 # Отправляем уведомление в Telegram
                                 await send_tg_notification(
                                     client,
-                                    text=f'🎯 Set TP: {latest_amount:.6f} {token_name} at ${tp_price:.2f}',
+                                    text=f'🎯 Set TP: {adjusted_amount:.6f} {token_name} at ${tp_price:.2f}',
                                     save_to_report=False
                                 )
                                 
@@ -1139,7 +1205,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     await log_statistics_to_excel(
                                         client=client,
                                         operation="Set TP",
-                                        btc_amount=latest_amount,
+                                        btc_amount=adjusted_amount,
                                         price=tp_price,
                                         usdc_balance=all_balances.get("USDC", 0.0),
                                         btc_balance=btc_balance,
