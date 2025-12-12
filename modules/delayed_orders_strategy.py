@@ -1814,17 +1814,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         )
                         
                         # Отправляем дополнительное уведомление с фактической ценой исполнения
-                        if actual_price != current_price:
-                            await send_tg_notification(
-                                client,
-                                f"✅ <b>Pyramiding Executed</b>\n{token_amount:.6f}{token_name} filled at ${actual_price:.2f} (expected ${current_price:.2f})",
-                                save_to_report=False
-                            )
+                        # if actual_price != current_price:
+                        #     await send_tg_notification(
+                        #         client,
+                        #         f"✅ <b>Pyramiding</b>\n{token_amount:.6f}{token_name} filled at {actual_price:.2f}",
+                        #         save_to_report=False
+                        #     )
                         
                         # Обновляем уведомление с фактической ценой исполнения
                         await send_tg_notification(
                             client,
-                            f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} / ${actual_price:.2f}",
+                            f"📈 <b>Pyramiding</b>\n{token_amount:.6f}{token_name} at {actual_price:.2f}",
                             save_to_report=False
                         )
                 
