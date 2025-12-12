@@ -901,42 +901,41 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
         
-        # Загружаем last_buy_timestamp из БД
-        last_buy_timestamp = client.db.get_last_buy_timestamp(client.wallet_address, token_name)
+        # Загружаем список last_buy_timestamps из БД
+        last_buy_timestamps = client.db.get_last_buy_timestamps(client.wallet_address, token_name)
         
-        # Получаем информацию о последней покупке из Trade History при старте
-        last_buy_price = None
-        last_buy_size = None
-        last_buy_timestamp_from_history = None
-        try:
-            trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
-            if trades_history:
-                # История уже отсортирована от новых к старым
-                for trade in trades_history:
-                    trade_side = trade.get('side', '').upper()
-                    # Ищем последнюю покупку
-                    if trade_side in ['BUY', 'B']:
-                        last_buy_price = float(trade.get('px', 0))
-                        last_buy_size = float(trade.get('sz', 0))
-                        last_buy_timestamp_from_history = trade.get('time', 0)
-                        if last_buy_price > 0 and last_buy_size > 0:
-                            break
-        except Exception as e:
-            client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
-        
-        # Если в БД нет значения, заполняем БД значением из истории (но не ставим TP)
-        if last_buy_timestamp is None and last_buy_timestamp_from_history is not None:
-            client.db.save_last_buy_timestamp(client.wallet_address, token_name, last_buy_timestamp_from_history)
-            last_buy_timestamp = last_buy_timestamp_from_history
-            client.browser.log_message(
-                f"💾 Initialized last_buy_timestamp from history: {last_buy_timestamp} (no TP will be set for this buy)",
-                level="INFO"
-            )
+        # Если в БД нет значений, заполняем БД последними 10 покупками из истории (но не ставим TP)
+        if not last_buy_timestamps:
+            try:
+                trades_history = await client.browser.get_all_orders_history(token_name, limit=500)
+                if trades_history:
+                    # История уже отсортирована от новых к старым
+                    buy_timestamps = []
+                    for trade in trades_history:
+                        trade_side = trade.get('side', '').upper()
+                        # Ищем покупки
+                        if trade_side in ['BUY', 'B']:
+                            buy_timestamp = trade.get('time', 0)
+                            if buy_timestamp > 0 and buy_timestamp not in buy_timestamps:
+                                buy_timestamps.append(buy_timestamp)
+                                # Собираем максимум 10 последних покупок
+                                if len(buy_timestamps) >= 10:
+                                    break
+                    
+                    if buy_timestamps:
+                        client.db.save_last_buy_timestamps(client.wallet_address, token_name, buy_timestamps)
+                        last_buy_timestamps = buy_timestamps
+                        client.browser.log_message(
+                            f"💾 Initialized last_buy_timestamps from history: {len(buy_timestamps)} timestamps "
+                            f"(no TP will be set for these buys)",
+                            level="INFO"
+                        )
+            except Exception as e:
+                client.browser.log_message(f"Failed to initialize last_buy_timestamps from history: {e}", level="WARNING")
         
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
-        # last_buy_timestamp = 0 # удалить (ставит тейк на последнюю покупку)
         # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
         import time
         status_interval = 600  # 10 минут в секундах
@@ -1006,11 +1005,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     tp_count = len(tp_orders) if tp_orders else 0
                     
                     # Формируем информацию о последней покупке
-                    if last_buy_price and last_buy_timestamp:
+                    if last_buy_timestamps:
+                        # Берем последний (самый новый) timestamp из списка
+                        latest_timestamp = last_buy_timestamps[0]
                         # Преобразуем timestamp из миллисекунд в читаемый формат
-                        buy_datetime = datetime.fromtimestamp(last_buy_timestamp / 1000)
+                        buy_datetime = datetime.fromtimestamp(latest_timestamp / 1000)
                         buy_time_str = buy_datetime.strftime('%H:%M:%S')
-                        last_buy_info = f"LastBuy={last_buy_price:.2f}"
+                        last_buy_info = f"LastBuy: {len(last_buy_timestamps)} tracked"
                     else:
                         last_buy_info = "LastBuy=N/A"
                     
@@ -1064,80 +1065,43 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Этот модуль работает независимо от блоков покупки.
                 # Он проверяет историю сделок и выставляет тейк-профит для любых новых покупок.
                 try:
-                    # client.browser.log_message(f"Start of TP set", level="INFO")
-                    # Получаем историю торговли (последние сделки)
-                    trades_history = await client.browser.get_all_orders_history(token_name, limit=50)
-                    # Инициализируем переменные для последней покупки
-                    latest_price = None
-                    latest_amount = None
-                    latest_timestamp = None
+                    # Получаем список last_buy_timestamps из БД
+                    last_buy_timestamps = client.db.get_last_buy_timestamps(client.wallet_address, token_name)
+                    
+                    # Получаем историю торговли (последние 5 сделок)
+                    trades_history = await client.browser.get_all_orders_history(token_name, limit=5)
                     
                     if trades_history:
                         # История уже отсортирована от новых к старым
-                        # Вспомогательная функция для преобразования timestamp в читаемый формат
-                        def format_timestamp(ts):
-                            """Преобразует timestamp (мс) в читаемый формат времени"""
-                            if ts == 'N/A' or ts is None:
-                                return 'N/A'
-                            try:
-                                # Timestamp в миллисекундах
-                                dt = datetime.fromtimestamp(ts / 1000)
-                                return dt.strftime('%Y-%m-%d %H:%M:%S')
-                            except:
-                                return str(ts)
-                        
-                        buy_trades_found = []  # Список всех найденных BUY сделок
-                        for idx, trade in enumerate(trades_history):
+                        # Собираем все покупки из последних 5 сделок
+                        new_buy_trades = []
+                        for trade in trades_history:
                             trade_side = trade.get('side', '').upper()
-                            trade_time = trade.get('time', 'N/A')
-                            trade_oid = trade.get('oid', 'N/A')
                             
-                            # Ищем все покупки (не останавливаемся на первой)
+                            # Ищем покупки
                             if trade_side in ['BUY', 'B']:
                                 buy_price = float(trade.get('px', 0))
                                 buy_amount = float(trade.get('sz', 0))
                                 buy_timestamp = trade.get('time', 0)
                                 
-                                if buy_price > 0 and buy_amount > 0:
-                                    # Сохраняем информацию о BUY сделке
-                                    buy_trade_info = {
-                                        'idx': idx,
-                                        'price': buy_price,
-                                        'amount': buy_amount,
-                                        'timestamp': buy_timestamp,
-                                        'oid': trade_oid,
-                                        'time': trade_time
-                                    }
-                                    buy_trades_found.append(buy_trade_info)
-                                    
-                                    # Обновляем latest только если это более новая сделка
-                                    if latest_timestamp is None or buy_timestamp > latest_timestamp:
-                                        latest_price = buy_price
-                                        latest_amount = buy_amount
-                                        latest_timestamp = buy_timestamp
+                                if buy_price > 0 and buy_amount > 0 and buy_timestamp > 0:
+                                    # Проверяем, есть ли этот timestamp в списке сохраненных
+                                    if buy_timestamp not in last_buy_timestamps:
+                                        # Это новая покупка, для которой нужно выставить TP
+                                        new_buy_trades.append({
+                                            'price': buy_price,
+                                            'amount': buy_amount,
+                                            'timestamp': buy_timestamp
+                                        })
                         
-                    
-                    # Проверяем, есть ли новая покупка только если нашли покупку в истории
-                    if latest_timestamp is not None and latest_price is not None and latest_amount is not None:
-                        is_new_buy = False
-                        
-                        if last_buy_timestamp is None:
-                            # Первая покупка - всегда новая
-                            is_new_buy = True
-                        elif latest_timestamp > last_buy_timestamp:
-                            # Покупка с более поздним timestamp - новая покупка
-                            is_new_buy = True
-                        # client.browser.log_message(f"🔍 SET_TP: last_buy_timestamp={last_buy_timestamp}, latest_timestamp={latest_timestamp}, is_new_buy={is_new_buy}",level="INFO")        
-                        if is_new_buy:
-                            # Обнаружена новая покупка                  
-                            # Обновляем last_buy_price и last_buy_timestamp для отслеживания следующей новой покупки
-                            last_buy_price = latest_price
-                            last_buy_timestamp = latest_timestamp
-                            # Сохраняем в БД
-                            client.db.save_last_buy_timestamp(client.wallet_address, token_name, latest_timestamp)
+                        # Обрабатываем все новые покупки
+                        for buy_trade in new_buy_trades:
+                            buy_price = buy_trade['price']
+                            buy_amount = buy_trade['amount']
+                            buy_timestamp = buy_trade['timestamp']
                             
                             # Рассчитываем цену TP
-                            tp_price = normalize_price(latest_price + float(step), sz_decimals)
+                            tp_price = normalize_price(buy_price + float(step), sz_decimals)
                             
                             # Проверяем баланс токена перед созданием ордера
                             # all_balances уже получены выше в цикле
@@ -1152,14 +1116,16 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.6f})",
                                     level="WARNING"
                                 )
+                                # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
+                                client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
                                 continue
                             
                             # Если количество ордера превышает доступный баланс, уменьшаем его
-                            adjusted_amount = min(latest_amount, available_balance)
+                            adjusted_amount = min(buy_amount, available_balance)
                             
-                            if adjusted_amount < latest_amount:
+                            if adjusted_amount < buy_amount:
                                 client.browser.log_message(
-                                    f"⚠️ TP order quantity adjusted: {latest_amount:.6f} → {adjusted_amount:.6f} {token_name} "
+                                    f"⚠️ TP order quantity adjusted: {buy_amount:.6f} → {adjusted_amount:.6f} {token_name} "
                                     f"(available balance: {available_balance:.6f}, total balance: {token_balance:.6f})",
                                     level="WARNING"
                                 )
@@ -1170,6 +1136,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.6f})",
                                     level="WARNING"
                                 )
+                                # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
+                                client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
                                 continue
                             
                             # Размещение TP-ордера на бирже
@@ -1216,13 +1184,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 except Exception as e:
                                     client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
                                 
-                                                       
+                                # Добавляем timestamp в БД после успешного создания TP
+                                client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
+                                
                                 # Прерываем цикл после создания TP ордера
                                 # Это дает время ордеру появиться в API перед следующей итерацией
                                 continue
                                                 
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
+                                # В случае ошибки все равно добавляем timestamp, чтобы не пытаться создать TP повторно
+                                client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
                 

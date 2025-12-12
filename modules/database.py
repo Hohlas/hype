@@ -355,33 +355,45 @@ class DataBase:
         logger.critical('Dont Forget To Remove Private Keys from wallets.txt!')
         logger.info(f'Created Database for {len(new_modules)} accounts!\n')
     
-    def get_last_buy_timestamp(self, wallet_address: str, token_name: str) -> int | None:
+    def get_last_buy_timestamps(self, wallet_address: str, token_name: str) -> list[int]:
         """
-        Получает last_buy_timestamp для кошелька и токена из БД.
+        Получает список last_buy_timestamps для кошелька и токена из БД.
         
         Args:
             wallet_address: Адрес кошелька
             token_name: Название токена (например, "BTC")
             
         Returns:
-            timestamp в миллисекундах или None, если не найдено
+            Список timestamp в миллисекундах (до 10 элементов), отсортированный по убыванию.
+            Пустой список, если не найдено.
         """
         try:
             if not path.isfile(self.last_buy_timestamps_db_name):
-                return None
+                return []
             
             with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             key = f"{wallet_address}_{token_name}"
-            return data.get(key)
+            timestamps = data.get(key, [])
+            
+            # Поддерживаем обратную совместимость: если значение - число, преобразуем в список
+            if isinstance(timestamps, int):
+                return [timestamps]
+            elif isinstance(timestamps, list):
+                # Убеждаемся, что список отсортирован по убыванию и содержит максимум 10 элементов
+                timestamps = sorted(timestamps, reverse=True)[:10]
+                return timestamps
+            else:
+                return []
         except Exception as e:
-            logger.error(f"Failed to get last_buy_timestamp: {e}")
-            return None
+            logger.error(f"Failed to get last_buy_timestamps: {e}")
+            return []
     
-    def save_last_buy_timestamp(self, wallet_address: str, token_name: str, timestamp: int):
+    def add_last_buy_timestamp(self, wallet_address: str, token_name: str, timestamp: int):
         """
-        Сохраняет last_buy_timestamp для кошелька и токена в БД.
+        Добавляет last_buy_timestamp в список для кошелька и токена в БД.
+        Поддерживает максимум 10 элементов, удаляя самые старые при превышении.
         
         Args:
             wallet_address: Адрес кошелька
@@ -396,12 +408,53 @@ class DataBase:
             else:
                 data = {}
             
-            # Обновляем значение
             key = f"{wallet_address}_{token_name}"
-            data[key] = timestamp
+            timestamps = data.get(key, [])
+            
+            # Поддерживаем обратную совместимость: если значение - число, преобразуем в список
+            if isinstance(timestamps, int):
+                timestamps = [timestamps]
+            elif not isinstance(timestamps, list):
+                timestamps = []
+            
+            # Добавляем новый timestamp, если его еще нет в списке
+            if timestamp not in timestamps:
+                timestamps.append(timestamp)
+                # Сортируем по убыванию (новые первыми) и оставляем максимум 10
+                timestamps = sorted(timestamps, reverse=True)[:10]
+                data[key] = timestamps
             
             # Сохраняем обратно
             with open(self.last_buy_timestamps_db_name, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            logger.error(f"Failed to save last_buy_timestamp: {e}")
+            logger.error(f"Failed to add last_buy_timestamp: {e}")
+    
+    def save_last_buy_timestamps(self, wallet_address: str, token_name: str, timestamps: list[int]):
+        """
+        Сохраняет список last_buy_timestamps для кошелька и токена в БД.
+        Используется для массовой инициализации.
+        
+        Args:
+            wallet_address: Адрес кошелька
+            token_name: Название токена (например, "BTC")
+            timestamps: Список timestamp в миллисекундах (будет обрезан до 10 элементов)
+        """
+        try:
+            # Загружаем существующие данные
+            if path.isfile(self.last_buy_timestamps_db_name):
+                with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            
+            key = f"{wallet_address}_{token_name}"
+            # Сортируем по убыванию (новые первыми) и оставляем максимум 10
+            sorted_timestamps = sorted(timestamps, reverse=True)[:10]
+            data[key] = sorted_timestamps
+            
+            # Сохраняем обратно
+            with open(self.last_buy_timestamps_db_name, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save last_buy_timestamps: {e}")
