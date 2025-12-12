@@ -1113,7 +1113,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             # Если баланс недостаточен, пропускаем создание ордера
                             if token_balance <= 0:
                                 client.browser.log_message(
-                                    f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.6f})",
+                                    f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.9f})",
                                     level="WARNING"
                                 )
                                 # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
@@ -1125,15 +1125,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             
                             if adjusted_amount < buy_amount:
                                 client.browser.log_message(
-                                    f"⚠️ TP order quantity adjusted: {buy_amount:.6f} → {adjusted_amount:.6f} {token_name} "
-                                    f"(available balance: {available_balance:.6f}, total balance: {token_balance:.6f})",
+                                    f"⚠️ TP order quantity adjusted: {buy_amount:.9f} → {adjusted_amount:.9f} {token_name} "
+                                    f"(available balance: {available_balance:.9f}, total balance: {token_balance:.9f})",
                                     level="WARNING"
                                 )
                             
                             # Если скорректированное количество слишком мало, не создаем ордер
                             if adjusted_amount <= 0:
                                 client.browser.log_message(
-                                    f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.6f})",
+                                    f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.9f})",
                                     level="WARNING"
                                 )
                                 # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
