@@ -1187,14 +1187,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 # Добавляем timestamp в БД после успешного создания TP
                                 client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
                                 
-                                # Прерываем цикл после создания TP ордера
-                                # Это дает время ордеру появиться в API перед следующей итерацией
-                                continue
-                                                
+                                # Небольшая пауза между созданием TP ордеров, чтобы они успели появиться в API
+                                await async_sleep(1)
+                                
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
                                 # В случае ошибки все равно добавляем timestamp, чтобы не пытаться создать TP повторно
                                 client.db.add_last_buy_timestamp(client.wallet_address, token_name, buy_timestamp)
+                        
+                        # После завершения цикла for buy_trade in new_buy_trades
+                        # Если были обработаны покупки и созданы TP ордера, прерываем основную итерацию
+                        # чтобы начать новую итерацию while True с паузой в 10 секунд
+                        if new_buy_trades:
+                            continue  # Прерываем основную итерацию while True
                 except Exception as e:
                     client.browser.log_message(f"❌ SET_TP module error: {e}", level="ERROR")
                 
