@@ -71,6 +71,7 @@ tmp/
 # private
 input_data/*
 !input_data/.tmp
+!input_data/*.example
 
 # Statistics folder
 stat/*
