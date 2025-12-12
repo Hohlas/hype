@@ -991,18 +991,21 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     else:
                         buy_limit_info = "BuyLimit=N/A"
                     
-                    # Вычисляем минимальную цену TP ордеров
+                    # Вычисляем минимальную и максимальную цену TP ордеров
                     min_tp_price = 0.0
+                    max_tp_price = 0.0
                     if tp_orders:
                         tp_prices = [float(order.get("limitPx", 0)) for order in tp_orders if float(order.get("limitPx", 0)) > 0]
                         if tp_prices:
                             min_tp_price = min(tp_prices)
-                    
+                            max_tp_price = max(tp_prices)
+
                     if min_tp_price > 0:
                         min_tp_info = f"min_TP={min_tp_price:.2f}"
                     else:
                         min_tp_info = "min_TP=N/A"
 
+                    
                     if max_tp_price > 0:
                         max_tp_info = f"max_TP={max_tp_price:.2f}"
                     else:
