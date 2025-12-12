@@ -1035,9 +1035,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             if last_buy_price and last_buy_price > 0:
                                 last_buy_info = f"LastBuy={last_buy_price:.2f}"
                             else:
-                                # Если не нашли цену, показываем количество
+                                # Если не нашли цену, показываем N/A
                                 last_buy_info = "LastBuy=N/A"
                         except Exception as e:
+                            # В случае ошибки при получении истории показываем N/A
+                            last_buy_info = "LastBuy=N/A"
                     else:
                         last_buy_info = "LastBuy=N/A"
                     
