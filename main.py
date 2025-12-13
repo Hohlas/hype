@@ -313,6 +313,7 @@ if __name__ == '__main__':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     manual_stop = False
+    stop_reason = None
     
     try:
         db = DataBase()
@@ -341,6 +342,7 @@ if __name__ == '__main__':
                 case "exit":
                     # Выход из программы
                     logger.info(f'[•] Bot | Exiting...')
+                    stop_reason = "Normal exit"
                     break
                 
                 case _:
@@ -353,16 +355,26 @@ if __name__ == '__main__':
 
     except DataBaseError as e:
         logger.error(f'[-] Database | {e}')
+        stop_reason = f"Database error: {str(e)}"
         input('\n > Exit\n')
 
     except KeyboardInterrupt:
         logger.info(f'[•] Soft | Closed')
         manual_stop = True
+        stop_reason = "Manual stop (Ctrl+C)"
 
     except Exception as e:
         logger.error(f'[-] Global | {e}')
+        stop_reason = f"Error: {str(e)}"
         input('\n > Exit\n')
 
     finally:
         if not manual_stop:
             logger.info(f'[•] Soft | Closed')
+        
+        # Отправляем уведомление в Telegram при остановке бота
+        if stop_reason:
+            try:
+                asyncio.run(TgReport().send_log(logs=f"⏹️ Bot Stopped\nReason: {stop_reason}"))
+            except Exception as e:
+                logger.error(f"Failed to send stop notification: {e}")
