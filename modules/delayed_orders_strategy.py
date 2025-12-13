@@ -1139,10 +1139,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             # Учитываем комиссию 0.1% - доступно 99.9% баланса
                             available_balance = token_balance * 0.9
                             
-                            # Если баланс недостаточен, пропускаем создание ордера
-                            if token_balance <= 0:
+                            # Если баланс меньше минимального количества, пропускаем создание ордера
+                            if token_balance < min_qty:
                                 client.browser.log_message(
-                                    f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.9f})",
+                                    f"⚠️ Cannot create TP order: insufficient balance for {token_name} (balance: {token_balance:.9f} < min_qty: {min_qty:.9f})",
                                     level="WARNING"
                                 )
                                 # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
@@ -1159,10 +1159,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     level="WARNING"
                                 )
                             
-                            # Если скорректированное количество слишком мало, не создаем ордер
-                            if adjusted_amount <= 0:
+                            # Если скорректированное количество меньше минимального, не создаем ордер
+                            if adjusted_amount < min_qty:
                                 client.browser.log_message(
-                                    f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.9f})",
+                                    f"⚠️ Cannot create TP order: adjusted quantity is too small ({adjusted_amount:.9f} < min_qty: {min_qty:.9f})",
                                     level="WARNING"
                                 )
                                 # Все равно добавляем timestamp в БД, чтобы не обрабатывать повторно
