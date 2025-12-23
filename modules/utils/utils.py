@@ -34,6 +34,10 @@ class TgReport:
     Класс для отправки отчетов в Telegram.
     """
     
+    # Классовый кэш для предотвращения дублирования
+    _send_log_cache = {}
+    _cache_timeout = 30  # секунд
+    
     def __init__(self):
         tokens = _get_tg_tokens()
         self.bot_token = tokens.get("TG_BOT_TOKEN") or "12345:AABBCC"
@@ -51,6 +55,7 @@ class TgReport:
         """
         try:
             import aiohttp
+            import time
             
             # Проверяем, что logs не пустой и содержит корректный текст
             if not logs or not isinstance(logs, str) or logs.strip() == "":
@@ -69,6 +74,25 @@ class TgReport:
             
             # Очищаем текст от потенциально проблемных символов
             clean_logs = logs.strip()
+            
+            # Проверка на дубликаты на уровне TgReport
+            cache_key = f"{self.chat_id}:{clean_logs}"
+            current_time = time.time()
+            
+            if cache_key in TgReport._send_log_cache:
+                last_sent_time = TgReport._send_log_cache[cache_key]
+                time_since_last = current_time - last_sent_time
+                if time_since_last < TgReport._cache_timeout:
+                    logger.debug(f"Skipping duplicate TgReport.send_log: {clean_logs[:50]}... (sent {time_since_last:.1f}s ago)")
+                    return
+            
+            # Обновляем кэш
+            TgReport._send_log_cache[cache_key] = current_time
+            
+            # Очищаем старые записи из кэша
+            if len(TgReport._send_log_cache) > 1000:
+                cutoff_time = current_time - 3600
+                TgReport._send_log_cache = {k: v for k, v in TgReport._send_log_cache.items() if v > cutoff_time}
             
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             # Конвертируем chat_id в строку (Telegram API принимает и строку, и число)

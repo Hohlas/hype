@@ -39,6 +39,10 @@ import settings
 # Кэш для ограничения частоты предупреждающих сообщений
 _order_skipped_cache = {}
 
+# Кэш для предотвращения дублирования уведомлений
+_notification_cache = {}
+_notification_cache_timeout = 3  # секунд
+
 
 def normalize_price(price_value: float, decimals: int) -> float:
     """
@@ -633,6 +637,29 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
     Отправляет уведомление в Telegram немедленно (без ожидания окончания работы модуля).
     """
     try:
+        import time
+        
+        # Создаем уникальный ключ для уведомления (кошелек + текст)
+        cache_key = f"{client.wallet_address}:{text}"
+        current_time = time.time()
+        
+        # Проверяем, не отправляли ли мы это уведомление недавно
+        if cache_key in _notification_cache:
+            last_sent_time = _notification_cache[cache_key]
+            time_since_last = current_time - last_sent_time
+            if time_since_last < _notification_cache_timeout:
+                # Пропускаем дубликат - логируем для отладки
+                logger.debug(f"Skipping duplicate notification: {text[:50]}... (sent {time_since_last:.1f}s ago)")
+                return
+        
+        # Обновляем время последней отправки
+        _notification_cache[cache_key] = current_time
+        
+        # Очищаем старые записи из кэша (старше 1 часа)
+        if len(_notification_cache) > 1000:  # Защита от переполнения
+            cutoff_time = current_time - 3600  # 1 час
+            _notification_cache = {k: v for k, v in _notification_cache.items() if v > cutoff_time}
+        
         # Добавляем название кошелька перед сообщением для Telegram
         tg_message = f"{client.label}: {text}"
         await TgReport().send_log(logs=tg_message)
@@ -644,7 +671,7 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
                 success=True
             )
     except Exception as e:
-        pass
+        logger.error(f"Error in send_tg_notification: {e}", exc_info=True)
 
 
 async def create_tp_order(client, token_name: str, entry_price: Decimal, order_qty: Decimal, step: Decimal):
