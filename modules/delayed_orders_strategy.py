@@ -1713,6 +1713,24 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     buy_limit_orders_recheck.append(order)
                         
                         if buy_limit_orders_recheck:
+                            # Проверяем, нет ли уже ордера с точно такой же ценой и размером
+                            target_size = usdc_amount / target_buy_price
+                            for existing_order in buy_limit_orders_recheck:
+                                existing_price = float(existing_order.get("limitPx", 0))
+                                existing_size = float(existing_order.get("sz", 0))
+                                
+                                # Проверяем совпадение цены (с допуском 0.01) и размера (с допуском 10%)
+                                price_match = abs(existing_price - target_buy_price) < 0.01
+                                size_match = abs(existing_size - target_size) / target_size < 0.1 if target_size > 0 else False
+                                
+                                if price_match and size_match:
+                                    client.browser.log_message(
+                                        f"🔒 [BUY_LIMIT_{call_id}] Duplicate order detected: "
+                                        f"existing price=${existing_price:.2f}, size={existing_size:.6f} vs "
+                                        f"target price=${target_buy_price:.2f}, size={target_size:.6f}",
+                                        level="WARNING"
+                                    )
+                            
                             client.browser.log_message(
                                 f"🔒 [BUY_LIMIT_{call_id}] Order already exists after recheck, skipping creation",
                                 level="INFO"
@@ -1927,6 +1945,38 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 f"⚠️ [BUY_LIMIT_{call_id}] CRITICAL: Found {len(buy_limit_check)} duplicate orders on exchange! "
                                                 f"Orders: {buy_limit_check}",
                                                 level="WARNING"
+                                            )
+                                            
+                                            # КРИТИЧНО: Отменяем все дубликаты, оставляем только первый (самый старый)
+                                            # Сортируем по OID (меньший OID = более старый ордер)
+                                            buy_limit_check_sorted = sorted(buy_limit_check, key=lambda x: x.get('oid', 0))
+                                            
+                                            # Оставляем первый ордер, отменяем остальные
+                                            for duplicate_order in buy_limit_check_sorted[1:]:
+                                                duplicate_oid = duplicate_order.get('oid')
+                                                duplicate_price = duplicate_order.get('price')
+                                                try:
+                                                    await client.browser.cancel_order(token_name, duplicate_oid)
+                                                    client.browser.log_message(
+                                                        f"✅ [BUY_LIMIT_{call_id}] Cancelled duplicate order: OID={duplicate_oid}, price=${duplicate_price:.2f}",
+                                                        level="INFO"
+                                                    )
+                                                    # Отправляем уведомление в Telegram
+                                                    await send_tg_notification(
+                                                        client,
+                                                        f"⚠️ <b>Duplicate order cancelled</b>\nOID: {duplicate_oid}, Price: ${duplicate_price:.2f}",
+                                                        save_to_report=False
+                                                    )
+                                                except Exception as e:
+                                                    client.browser.log_message(
+                                                        f"❌ [BUY_LIMIT_{call_id}] Failed to cancel duplicate order {duplicate_oid}: {e}",
+                                                        level="ERROR"
+                                                    )
+                                            
+                                            client.browser.log_message(
+                                                f"✅ [BUY_LIMIT_{call_id}] Kept original order: OID={buy_limit_check_sorted[0].get('oid')}, "
+                                                f"price=${buy_limit_check_sorted[0].get('price'):.2f}",
+                                                level="INFO"
                                             )
                                         elif len(buy_limit_check) == 1:
                                             client.browser.log_message(

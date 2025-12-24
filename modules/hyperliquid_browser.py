@@ -117,6 +117,22 @@ class HyperliquidBrowser:
         """
         Отправка HTTP запроса с подписью (если требуется)
         """
+        import threading
+        import uuid as uuid_module
+        call_id = str(uuid_module.uuid4())[:8]
+        thread_id = threading.current_thread().ident
+        
+        # Логируем вызов send_request для диагностики дубликатов
+        if method == "POST" and data and "/exchange" in url:
+            # Это запрос на создание ордера - логируем детально
+            nonce = data.get("nonce", "N/A") if isinstance(data, dict) else "N/A"
+            orders_count = len(data.get("action", {}).get("orders", [])) if isinstance(data, dict) else "N/A"
+            self.log_message(
+                f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | POST to {url} | "
+                f"nonce={nonce}, orders_in_payload={orders_count}",
+                level="INFO"
+            )
+        
         if not self.session:
             await self.start_session()
             
@@ -145,11 +161,21 @@ class HyperliquidBrowser:
                 response = await self.session.get(url, params=params, headers=headers)
             elif method == "POST":
                 # Для Hyperliquid API используем json вместо data
+                if method == "POST" and data and "/exchange" in url:
+                    self.log_message(
+                        f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | Actually sending POST request now...",
+                        level="INFO"
+                    )
                 if build_signature:
                     headers["Content-Type"] = "application/json"
                     response = await self.session.post(url, json=data, params=params, headers=headers)
                 else:
                     response = await self.session.post(url, json=data, params=params, headers=headers)
+                if method == "POST" and data and "/exchange" in url:
+                    self.log_message(
+                        f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | POST request sent, status: {response.status}",
+                        level="INFO"
+                    )
             elif method == "PUT":
                 response = await self.session.put(url, json=data, params=params, headers=headers)
             elif method == "DELETE":
@@ -1042,6 +1068,21 @@ class HyperliquidBrowser:
                 "vaultAddress": None  # Для основного кошелька используем None
             }
             
+            # КРИТИЧНО: Логируем полный payload перед отправкой для диагностики
+            import json as json_module
+            payload_json = json_module.dumps(payload, indent=2)
+            self.log_message(
+                f"🟢 [CREATE_ORDER] Thread {thread_id} | Full payload before send:\n{payload_json}",
+                level="INFO"
+            )
+            
+            # Проверяем количество ордеров в payload
+            orders_in_payload = len(payload.get("action", {}).get("orders", []))
+            if orders_in_payload != 1:
+                self.log_message(
+                    f"⚠️ CRITICAL: Payload contains {orders_in_payload} orders instead of 1!",
+                    level="WARNING"
+                )
             
             payload_variants = [payload]  # Теперь у нас только один правильный вариант
             
@@ -1063,7 +1104,15 @@ class HyperliquidBrowser:
                     'User-Agent': 'HyperliquidBot/1.0'
                 }
                 
+                self.log_message(
+                    f"🟢 [CREATE_ORDER] Thread {thread_id} | Sending POST request to {endpoint_url}...",
+                    level="INFO"
+                )
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
+                self.log_message(
+                    f"🟢 [CREATE_ORDER] Thread {thread_id} | POST request completed, status: {response.status}",
+                    level="INFO"
+                )
                 
                 # Читаем ответ только при ошибках
                 response_text = await response.text()
