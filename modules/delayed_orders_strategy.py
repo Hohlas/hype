@@ -703,21 +703,7 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
             for k in keys_to_remove:
                 _tg_notification_cache.pop(k, None)
         
-        logger.info(f"[TG_NOTIFY_{call_id}] Sending notification: {normalized_text[:50]}...")
-        if hasattr(client, 'browser'):
-            client.browser.log_message(
-                f"[TG_NOTIFY_{call_id}] Sending Telegram notification: {normalized_text[:50]}...",
-                level="INFO"
-            )
-        
         await TgReport().send_log(logs=tg_message)
-        
-        logger.info(f"[TG_NOTIFY_{call_id}] Notification sent successfully")
-        if hasattr(client, 'browser'):
-            client.browser.log_message(
-                f"[TG_NOTIFY_{call_id}] Telegram notification sent successfully",
-                level="INFO"
-            )
         
         if save_to_report:
             await client.db.append_report(
@@ -1769,10 +1755,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     async with order_lock:
                         # Генерируем уникальный ID для отслеживания этого вызова
                         call_id = str(uuid.uuid4())[:8]
-                        client.browser.log_message(
-                            f"🔒 [BUY_LIMIT_{call_id}] Lock acquired, checking conditions...",
-                            level="INFO"
-                        )
                         
                         # DOUBLE-CHECK: Повторно проверяем наличие активных ордеров после получения блокировки
                         # Это защищает от race condition, когда ордер был создан между первой проверкой и получением блокировки
@@ -1796,11 +1778,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         else:
                             target_buy_price = normalize_price(current_price - float(step), sz_decimals)
                             # target_buy_price = normalize_price(current_price, sz_decimals)
-                        
-                        client.browser.log_message(
-                            f"🔒 [BUY_LIMIT_{call_id}] Target price calculated: ${target_buy_price:.2f}",
-                            level="INFO"
-                        )
                         
                         if buy_limit_orders_recheck:
                             # Проверяем, нет ли уже ордера с точно такой же ценой и размером
@@ -1910,24 +1887,12 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 
                                 # Размещение лимитного ордера на покупку
                                 try:
-                                    client.browser.log_message(
-                                        f"🔒 [BUY_LIMIT_{call_id}] Calling place_order: ${usdc_amount:.2f} at ${target_buy_price:.2f}",
-                                        level="INFO"
-                                    )
-                                    order_start_time = time.time()
                                     order_result = await client.place_order(
                                         token=token_name,
                                         side="BUY",
                                         order_type="LIMIT",
                                         usdc_amount=usdc_amount,
                                         price=target_buy_price
-                                    )
-                                    order_end_time = time.time()
-                                    order_duration = order_end_time - order_start_time
-                                    
-                                    client.browser.log_message(
-                                        f"🔒 [BUY_LIMIT_{call_id}] place_order completed in {order_duration:.3f}s, result: {order_result is not None}",
-                                        level="INFO"
                                     )
                                 
                                     # Инициализируем переменные перед обработкой результата
@@ -1936,10 +1901,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     is_filled = False
                                 
                                     if order_result:
-                                        client.browser.log_message(
-                                            f"🔒 [BUY_LIMIT_{call_id}] Order result received, processing...",
-                                            level="INFO"
-                                        )
                                     
                                         try:
                                             response_data = order_result.get('response', {})
@@ -2011,10 +1972,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         continue
                                     
                                     # Отправляем уведомление в Telegram
-                                    client.browser.log_message(
-                                        f"🔒 [BUY_LIMIT_{call_id}] Sending Telegram notification...",
-                                        level="INFO"
-                                    )
                                     if is_filled:
                                         await send_tg_notification(
                                             client,
@@ -2027,10 +1984,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             f"📉 <b>set BuyLimit</b>\n${usdc_amount:.2f} at ${target_buy_price:.2f}",
                                             save_to_report=False
                                         )
-                                    client.browser.log_message(
-                                        f"🔒 [BUY_LIMIT_{call_id}] Telegram notification sent",
-                                        level="INFO"
-                                    )
                                 
                                     # Записываем статистику операции с фактической ценой исполнения (если ордер был исполнен)
                                     try:

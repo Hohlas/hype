@@ -187,11 +187,6 @@ class HyperliquidClient:
         import uuid as uuid_module
         call_id = str(uuid_module.uuid4())[:8]
         thread_id = threading.current_thread().ident
-        self.browser.log_message(
-            f"🔵 [PLACE_ORDER_{call_id}] Thread {thread_id} | {order_type} {side} {token} | "
-            f"price={price}, usdc_amount={usdc_amount}, quantity={quantity}",
-            level="INFO"
-        )
         try:
             # Цена обязательна для LIMIT и MARKET ордеров
             if price is None:
@@ -303,15 +298,7 @@ class HyperliquidClient:
                 raise ValueError(f"Unsupported order type: {order_type}")
             
             # Создание ордера
-            self.browser.log_message(
-                f"🔵 [PLACE_ORDER_{call_id}] Thread {thread_id} | Calling browser.create_order...",
-                level="INFO"
-            )
             result = await self.browser.create_order(order_data)
-            self.browser.log_message(
-                f"🔵 [PLACE_ORDER_{call_id}] Thread {thread_id} | browser.create_order completed, result: {result is not None}",
-                level="INFO"
-            )
             
             # Детальное логирование ответа API (убрано для чистоты логов)
             

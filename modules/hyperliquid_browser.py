@@ -122,17 +122,6 @@ class HyperliquidBrowser:
         call_id = str(uuid_module.uuid4())[:8]
         thread_id = threading.current_thread().ident
         
-        # Логируем вызов send_request для диагностики дубликатов
-        if method == "POST" and data and "/exchange" in url:
-            # Это запрос на создание ордера - логируем детально
-            nonce = data.get("nonce", "N/A") if isinstance(data, dict) else "N/A"
-            orders_count = len(data.get("action", {}).get("orders", [])) if isinstance(data, dict) else "N/A"
-            self.log_message(
-                f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | POST to {url} | "
-                f"nonce={nonce}, orders_in_payload={orders_count}",
-                level="INFO"
-            )
-        
         if not self.session:
             await self.start_session()
             
@@ -161,21 +150,11 @@ class HyperliquidBrowser:
                 response = await self.session.get(url, params=params, headers=headers)
             elif method == "POST":
                 # Для Hyperliquid API используем json вместо data
-                if method == "POST" and data and "/exchange" in url:
-                    self.log_message(
-                        f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | Actually sending POST request now...",
-                        level="INFO"
-                    )
                 if build_signature:
                     headers["Content-Type"] = "application/json"
                     response = await self.session.post(url, json=data, params=params, headers=headers)
                 else:
                     response = await self.session.post(url, json=data, params=params, headers=headers)
-                if method == "POST" and data and "/exchange" in url:
-                    self.log_message(
-                        f"🔵 [SEND_REQUEST_{call_id}] Thread {thread_id} | POST request sent, status: {response.status}",
-                        level="INFO"
-                    )
             elif method == "PUT":
                 response = await self.session.put(url, json=data, params=params, headers=headers)
             elif method == "DELETE":
@@ -721,35 +700,15 @@ class HyperliquidBrowser:
         price = order_data.get("limit_px", "N/A")
         size = order_data.get("sz", "N/A")
         
-        self.log_message(
-            f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | {coin} {side} | price={price}, size={size}",
-            level="INFO"
-        )
         try:
             # Проверяем, это spot или futures торговля
             if "-SPOT" in coin:
                 # Spot торговля - используем правильную структуру payload
-                self.log_message(
-                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | Calling _create_spot_order...",
-                    level="INFO"
-                )
                 result = await self._create_spot_order(order_data)
-                self.log_message(
-                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | _create_spot_order completed",
-                    level="INFO"
-                )
                 return result
             else:
                 # Futures торговля - используем обычный placeOrder
-                self.log_message(
-                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | Calling _create_futures_order...",
-                    level="INFO"
-                )
                 result = await self._create_futures_order(order_data)
-                self.log_message(
-                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | _create_futures_order completed",
-                    level="INFO"
-                )
                 return result
                 
         except Exception as e:
@@ -1035,11 +994,6 @@ class HyperliquidBrowser:
             # КРИТИЧНО: Проверяем, что мы отправляем только ОДИН ордер
             import threading
             thread_id = threading.current_thread().ident
-            self.log_message(
-                f"🟢 [CREATE_ORDER] Thread {thread_id} | Preparing action with 1 order: asset_id={asset_id}, "
-                f"is_buy={order.get('b')}, size={order.get('s')}, price={order.get('p', 'N/A')}",
-                level="INFO"
-            )
             
             action = {
                 "type": "order",
@@ -1067,14 +1021,6 @@ class HyperliquidBrowser:
                 "signature": signature,
                 "vaultAddress": None  # Для основного кошелька используем None
             }
-            
-            # КРИТИЧНО: Логируем полный payload перед отправкой для диагностики
-            import json as json_module
-            payload_json = json_module.dumps(payload, indent=2)
-            self.log_message(
-                f"🟢 [CREATE_ORDER] Thread {thread_id} | Full payload before send:\n{payload_json}",
-                level="INFO"
-            )
             
             # Проверяем количество ордеров в payload
             orders_in_payload = len(payload.get("action", {}).get("orders", []))
@@ -1104,15 +1050,7 @@ class HyperliquidBrowser:
                     'User-Agent': 'HyperliquidBot/1.0'
                 }
                 
-                self.log_message(
-                    f"🟢 [CREATE_ORDER] Thread {thread_id} | Sending POST request to {endpoint_url}...",
-                    level="INFO"
-                )
                 response = await self.send_request("POST", endpoint_url, data=payload, build_signature=False)
-                self.log_message(
-                    f"🟢 [CREATE_ORDER] Thread {thread_id} | POST request completed, status: {response.status}",
-                    level="INFO"
-                )
                 
                 # Читаем ответ только при ошибках
                 response_text = await response.text()
@@ -1133,22 +1071,9 @@ class HyperliquidBrowser:
                         has_errors = any('error' in status for status in statuses)
                         
                         if not has_errors:
-                            # Детальное логирование ответа API для отладки дубликатов
-                            import threading
-                            thread_id = threading.current_thread().ident
-                            self.log_message(
-                                f"🟢 [CREATE_ORDER] Thread {thread_id} | API Response: statuses count={len(statuses)}, "
-                                f"statuses={statuses}",
-                                level="INFO"
-                            )
-                            
                             # Проверяем, сколько ордеров реально создано
                             filled_count = sum(1 for s in statuses if 'filled' in s)
                             rest_count = sum(1 for s in statuses if 'resting' in s)
-                            self.log_message(
-                                f"🟢 [CREATE_ORDER] Thread {thread_id} | Orders created: filled={filled_count}, resting={rest_count}, total={len(statuses)}",
-                                level="INFO"
-                            )
                             
                             # Если создано больше одного ордера - это проблема!
                             if len(statuses) > 1:

@@ -56,9 +56,6 @@ class TgReport:
         try:
             import aiohttp
             
-            # Логируем вызов функции
-            logger.info(f"[TG_SEND_{call_id}] TgReport.send_log called with text: {logs[:50]}...")
-            
             # Проверяем, что logs не пустой и содержит корректный текст
             if not logs or not isinstance(logs, str) or logs.strip() == "":
                 logger.warning(f"[TG_SEND_{call_id}] Empty or invalid logs text, skipping Telegram notification")
@@ -86,7 +83,6 @@ class TgReport:
                 "parse_mode": "HTML"
             }
             
-            logger.info(f"[TG_SEND_{call_id}] Sending HTTP request to Telegram API...")
             send_start_time = time.time()
             
             async with aiohttp.ClientSession() as session:
@@ -99,8 +95,6 @@ class TgReport:
                         logger.error(f"[TG_SEND_{call_id}] Failed to send Telegram message: {response.status} - {response_text}")
                         if response.status == 401:
                             logger.error(f"[TG_SEND_{call_id}] Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
-                    else:
-                        logger.info(f"[TG_SEND_{call_id}] Telegram message sent successfully in {send_duration:.3f}s")
                         
         except Exception as e:
             logger.error(f"[TG_SEND_{call_id}] Failed to send Telegram notification: {e}", exc_info=True)
