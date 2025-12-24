@@ -49,22 +49,29 @@ class TgReport:
         """
         Отправляет логи в Telegram.
         """
+        import uuid
+        import time
+        call_id = str(uuid.uuid4())[:8]
+        
         try:
             import aiohttp
             
+            # Логируем вызов функции
+            logger.info(f"[TG_SEND_{call_id}] TgReport.send_log called with text: {logs[:50]}...")
+            
             # Проверяем, что logs не пустой и содержит корректный текст
             if not logs or not isinstance(logs, str) or logs.strip() == "":
-                logger.warning("Empty or invalid logs text, skipping Telegram notification")
+                logger.warning(f"[TG_SEND_{call_id}] Empty or invalid logs text, skipping Telegram notification")
                 return
             
             # Проверяем, что токен не является значением по умолчанию
             if self.bot_token == "12345:AABBCC" or not self.bot_token or "..." in self.bot_token:
-                logger.warning(f"TG_BOT_TOKEN not configured properly (value: '{self.bot_token}'). Check input_data/tg_bot_tokens.txt file.")
+                logger.warning(f"[TG_SEND_{call_id}] TG_BOT_TOKEN not configured properly (value: '{self.bot_token}'). Check input_data/tg_bot_tokens.txt file.")
                 return
             
             # Проверяем, что chat_id не является значением по умолчанию
             if self.chat_id == "12345" or not self.chat_id or "..." in str(self.chat_id):
-                logger.warning(f"TG_USER_ID not configured properly (value: '{self.chat_id}'). Check input_data/tg_bot_tokens.txt file.")
+                logger.warning(f"[TG_SEND_{call_id}] TG_USER_ID not configured properly (value: '{self.chat_id}'). Check input_data/tg_bot_tokens.txt file.")
                 return
             
             # Очищаем текст от потенциально проблемных символов
@@ -79,17 +86,24 @@ class TgReport:
                 "parse_mode": "HTML"
             }
             
+            logger.info(f"[TG_SEND_{call_id}] Sending HTTP request to Telegram API...")
+            send_start_time = time.time()
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data) as response:
+                    send_end_time = time.time()
+                    send_duration = send_end_time - send_start_time
+                    
                     if response.status != 200:
                         response_text = await response.text()
+                        logger.error(f"[TG_SEND_{call_id}] Failed to send Telegram message: {response.status} - {response_text}")
                         if response.status == 401:
-                            logger.error(f"Failed to send Telegram message: Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
-                        else:
-                            logger.error(f"Failed to send Telegram message: {response.status} - {response_text}")
+                            logger.error(f"[TG_SEND_{call_id}] Unauthorized (401). Check TG_BOT_TOKEN in input_data/tg_bot_tokens.txt")
+                    else:
+                        logger.info(f"[TG_SEND_{call_id}] Telegram message sent successfully in {send_duration:.3f}s")
                         
         except Exception as e:
-            logger.error(f"Failed to send Telegram notification: {e}", exc_info=True)
+            logger.error(f"[TG_SEND_{call_id}] Failed to send Telegram notification: {e}", exc_info=True)
 
 
 async def send_warning_notification(error_type: str, error_message: str, account_label: str = "Unknown"):

@@ -686,19 +686,48 @@ class HyperliquidBrowser:
         """
         Создание ордера - используем spot торговлю с правильной структурой payload
         """
+        import threading
+        import uuid as uuid_module
+        call_id = str(uuid_module.uuid4())[:8]
+        thread_id = threading.current_thread().ident
+        coin = order_data.get("coin", "BTC-SPOT")
+        side = "BUY" if order_data.get("is_buy", True) else "SELL"
+        price = order_data.get("limit_px", "N/A")
+        size = order_data.get("sz", "N/A")
+        
+        self.log_message(
+            f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | {coin} {side} | price={price}, size={size}",
+            level="INFO"
+        )
         try:
             # Проверяем, это spot или futures торговля
-            coin = order_data.get("coin", "BTC-SPOT")
-            
             if "-SPOT" in coin:
                 # Spot торговля - используем правильную структуру payload
-                return await self._create_spot_order(order_data)
+                self.log_message(
+                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | Calling _create_spot_order...",
+                    level="INFO"
+                )
+                result = await self._create_spot_order(order_data)
+                self.log_message(
+                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | _create_spot_order completed",
+                    level="INFO"
+                )
+                return result
             else:
                 # Futures торговля - используем обычный placeOrder
-                return await self._create_futures_order(order_data)
+                self.log_message(
+                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | Calling _create_futures_order...",
+                    level="INFO"
+                )
+                result = await self._create_futures_order(order_data)
+                self.log_message(
+                    f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | _create_futures_order completed",
+                    level="INFO"
+                )
+                return result
                 
         except Exception as e:
-            self.log_message(f"Failed to create order: {e}", level="ERROR")
+            self.log_message(f"🟢 [CREATE_ORDER_{call_id}] Thread {thread_id} | Failed to create order: {e}", level="ERROR")
             raise
     
 
