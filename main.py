@@ -315,6 +315,14 @@ if __name__ == '__main__':
     manual_stop = False
     stop_reason = None
     
+    # Сбрасываем флаг остановки при запуске бота
+    try:
+        from modules.delayed_orders_strategy import set_bot_stop_flag
+        set_bot_stop_flag(False)
+        logger.info(f'[•] Bot stop flag reset on startup')
+    except Exception as e:
+        logger.warning(f'Failed to reset stop flag: {e}')
+    
     try:
         db = DataBase()
 
@@ -362,6 +370,14 @@ if __name__ == '__main__':
         logger.info(f'[•] Soft | Closed')
         manual_stop = True
         stop_reason = "Manual stop (Ctrl+C)"
+        
+        # Устанавливаем флаг остановки для предотвращения фантомных процессов
+        try:
+            from modules.delayed_orders_strategy import set_bot_stop_flag
+            set_bot_stop_flag(True)
+            logger.info(f'[•] Stop flag set to prevent phantom processes')
+        except Exception as e:
+            logger.error(f'Failed to set stop flag: {e}')
 
     except Exception as e:
         logger.error(f'[-] Global | {e}')

@@ -47,6 +47,18 @@ _order_creation_locks = {}
 # Кэш для дедупликации уведомлений Telegram
 _tg_notification_cache = {}
 
+# Глобальный флаг остановки бота (устанавливается при KeyboardInterrupt)
+_bot_stop_flag = False
+
+def set_bot_stop_flag(value: bool = True):
+    """Устанавливает флаг остановки бота"""
+    global _bot_stop_flag
+    _bot_stop_flag = value
+
+def get_bot_stop_flag() -> bool:
+    """Возвращает текущее значение флага остановки бота"""
+    return _bot_stop_flag
+
 
 def normalize_price(price_value: float, decimals: int) -> float:
     """
@@ -642,6 +654,19 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
     С защитой от дублирования сообщений.
     """
     try:
+        # Проверяем флаг остановки бота - если бот остановлен, не отправляем уведомления
+        if get_bot_stop_flag():
+            import uuid as uuid_module
+            call_id = str(uuid_module.uuid4())[:8]
+            logger.warning(f"[TG_NOTIFY_{call_id}] ⛔ Bot stop flag is set, skipping Telegram notification: {text[:50]}...")
+            if hasattr(client, 'browser'):
+                client.browser.log_message(
+                    f"[TG_NOTIFY_{call_id}] ⛔ PHANTOM PROCESS DETECTED: Bot stop flag is set, but notification was attempted! "
+                    f"Text: {text[:50]}...",
+                    level="WARNING"
+                )
+            return
+        
         import re
         import uuid as uuid_module
         call_id = str(uuid_module.uuid4())[:8]
@@ -1006,10 +1031,26 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         while True:
             try:
+                # Проверяем флаг остановки бота
+                if get_bot_stop_flag():
+                    client.browser.log_message(
+                        f"🛑 [STOP_FLAG] Bot stop flag detected, exiting strategy loop",
+                        level="WARNING"
+                    )
+                    break
+                
                 # Задержка между итерациями основного цикла
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
                 await async_sleep(10)
+                
+                # Повторная проверка флага после задержки
+                if get_bot_stop_flag():
+                    client.browser.log_message(
+                        f"🛑 [STOP_FLAG] Bot stop flag detected after sleep, exiting strategy loop",
+                        level="WARNING"
+                    )
+                    break
                 
                 # DEBUG лог отключен для чистоты логов
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
@@ -1870,6 +1911,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     level="WARNING"
                                 )
                             else:
+                                # Проверяем флаг остановки перед созданием ордера
+                                if get_bot_stop_flag():
+                                    client.browser.log_message(
+                                        f"🛑 [BUY_LIMIT_{call_id}] Bot stop flag detected, skipping order creation",
+                                        level="WARNING"
+                                    )
+                                    continue
+                                
                                 # Размещение лимитного ордера на покупку
                                 try:
                                     client.browser.log_message(
@@ -1962,6 +2011,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             f"📉 [BUY_LIMIT_{call_id}] set BuyLimit - ${usdc_amount:.2f} at ${target_buy_price:.2f}",
                                             level="INFO"
                                         )
+                                    
+                                    # Проверяем флаг остановки перед отправкой уведомления
+                                    if get_bot_stop_flag():
+                                        client.browser.log_message(
+                                            f"🛑 [BUY_LIMIT_{call_id}] Bot stop flag detected after order creation, skipping Telegram notification",
+                                            level="WARNING"
+                                        )
+                                        # Выходим из блока async with и продолжаем цикл
+                                        continue
                                     
                                     # Отправляем уведомление в Telegram
                                     client.browser.log_message(
