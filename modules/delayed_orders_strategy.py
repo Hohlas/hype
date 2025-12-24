@@ -1796,9 +1796,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             response_data = order_result.get('response', {})
                                             statuses = response_data.get('data', {}).get('statuses', [])
                                             client.browser.log_message(
-                                                f"🔒 [BUY_LIMIT_{call_id}] Response statuses count: {len(statuses) if statuses else 0}",
+                                                f"🔒 [BUY_LIMIT_{call_id}] Response statuses count: {len(statuses) if statuses else 0}, "
+                                                f"statuses={statuses}",
                                                 level="INFO"
                                             )
+                                            
+                                            # КРИТИЧНО: Проверяем, не создано ли несколько ордеров
+                                            if statuses and len(statuses) > 1:
+                                                client.browser.log_message(
+                                                    f"⚠️ [BUY_LIMIT_{call_id}] WARNING: API returned {len(statuses)} statuses! "
+                                                    f"This means {len(statuses)} orders were created instead of 1!",
+                                                    level="WARNING"
+                                                )
+                                            
                                             if statuses and len(statuses) > 0:
                                                 # ВАЖНО: Обрабатываем только ПЕРВЫЙ статус, чтобы не было дублирования
                                                 # Если API возвращает несколько статусов, это могут быть разные ордера
@@ -1885,6 +1895,54 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         )
                                     except Exception as e:
                                         client.browser.log_message(f"🔒 [BUY_LIMIT_{call_id}] Failed to log Averaging statistics: {e}", level="ERROR")
+                                    
+                                    # КРИТИЧНО: Проверяем, сколько ордеров реально создано на бирже
+                                    # Делаем небольшую задержку, чтобы ордера успели появиться в API
+                                    await async_sleep(2)
+                                    
+                                    # Получаем список ордеров с биржи для проверки дубликатов
+                                    try:
+                                        check_orders = await client.browser.get_account_orders()
+                                        buy_limit_check = []
+                                        for order in check_orders:
+                                            coin = order.get("coin", "")
+                                            side = order.get("side", "")
+                                            is_buy = order.get("isBuy", True)
+                                            limit_price = float(order.get("limitPx", 0))
+                                            
+                                            asset_id = token_mapping.get(token_name, token_name)
+                                            if coin == asset_id and limit_price > 0:
+                                                is_sell = side in ["SELL", "S", "A"] or (not is_buy)
+                                                if not is_sell:
+                                                    # Проверяем, что это ордер с нашей ценой (с допуском)
+                                                    if abs(limit_price - target_buy_price) < 1.0:
+                                                        buy_limit_check.append({
+                                                            'oid': order.get('oid'),
+                                                            'price': limit_price,
+                                                            'size': order.get('sz', 0)
+                                                        })
+                                        
+                                        if len(buy_limit_check) > 1:
+                                            client.browser.log_message(
+                                                f"⚠️ [BUY_LIMIT_{call_id}] CRITICAL: Found {len(buy_limit_check)} duplicate orders on exchange! "
+                                                f"Orders: {buy_limit_check}",
+                                                level="WARNING"
+                                            )
+                                        elif len(buy_limit_check) == 1:
+                                            client.browser.log_message(
+                                                f"✅ [BUY_LIMIT_{call_id}] Order verification: 1 order found on exchange (OK)",
+                                                level="INFO"
+                                            )
+                                        else:
+                                            client.browser.log_message(
+                                                f"⚠️ [BUY_LIMIT_{call_id}] Order verification: No orders found on exchange (may be filled immediately)",
+                                                level="INFO"
+                                            )
+                                    except Exception as e:
+                                        client.browser.log_message(
+                                            f"⚠️ [BUY_LIMIT_{call_id}] Failed to verify orders on exchange: {e}",
+                                            level="WARNING"
+                                        )
                                     
                                     client.browser.log_message(
                                         f"🔒 [BUY_LIMIT_{call_id}] Order creation completed, releasing lock and continuing...",

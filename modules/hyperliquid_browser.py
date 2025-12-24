@@ -1006,11 +1006,27 @@ class HyperliquidBrowser:
             
             
             # Формируем action
+            # КРИТИЧНО: Проверяем, что мы отправляем только ОДИН ордер
+            import threading
+            thread_id = threading.current_thread().ident
+            self.log_message(
+                f"🟢 [CREATE_ORDER] Thread {thread_id} | Preparing action with 1 order: asset_id={asset_id}, "
+                f"is_buy={order.get('b')}, size={order.get('s')}, price={order.get('p', 'N/A')}",
+                level="INFO"
+            )
+            
             action = {
                 "type": "order",
-                "orders": [order],
+                "orders": [order],  # ВАЖНО: только один ордер в массиве!
                 "grouping": "na"
             }
+            
+            # Проверяем, что в action действительно только один ордер
+            if len(action["orders"]) != 1:
+                self.log_message(
+                    f"⚠️ WARNING: Action contains {len(action['orders'])} orders instead of 1!",
+                    level="WARNING"
+                )
             
             # Создаем nonce
             nonce = int(time.time() * 1000)
@@ -1068,8 +1084,30 @@ class HyperliquidBrowser:
                         has_errors = any('error' in status for status in statuses)
                         
                         if not has_errors:
-                            # self.log_message(f"✅ SUCCESS: Spot order created successfully!", level="INFO")
-                            # Логируем полный ответ API для отладки (убрано для чистоты логов)
+                            # Детальное логирование ответа API для отладки дубликатов
+                            import threading
+                            thread_id = threading.current_thread().ident
+                            self.log_message(
+                                f"🟢 [CREATE_ORDER] Thread {thread_id} | API Response: statuses count={len(statuses)}, "
+                                f"statuses={statuses}",
+                                level="INFO"
+                            )
+                            
+                            # Проверяем, сколько ордеров реально создано
+                            filled_count = sum(1 for s in statuses if 'filled' in s)
+                            rest_count = sum(1 for s in statuses if 'resting' in s)
+                            self.log_message(
+                                f"🟢 [CREATE_ORDER] Thread {thread_id} | Orders created: filled={filled_count}, resting={rest_count}, total={len(statuses)}",
+                                level="INFO"
+                            )
+                            
+                            # Если создано больше одного ордера - это проблема!
+                            if len(statuses) > 1:
+                                self.log_message(
+                                    f"⚠️ WARNING: API created {len(statuses)} orders instead of 1! This is a duplicate!",
+                                    level="WARNING"
+                                )
+                            
                             return result
                         else:
                             # Показываем ошибки из statuses
