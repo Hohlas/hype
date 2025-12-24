@@ -3,6 +3,8 @@ from loguru import logger
 from time import sleep
 import asyncio
 import sys
+import os
+import atexit
 
 from modules.retry import DataBaseError
 from modules.utils import async_sleep, send_warning_notification
@@ -79,7 +81,11 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
 
             finally:
                 if hyperliquid_client:
-                    await hyperliquid_client.browser.close_sessions()
+                    try:
+                        await hyperliquid_client.browser.close_sessions()
+                        logger.info(f'[{hyperliquid_client.label}] HTTP sessions closed')
+                    except Exception as e:
+                        logger.error(f'[{hyperliquid_client.label}] Failed to close sessions: {e}')
 
                 if type(module_data) == dict:
                     if mode in [0, 1, 2]:
@@ -131,7 +137,11 @@ async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
 
             finally:
                 for client in hyperliquid_clients:
-                    await client.browser.close_sessions()
+                    try:
+                        await client.browser.close_sessions()
+                        logger.info(f'[{client.label}] HTTP sessions closed')
+                    except Exception as e:
+                        logger.error(f'[{client.label}] Failed to close sessions: {e}')
 
                 if type(group_data) == dict:
                     if mode in [3]:
@@ -312,6 +322,48 @@ if __name__ == '__main__':
     if os_name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+    # PID-файл для предотвращения множественных запусков этого конкретного бота
+    # Используем уникальное имя, специфичное для Hyperliquid бота
+    PID_FILE = '/tmp/hyperliquid_trading_bot.pid' if os_name != 'nt' else os.path.join(os.environ.get('TEMP', '.'), 'hyperliquid_trading_bot.pid')
+    
+    def cleanup_pid_file():
+        """Удаляет PID-файл при выходе"""
+        try:
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
+                logger.info(f'[•] PID file removed: {PID_FILE}')
+        except Exception as e:
+            logger.error(f'Failed to remove PID file: {e}')
+    
+    # Проверяем, не запущен ли уже бот
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            
+            # Проверяем, существует ли процесс с этим PID
+            try:
+                os.kill(old_pid, 0)  # Сигнал 0 проверяет существование процесса
+                logger.error(f'[•] Bot already running (PID: {old_pid})')
+                logger.error(f'[•] If this is incorrect, delete: {PID_FILE}')
+                sys.exit(1)
+            except OSError:
+                # Процесс не существует, удаляем старый PID файл
+                logger.warning(f'[•] Stale PID file found (process {old_pid} not running), removing...')
+                os.remove(PID_FILE)
+        except Exception as e:
+            logger.warning(f'[•] Error checking PID file: {e}')
+    
+    # Создаём PID-файл
+    try:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info(f'[•] PID file created: {PID_FILE} (PID: {os.getpid()})')
+        # Регистрируем cleanup при выходе
+        atexit.register(cleanup_pid_file)
+    except Exception as e:
+        logger.error(f'[•] Failed to create PID file: {e}')
+
     manual_stop = False
     stop_reason = None
     
@@ -378,6 +430,34 @@ if __name__ == '__main__':
             logger.info(f'[•] Stop flag set to prevent phantom processes')
         except Exception as e:
             logger.error(f'Failed to set stop flag: {e}')
+        
+        # КРИТИЧНО: Отменяем все активные asyncio задачи
+        try:
+            # Получаем текущий event loop (если он существует)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            
+            if loop and not loop.is_closed():
+                # Получаем все активные задачи
+                pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                if pending:
+                    logger.info(f'[•] Cancelling {len(pending)} pending asyncio tasks...')
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Даём время на корректное завершение задач
+                    try:
+                        loop.run_until_complete(asyncio.sleep(0.5))
+                    except:
+                        pass
+                    
+                    logger.info(f'[•] All pending tasks cancelled')
+                else:
+                    logger.info(f'[•] No pending tasks to cancel')
+        except Exception as e:
+            logger.error(f'Failed to cancel asyncio tasks: {e}')
 
     except Exception as e:
         logger.error(f'[-] Global | {e}')
@@ -394,3 +474,6 @@ if __name__ == '__main__':
                 asyncio.run(TgReport().send_log(logs=f"⏹️ Bot Stopped\nReason: {stop_reason}"))
             except Exception as e:
                 logger.error(f"Failed to send stop notification: {e}")
+        
+        # Удаляем PID-файл при выходе
+        cleanup_pid_file()
