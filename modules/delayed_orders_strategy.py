@@ -1757,18 +1757,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Проверяем, есть ли активные Buy Limit ордера
                 active_buy_limits = [order for order in buy_limit_orders if float(order.get("limitPx", 0)) > 0]
                 
-                # Логируем состояние перед проверкой
-                client.browser.log_message(
-                    f"🔍 [BUY_LIMIT_CHECK] Active buy limits count: {len(active_buy_limits)}, "
-                    f"current_price=${current_price:.2f}, min_tp_price=${min_tp_price:.2f}",
-                    level="INFO"
-                )
-                
                 if not active_buy_limits:
-                    client.browser.log_message(
-                        f"🔍 [BUY_LIMIT_CHECK] No active buy limits found, proceeding to create order...",
-                        level="INFO"
-                    )
                     
                     # Инициализируем блокировку для этого клиента, если еще не создана
                     if client.wallet_address not in _order_creation_locks:
