@@ -1041,15 +1041,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # DEBUG лог отключен для чистоты логов
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
                 
-                # Получаем данные параллельно для оптимизации
-                import asyncio
-                tasks = [
-                    client.browser.get_token_price(token_name),
-                    client.browser.get_account_orders(),
-                    get_active_tp_orders(client, token_name),
-                    client.browser.get_all_balances()
-                ]
-                current_price_raw, open_orders, tp_orders, all_balances = await asyncio.gather(*tasks)
+                # Получаем данные последовательно (убрали asyncio.gather для надежности)
+                current_price_raw = await client.browser.get_token_price(token_name)
+                open_orders = await client.browser.get_account_orders()
+                tp_orders = await get_active_tp_orders(client, token_name)
+                all_balances = await client.browser.get_all_balances()
                 current_price = float(current_price_raw)
                 
                 # Разделяем лимитные ордера на две категории
