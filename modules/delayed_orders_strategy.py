@@ -1360,10 +1360,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             if executed_id in client._processed_tp_orders:
                                 continue
                             
+                            # КРИТИЧНО: Помечаем TP как обработанный СРАЗУ, ДО начала обработки
+                            # Это предотвращает параллельную обработку одного TP в разных итерациях цикла
+                            # (аналогично averaging_market.py, строка 754)
+                            client._processed_tp_orders.add(executed_id)
+                            
                             executed_order = client._previous_tp_orders.get(executed_id)
                             
                             if executed_order:
-                                # Оборачиваем обработку в try-finally, чтобы гарантировать пометку как обработанного
+                                # Оборачиваем обработку в try-except для обработки ошибок
                                 try:
                                     # Используем уже полученные балансы из основного цикла
                                     # all_balances уже получены выше в цикле
@@ -1620,10 +1625,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         f"❌ Error processing Take Profit for order {executed_id}: {e}",
                                         level="ERROR"
                                     )
-                                finally:
-                                    # Всегда помечаем TP ордер как обработанный, даже при ошибке
-                                    # Это предотвращает повторную обработку и дубликаты в Excel
-                                    client._processed_tp_orders.add(executed_id)
+                                    # TP уже помечен как обработанный выше, поэтому не нужно делать это здесь
                 
                 # Обновляем предыдущее состояние (сохраняем полную информацию об ордерах)
                 # В TP ордерах из Open Orders есть поле "timestamp" - время создания ордера
