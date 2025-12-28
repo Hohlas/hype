@@ -300,15 +300,16 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         return None
 
 
-def initialize_statistics_file(token_name: str = "BTC"):
+def initialize_statistics_file(token_name: str = "BTC", account_label: str = "hype"):
     """
     Инициализирует файл статистики с правильной структурой колонок при старте программы.
     Вызывается один раз при запуске стратегии.
     
     Args:
         token_name: Название торгуемого токена (по умолчанию "BTC")
+        account_label: Метка аккаунта из wallets.txt (по умолчанию "hype")
     """
-    stats_file = "hype_stat.xlsx"
+    stats_file = f"{account_label}_stat.xlsx"
     
     # Определяем список колонок (используем token_name для универсальности)
     expected_columns = [
@@ -352,7 +353,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                                  usdc_balance: float, btc_balance: float, total_value: float, 
                                  orders=None, sz_decimals: int = None, token_name: str = "BTC"):
     """
-    Записывает статистику операции в Excel файл hype_stat.xlsx
+    Записывает статистику операции в Excel файл {account_label}_stat.xlsx
     
     Args:
         client: HyperliquidClient instance
@@ -425,8 +426,9 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             'Total Value': total_value
         }
         
-        # Путь к файлу статистики
-        stats_file = "hype_stat.xlsx"
+        # Путь к файлу статистики (используем имя аккаунта из wallets.txt)
+        account_label = client.label if hasattr(client, 'label') else "hype"
+        stats_file = f"{account_label}_stat.xlsx"
         
         # Определяем список колонок
         expected_columns = [
@@ -970,7 +972,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # client.browser.log_message("🔍 DEBUG: Strategy function started", level="INFO")
         
         # Инициализируем файл статистики при старте (создаем, если не существует)
-        initialize_statistics_file(token_name)
+        account_label = client.label if hasattr(client, 'label') else "hype"
+        initialize_statistics_file(token_name, account_label)
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
