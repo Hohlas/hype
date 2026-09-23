@@ -52,11 +52,17 @@ class HyperliquidBrowser:
             # Создаем и сохраняем аккаунт
             try:
                 self.account = Account.from_key(clean_key)
-                
-                # Проверка совпадения адресов
+
+                # Прямой режим: ключ от основного кошелька.
+                # Agent режим (Hyperliquid API Wallet): подпись ставится ключом
+                # API-кошелька, а балансы/ордера читаются по основному адресу —
+                # биржа сама привязывает подпись агента к основному аккаунту.
                 if self.account.address.lower() != wallet_address.lower():
-                    self.log_message(f"❌ MISMATCH: Account address {self.account.address} != Expected {wallet_address}", level="ERROR")
-                    self.log_message(f"❌ This means the private key doesn't match the wallet address!", level="ERROR")
+                    self.log_message(
+                        f"🔑 Agent mode: signer {self.account.address} "
+                        f"trades on behalf of {wallet_address}",
+                        level="INFO"
+                    )
                 else:
                     self.log_message(f"✅ Wallet initialized: {self.account.address}", level="INFO")
             except Exception as e:
@@ -193,10 +199,10 @@ class HyperliquidBrowser:
             # Проверим наличие аккаунта
             if not self.account:
                 raise Exception("No account available for signing")
-                
-            # Проверка соответствия адреса
-            if self.wallet_address.lower() != self.account.address.lower():
-                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+
+            # NOTE: signer может отличаться от wallet_address в agent режиме
+            # (Hyperliquid API Wallet) — биржа привязывает подпись к основному
+            # аккаунту сама, поэтому жесткой проверки равенства здесь нет.
             
             def normalize_number(n):
                 if isinstance(n, str):
@@ -901,8 +907,8 @@ class HyperliquidBrowser:
             asset_id = await self._get_spot_asset_id(coin)
             
             # Make sure wallet address matches
-            if self.wallet_address.lower() != self.account.address.lower():
-                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+            # NOTE: в agent режиме (API Wallet) signer отличается от wallet_address —
+            # это нормально, проверка равенства убрана (см. __init__).
                 
             # Using only the main exchange endpoint for spot trading
             endpoint_url = f"{self.BASE_URL}/exchange"
@@ -1085,8 +1091,8 @@ class HyperliquidBrowser:
             ]
             
             # Double check wallet address before preparing payload
-            if self.wallet_address.lower() != self.account.address.lower():
-                raise Exception(f"Wallet address mismatch: Expected {self.wallet_address}, got {self.account.address}")
+            # NOTE: в agent режиме (API Wallet) signer отличается от wallet_address —
+            # это нормально, проверка равенства убрана (см. __init__).
             
             # ПРАВИЛЬНАЯ структура payload для futures торговли
             # Форматируем числовые поля с правильной точностью

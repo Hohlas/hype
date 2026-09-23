@@ -17,6 +17,14 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
     level=settings.LOG_LEVEL
 )
+logger.add(
+    settings.LOG_FILE,
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
+    level=settings.LOG_LEVEL,
+    rotation=settings.LOG_ROTATION,
+    retention=settings.LOG_RETENTION,
+    encoding="utf-8",
+)
 
 
 def initialize_account(module_data: dict, group_data: dict = None):

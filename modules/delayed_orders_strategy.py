@@ -31,6 +31,7 @@ from loguru import logger
 import pandas as pd
 from datetime import datetime
 import os
+import json
 import asyncio
 from .utils import round_cut, async_sleep, TgReport, send_warning_notification, send_profit_notification
 from .retry import CustomError
@@ -280,6 +281,134 @@ async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sel
         return None
 
 
+# Файл персистентности якорей hold_benchmark (депо_старт / цена_старт).
+# Якорь фиксируется ОДИН РАЗ при первой операции First Position и больше
+# никогда не перезаписывается — иначе сравнение Total Value vs hold_benchmark
+# при перезапусках теряет смысл. Хранится per-label, чтобы несколько
+# аккаунтов не затирали друг друга.
+STATS_DB_FILE = "databases/stats.json"
+HOLD_ANCHOR_KEY = "hold_benchmark_anchor"
+
+
+def load_hold_anchor(label: str):
+    """
+    Читает якорь hold_benchmark для label из databases/stats.json.
+
+    Returns:
+        dict {depo_start, price_start, timestamp} или None если якоря нет.
+        Существующие ключи файла не трогаются.
+    """
+    try:
+        if not os.path.exists(STATS_DB_FILE):
+            return None
+        with open(STATS_DB_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        anchors = data.get(HOLD_ANCHOR_KEY)
+        if not isinstance(anchors, dict):
+            return None
+        # Backward compat: старый плоский формат {depo_start, price_start, ...}
+        if "depo_start" in anchors and "price_start" in anchors:
+            return anchors
+        entry = anchors.get(label)
+        if isinstance(entry, dict) and entry.get("depo_start") and entry.get("price_start"):
+            return entry
+        return None
+    except Exception:
+        return None
+
+
+def save_hold_anchor(label: str, depo_start: float, price_start: float):
+    """
+    Записывает якорь hold_benchmark для label в databases/stats.json.
+    Пишет ТОЛЬКО если якоря для этого label еще нет (повторная запись запрещена).
+    Остальное содержимое файла сохраняется как есть.
+
+    Returns:
+        True если якорь записан (или уже был и совпадает по смыслу — т.е. якорь есть),
+        актуальный якорь dict.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = {}
+    try:
+        if os.path.exists(STATS_DB_FILE):
+            with open(STATS_DB_FILE, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+    except Exception:
+        data = {}
+
+    anchors = data.get(HOLD_ANCHOR_KEY)
+    if not isinstance(anchors, dict):
+        anchors = {}
+
+    # Плоский legacy-формат в per-label не мигрируем молча — просто не трогаем,
+    # новый якорь кладем рядом под label.
+    if "depo_start" in anchors and "price_start" in anchors and label not in anchors:
+        pass
+
+    existing = anchors.get(label)
+    if isinstance(existing, dict) and existing.get("depo_start") and existing.get("price_start"):
+        return existing  # уже зафиксирован — не перетираем
+
+    entry = {
+        "depo_start": depo_start,
+        "price_start": price_start,
+        "timestamp": timestamp,
+    }
+    anchors[label] = entry
+    data[HOLD_ANCHOR_KEY] = anchors
+    os.makedirs(os.path.dirname(STATS_DB_FILE) or ".", exist_ok=True)
+    with open(STATS_DB_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return entry
+
+
+def ensure_hold_anchor(client, depo_start: float = None, price_start: float = None):
+    """
+    Гарантирует наличие якоря hold_benchmark в памяти client.
+
+    Логика (приоритет сверху вниз):
+    1. Если якорь уже есть в памяти client — ничего не делать (рестарты
+       в рамках одного запуска не перетирают значения).
+    2. Иначе прочитать из databases/stats.json — если есть, взять оттуда.
+    3. Иначе (только First Position передает depo_start/price_start) —
+       зафиксировать переданные значения в памяти + записать на диск.
+
+    Returns:
+        dict якоря или None.
+    """
+    if getattr(client, '_hold_depo_start', None) and getattr(client, '_hold_price_start', None):
+        return {
+            "depo_start": client._hold_depo_start,
+            "price_start": client._hold_price_start,
+        }
+    label = getattr(client, 'label', 'default')
+    anchor = load_hold_anchor(label)
+    if anchor is None and depo_start and price_start:
+        anchor = save_hold_anchor(label, depo_start, price_start)
+    if anchor:
+        client._hold_depo_start = float(anchor["depo_start"])
+        client._hold_price_start = float(anchor["price_start"])
+        return anchor
+    return None
+
+
+def calc_hold_benchmark(client, current_price: float):
+    """
+    hold_benchmark = депо_старт / цена_старт × цена_сейчас.
+    Стоимость депозита, если бы на старте весь депозит ушел в BTC.
+
+    Returns:
+        float или None если якорь еще не зафиксирован.
+    """
+    depo_start = getattr(client, '_hold_depo_start', None)
+    price_start = getattr(client, '_hold_price_start', None)
+    if not depo_start or not price_start or not current_price:
+        return None
+    return depo_start / price_start * float(current_price)
+
+
 def initialize_statistics_file(token_name: str = "BTC"):
     """
     Инициализирует файл статистики с правильной структурой колонок при старте программы.
@@ -293,7 +422,8 @@ def initialize_statistics_file(token_name: str = "BTC"):
     # Определяем список колонок (используем token_name для универсальности)
     expected_columns = [
         'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount', 
-        'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value'
+        'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value',
+        'Hold Benchmark'
     ]
     
     # Проверяем, существует ли файл
@@ -316,6 +446,13 @@ def initialize_statistics_file(token_name: str = "BTC"):
                     df['Limit Profit'] = 0.0
                 df.to_excel(stats_file, index=False)
                 logger.info(f"✅ Updated statistics file structure: added 'Limit Profit' column")
+
+            # Если столбец "Hold Benchmark" отсутствует, добавляем его в конец
+            # (рядом с Total Value — Total Value последняя из старых колонок)
+            if 'Hold Benchmark' not in df.columns:
+                df['Hold Benchmark'] = 0.0
+                df.to_excel(stats_file, index=False)
+                logger.info(f"✅ Updated statistics file structure: added 'Hold Benchmark' column")
             
             # Убеждаемся, что все ожидаемые колонки присутствуют
             missing_columns = [col for col in expected_columns if col not in df.columns]
@@ -330,7 +467,8 @@ def initialize_statistics_file(token_name: str = "BTC"):
 
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
                                  usdc_balance: float, btc_balance: float, total_value: float, 
-                                 orders=None, sz_decimals: int = None, token_name: str = "BTC"):
+                                 orders=None, sz_decimals: int = None, token_name: str = "BTC",
+                                 hold_benchmark: float = None):
     """
     Записывает статистику операции в Excel файл hype_stat.xlsx
     
@@ -345,6 +483,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         orders: Список открытых ордеров (опционально, если не передан - будет получен внутри функции)
         sz_decimals: Количество знаков после запятой для форматирования цены (из API)
         token_name: Название торгуемого токена (по умолчанию "BTC")
+        hold_benchmark: Эталон buy-and-hold (опционально; если не передан —
+            считается внутри из якоря client: депо_старт / цена_старт × цена_сейчас)
     """
     try:
         # Получаем текущую цену токена
@@ -391,6 +531,13 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         
         # Цена уже нормализована при расчете через normalize_price, записываем как число
         # Excel автоматически отформатирует число согласно настройкам ячейки
+
+        # Hold Benchmark: если явно не передан — считаем из якоря client.
+        # Якорь фиксируется один раз при First Position (см. ensure_hold_anchor),
+        # до этого момента колонка остается пустой (None).
+        if hold_benchmark is None:
+            ensure_hold_anchor(client)
+            hold_benchmark = calc_hold_benchmark(client, current_token_price)
         
         # Подготавливаем данные для записи
         new_row = {
@@ -402,7 +549,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             'USDC Balance': usdc_balance,
             f'{token_name} Balance': btc_balance,
             'Limit Profit': limit_profit,
-            'Total Value': total_value
+            'Total Value': total_value,
+            'Hold Benchmark': hold_benchmark
         }
         
         # Путь к файлу статистики
@@ -411,7 +559,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Определяем список колонок
         expected_columns = [
             'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
-            'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value'
+            'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value',
+            'Hold Benchmark'
         ]
         
         # Проверяем, существует ли файл
@@ -429,6 +578,10 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
                 else:
                     # Если "Total Value" нет, добавляем в конец
                     df['Limit Profit'] = 0.0
+
+            # Если столбец "Hold Benchmark" отсутствует, добавляем его в конец
+            if 'Hold Benchmark' not in df.columns:
+                df['Hold Benchmark'] = 0.0
             
             # Убеждаемся, что все ожидаемые колонки присутствуют
             for col in expected_columns:
@@ -862,6 +1015,11 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         
         # Инициализируем файл статистики при старте (создаем, если не существует)
         initialize_statistics_file(token_name)
+
+        # Восстанавливаем якорь hold_benchmark (депо_старт / цена_старт) с диска.
+        # Только чтение: если якорь уже зафиксирован ранее — используем его,
+        # повторная запись при перезапусках запрещена.
+        ensure_hold_anchor(client)
         
         # Загружаем лимиты токена один раз при старте (кэшируются в client)
         min_qty, min_notional, sz_decimals = await client.load_token_limits(token_name)
@@ -1621,6 +1779,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         usdc_balance = all_balances.get("USDC", 0.0)
                         btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                         total_value = usdc_balance + (btc_balance * actual_price)
+                        # Фиксируем якорь hold_benchmark ОДИН РАЗ: депо_старт = total
+                        # после первой покупки, цена_старт = фактическая цена исполнения.
+                        # Если якорь уже есть (память/диск) — не перетираем.
+                        ensure_hold_anchor(
+                            client,
+                            depo_start=total_value,
+                            price_start=actual_price,
+                        )
                         await log_statistics_to_excel(
                             client=client,
                             operation="First Position",
