@@ -25,6 +25,7 @@ class DataBase:
         self.modules_db_name = 'databases/modules.json'
         self.report_db_name = 'databases/report.json'
         self.stats_db_name = 'databases/stats.json'
+        self.last_buy_timestamps_db_name = 'databases/last_buy_timestamps.json'
         self.personal_key = None
         
         # Создаем каталог databases, если его нет
@@ -36,6 +37,7 @@ class DataBase:
             {"name": self.modules_db_name, "default": "{}"},
             {"name": self.report_db_name, "default": "{}"},
             {"name": self.stats_db_name, "default": "{}"},
+            {"name": self.last_buy_timestamps_db_name, "default": "{}"},
         ]:
             if not path.isfile(db["name"]):
                 with open(db["name"], 'w', encoding='utf-8') as f:
@@ -352,3 +354,64 @@ class DataBase:
         
         logger.critical('Dont Forget To Remove Private Keys from wallets.txt!')
         logger.info(f'Created Database for {len(new_modules)} accounts!\n')
+    
+    def get_last_buy_timestamps(self, wallet_address: str, token_name: str) -> list:
+        """
+        Персистентные timestamps покупок для кошелька и токена.
+        Переживают рестарты (в отличие от in-memory last_buy_timestamp),
+        дополняют retry-очередь и скан сирот.
+        
+        Returns:
+            Список timestamp в миллисекундах (до 10, по убыванию) или [].
+        """
+        try:
+            if not path.isfile(self.last_buy_timestamps_db_name):
+                return []
+            
+            with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            key = f"{wallet_address}_{token_name}"
+            timestamps = data.get(key, [])
+            
+            # Обратная совместимость: число -> список
+            if isinstance(timestamps, int):
+                return [timestamps]
+            elif isinstance(timestamps, list):
+                timestamps = sorted(timestamps, reverse=True)[:10]
+                return timestamps
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"Failed to get last_buy_timestamps: {e}")
+            return []
+    
+    def add_last_buy_timestamp(self, wallet_address: str, token_name: str, timestamp: int):
+        """
+        Добавляет timestamp покупки (максимум 10, старые вытесняются).
+        Ошибки БД никогда не должны ронять торговлю — только лог.
+        """
+        try:
+            if path.isfile(self.last_buy_timestamps_db_name):
+                with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            
+            key = f"{wallet_address}_{token_name}"
+            timestamps = data.get(key, [])
+            
+            if isinstance(timestamps, int):
+                timestamps = [timestamps]
+            elif not isinstance(timestamps, list):
+                timestamps = []
+            
+            if timestamp not in timestamps:
+                timestamps.append(timestamp)
+                timestamps = sorted(timestamps, reverse=True)[:10]
+                data[key] = timestamps
+            
+            with open(self.last_buy_timestamps_db_name, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to add last_buy_timestamp: {e}")

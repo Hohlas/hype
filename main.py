@@ -289,7 +289,16 @@ if __name__ == '__main__':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     manual_stop = False
-    
+
+    # Сбрасываем stop-флаг стратегии при запуске (прошлый запуск мог
+    # завершиться по Ctrl+C с выставленным флагом)
+    try:
+        from modules.delayed_orders_strategy import set_bot_stop_flag
+        set_bot_stop_flag(False)
+        logger.info('[•] Bot stop flag reset on startup')
+    except Exception as e:
+        logger.warning(f'Failed to reset stop flag: {e}')
+
     try:
         db = DataBase()
 
@@ -334,6 +343,15 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logger.info(f'[•] Soft | Closed')
         manual_stop = True
+
+        # Флаг остановки: циклы стратегии завершатся сами, фантомных
+        # уведомлений/ордеров от умирающего процесса не будет
+        try:
+            from modules.delayed_orders_strategy import set_bot_stop_flag
+            set_bot_stop_flag(True)
+            logger.info('[•] Stop flag set to prevent phantom processes')
+        except Exception as e:
+            logger.error(f'Failed to set stop flag: {e}')
 
     except Exception as e:
         logger.error(f'[-] Global | {e}')

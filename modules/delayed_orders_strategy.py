@@ -41,6 +41,22 @@ import settings
 # Кэш для ограничения частоты предупреждающих сообщений
 _order_skipped_cache = {}
 
+# Глобальный флаг остановки бота (выставляется при KeyboardInterrupt в main.py).
+# Проверяется вверху цикла, после сна и перед выставлением ордеров —
+# стратегия завершает цикл сама вместо обрыва посреди операций.
+_bot_stop_flag = False
+
+
+def set_bot_stop_flag(value: bool = True):
+    """Устанавливает флаг остановки бота"""
+    global _bot_stop_flag
+    _bot_stop_flag = value
+
+
+def get_bot_stop_flag() -> bool:
+    """Возвращает текущее значение флага остановки бота"""
+    return _bot_stop_flag
+
 
 def normalize_price(price_value: float, decimals: int) -> float:
     """
@@ -674,6 +690,11 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             hold_benchmark = calc_hold_benchmark(client, current_token_price)
         
         # Подготавливаем данные для записи
+        # Profit=None (не Take Profit) -> 0.0: в файле так заведены все
+        # неторговые строки, плюс это убирает all-NA колонку в new_df
+        # (источник FutureWarning при concat).
+        if profit is None:
+            profit = 0.0
         new_row = {
             'Timestamp': timestamp,
             f'Current {token_name} Price': current_token_price,
@@ -741,7 +762,17 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         if len(df) == 0:
             df = new_df
         else:
+            # FutureWarning (pandas>=2.1): concat с пустыми/all-NA колонками
+            # deprecated — исключаем такие колонки из ОБОИХ фреймов заранее,
+            # значения подтянутся при финальном выравнивании.
+            na_cols = [c for c in df.columns if df[c].isna().all()]
+            if na_cols:
+                df = df.drop(columns=na_cols)
+            na_new = [c for c in new_df.columns if new_df[c].isna().all()]
+            if na_new:
+                new_df = new_df.drop(columns=na_new)
             df = pd.concat([df, new_df], ignore_index=True, sort=False)
+            df = df.reindex(columns=expected_columns)
         
         # Сохраняем в Excel файл
         df.to_excel(stats_file, index=False)
@@ -923,8 +954,12 @@ async def safe_place_order(client, **kwargs):
 async def send_tg_notification(client, text: str, save_to_report: bool = True):
     """
     Отправляет уведомление в Telegram немедленно (без ожидания окончания работы модуля).
+    При выставленном stop-флаге уведомления глушатся (защита от фантомного процесса).
     """
     try:
+        if get_bot_stop_flag():
+            logger.warning("⛔ Bot stop flag is set, skipping Telegram notification")
+            return
         await TgReport().send_log(logs=text)
         
         if save_to_report:
@@ -958,14 +993,14 @@ async def create_tp_order(client, token_name: str, entry_price: Decimal, order_q
         tp_result = await client.place_order(**tp_order_data)
         
         client.browser.log_message(
-            f"🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}",
+            f"📉 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}",
             level="INFO"
         )
         
         # Отправляем уведомление в Telegram
         await send_tg_notification(
             client,
-            text=f'🎯 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}',
+            text=f'📉 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}',
             save_to_report=False
         )
         
@@ -1182,6 +1217,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             break
         except Exception as e:
             client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
+
+        # Сбрасываем stop-флаг при старте стратегии (порт из lighter):
+        # прошлый запуск мог завершиться по Ctrl+C с выставленным флагом.
+        set_bot_stop_flag(False)
+
+        # Добираем персистентные timestamps покупок с диска (порт из lighter):
+        # переживают рестарты, дополняют in-memory last_buy_timestamp.
+        try:
+            if getattr(client, 'db', None) is not None:
+                persisted = client.db.get_last_buy_timestamps(client.wallet_address, token_name) or []
+                if persisted:
+                    persisted_max = max(persisted)
+                    if last_buy_timestamp is None or persisted_max > last_buy_timestamp:
+                        last_buy_timestamp = persisted_max
+                    client.browser.log_message(
+                        f"💾 Restored {len(persisted)} buy timestamp(s) from DB "
+                        f"(latest: {datetime.fromtimestamp(persisted_max / 1000).strftime('%Y-%m-%d %H:%M:%S')})",
+                        level="INFO"
+                    )
+        except Exception as e:
+            client.browser.log_message(f"Failed to restore buy timestamps: {e}", level="WARNING")
         
         # Структуры незащищенных покупок (фиксы 2-4):
         # _retry_tp_buys: oid -> buy info, TP не выставлен — ретраить вне зависимости от timestamp
@@ -1225,6 +1281,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
 
         while True:
             try:
+                # Чистое завершение по stop-флагу (порт из lighter)
+                if get_bot_stop_flag():
+                    client.browser.log_message(
+                        "🛑 [STOP_FLAG] Bot stop flag detected, exiting strategy loop",
+                        level="WARNING"
+                    )
+                    break
                 cycle_count += 1
                 if cycle_count % cycle_log_every == 0:
                     client.browser.log_message(f"🔄 CYCLE #{cycle_count}", level="INFO")
@@ -1232,6 +1295,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
                 await async_sleep(10)
+                # Повторная проверка после сна — выходим до любых запросов/ордеров
+                if get_bot_stop_flag():
+                    client.browser.log_message(
+                        "🛑 [STOP_FLAG] Bot stop flag detected after sleep, exiting strategy loop",
+                        level="WARNING"
+                    )
+                    break
                 
                 # DEBUG лог отключен для чистоты логов
                 # client.browser.log_message("🔍 DEBUG: Starting strategy iteration", level="INFO")
@@ -1452,17 +1522,26 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 client._pending_tp_oids.discard(trade_oid)
                                 if last_buy_timestamp is None or buy['timestamp'] > last_buy_timestamp:
                                     last_buy_timestamp = buy['timestamp']
+                                # Дублируем timestamp на диск (порт из lighter) — переживет рестарт.
+                                # Ошибки БД не роняют торговлю.
+                                try:
+                                    if getattr(client, 'db', None) is not None:
+                                        client.db.add_last_buy_timestamp(
+                                            client.wallet_address, token_name, buy['timestamp']
+                                        )
+                                except Exception:
+                                    pass
                                 free_btc = max(0.0, free_btc - tp_qty)
 
                                 client.browser.log_message(
-                                    f"🎯 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
+                                    f"📉 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
                                     level="INFO"
                                 )
 
                                 # Отправляем уведомление в Telegram
                                 await send_tg_notification(
                                     client,
-                                    text=f'🎯 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f}',
+                                    text=f'📉 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f}',
                                     save_to_report=False
                                 )
 
@@ -1969,7 +2048,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         f"🚀 <b>First Position</b>\nBUY {token_name} at ${current_price:.2f}",
                         save_to_report=False
                     )
-                    
+
+                    # Не открываем новые позиции во время остановки
+                    if get_bot_stop_flag():
+                        client.browser.log_message(
+                            "🛑 [STOP_FLAG] Bot stop flag detected, skipping First Position order",
+                            level="WARNING"
+                        )
+                        continue
+
                     order_result = await client.place_order(
                         token=token_name,
                         side="BUY",
@@ -2084,6 +2171,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     level="WARNING"
                                 )
                             else:
+                                # Не открываем новые позиции во время остановки
+                                if get_bot_stop_flag():
+                                    client.browser.log_message(
+                                        "🛑 [STOP_FLAG] Bot stop flag detected, skipping BuyLimit order",
+                                        level="WARNING"
+                                    )
+                                    continue
                                 # Размещение лимитного ордера на покупку
                                 try:
                                     order_result = await client.place_order(
@@ -2225,7 +2319,15 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             f"🚀 Pyramiding at ${current_price:.2f} | Balance ${usdc_balance:.2f}",
                             level="INFO"
                         )
-                        
+
+                        # Не открываем новые позиции во время остановки
+                        if get_bot_stop_flag():
+                            client.browser.log_message(
+                                "🛑 [STOP_FLAG] Bot stop flag detected, skipping Pyramiding order",
+                                level="WARNING"
+                            )
+                            continue
+
                         order_result = await client.place_order(
                             token=token_name,
                             side="BUY",
