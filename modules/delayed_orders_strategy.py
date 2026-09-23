@@ -455,9 +455,41 @@ def fee_to_usdc(fee_str, fee_token: str, ref_price: float, token_name: str) -> f
     return 0.0
 
 
+def aggregate_buys_by_oid(trades_history):
+    """
+    Группирует fills покупок по oid ордера: биржа разбивает исполнение одного
+    ордера на несколько записей (сплиты вида 0.00002 + 0.00022). Без группировки
+    записи-крошки выглядят «покупками без TP» и плодят дубли TP.
+    Returns:
+        dict oid -> {oid, price (VWAP), amount (сумма), timestamp (max)}.
+    """
+    grouped = {}
+    for trade in (trades_history or []):
+        if trade.get("side", "").upper() not in ["BUY", "B"]:
+            continue
+        oid = trade.get("oid")
+        try:
+            px = float(trade.get("px", 0))
+            sz = float(trade.get("sz", 0))
+            ts = trade.get("time", 0)
+        except Exception:
+            continue
+        if not (px > 0 and sz > 0 and oid):
+            continue
+        g = grouped.get(oid)
+        if g is None:
+            grouped[oid] = {"oid": oid, "price": px, "amount": sz, "timestamp": ts}
+        else:
+            total = g["amount"] + sz
+            g["price"] = (g["price"] * g["amount"] + px * sz) / total
+            g["amount"] = total
+            g["timestamp"] = max(g["timestamp"], ts)
+    return grouped
+
+
 async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
                            sz_decimals: int, last_buy_timestamp=None,
-                           max_age_days: int = 7):
+                           max_age_days: int = 7, min_qty: float = 0.0):
     """
     Стартовое сканирование сирот: покупки из истории, у которых нет ни
     висящего TP SELL того же размера, ни более поздней продажи того же
@@ -466,6 +498,7 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
 
     Суммарный размер сирот ограничивается свободным балансом (от новых к старым),
     чтобы не ставить TP на пыль сверх имеющихся средств.
+    Fills одного ордера предварительно группируются по oid (см. aggregate_buys_by_oid).
 
     Returns:
         list[{oid, price, amount, timestamp}] от старых к новым.
@@ -499,14 +532,14 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
             if t.get("side", "").upper() in ["SELL", "S", "A"]
         ]
 
-        for trade in trades_history:
-            if trade.get("side", "").upper() not in ["BUY", "B"]:
-                continue
-            buy_time = trade.get("time", 0)
-            buy_price = float(trade.get("px", 0))
-            buy_amount = float(trade.get("sz", 0))
-            buy_oid = trade.get("oid")
-            if not (buy_price > 0 and buy_amount > 0 and buy_oid):
+        # Группируем сплит-записи fills по oid ордера
+        for buy_oid, grp in aggregate_buys_by_oid(trades_history).items():
+            buy_time = grp["timestamp"]
+            buy_price = grp["price"]
+            buy_amount = grp["amount"]
+            # Крошки меньше биржевого минимума TP не получат никогда —
+            # не ставим в очередь (пыль копим, не гоняем)
+            if buy_amount < min_qty:
                 continue
             # Свежие покупки разберет обычный поток SET_TP — скану они не нужны
             if last_buy_timestamp is None or buy_time > last_buy_timestamp:
@@ -1254,6 +1287,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
             orphans = await find_orphan_buys(
                 client, token_name, trades_history, startup_orders,
                 sz_decimals, last_buy_timestamp=last_buy_timestamp,
+                min_qty=min_qty,
             )
             for orphan in orphans:
                 client._retry_tp_buys[orphan["oid"]] = orphan
@@ -1402,65 +1436,55 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client._pending_tp_oids = set()
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
-                    # Собираем все новые покупки (timestamp > last_buy_timestamp)
+                    # Собираем новые покупки: fills группируем по oid ордера, т.к.
+                    # биржа разбивает одно исполнение на несколько записей (сплиты).
+                    # Без группировки каждая запись выглядела бы отдельной покупкой
+                    # и получала бы свой TP (дубли). Новой считается группа с
+                    # max timestamp > last_buy_timestamp.
                     new_buys = []
                     if trades_history:
-                        # История уже отсортирована от новых к старым
-                        for trade in trades_history:
-                            trade_side = trade.get('side', '').upper()
-                            
-                            # Ищем покупки
-                            if trade_side in ['BUY', 'B']:
-                                trade_oid = trade.get('oid')
-                                trade_timestamp = trade.get('time', 0)
-                                trade_price = float(trade.get('px', 0))
-                                trade_amount = float(trade.get('sz', 0))
-                                
-                                # Проверяем валидность данных покупки
-                                if trade_price > 0 and trade_amount > 0 and trade_oid:
-                                    # Проверяем, является ли покупка новой
-                                    is_new_buy = False
-                                    if last_buy_timestamp is None:
-                                        # Первая покупка - всегда новая
-                                        is_new_buy = True
-                                    elif trade_timestamp > last_buy_timestamp:
-                                        # Покупка с более поздним timestamp - новая покупка
-                                        is_new_buy = True
-                                    
-                                    # Проверяем, не обработана ли уже эта покупка
-                                    if is_new_buy and trade_oid not in client._processed_buy_trades:
-                                        new_buys.append({
-                                            'oid': trade_oid,
-                                            'price': trade_price,
-                                            'amount': trade_amount,
-                                            'timestamp': trade_timestamp
-                                        })
+                        for trade_oid, grp in aggregate_buys_by_oid(trades_history).items():
+                            # Проверяем, не обработана ли уже эта покупка
+                            if trade_oid in client._processed_buy_trades:
+                                continue
+                            # Проверяем, является ли покупка новой
+                            is_new_buy = False
+                            if last_buy_timestamp is None:
+                                # Первая покупка - всегда новая
+                                is_new_buy = True
+                            elif grp["timestamp"] > last_buy_timestamp:
+                                # Покупка с более поздним timestamp - новая покупка
+                                is_new_buy = True
+
+                            if is_new_buy:
+                                new_buys.append({
+                                    'oid': trade_oid,
+                                    'price': grp["price"],
+                                    'amount': grp["amount"],
+                                    'timestamp': grp["timestamp"]
+                                })
                     # Добираем ретраи (фикс 2): покупки, чей TP не выставился ранее.
                     # Они обрабатываются ВНЕ зависимости от timestamp — иначе после
                     # сдвига last_buy_timestamp вперед они не были бы «новыми»
                     # и остались бы без TP навсегда (так потерялся первый вход).
+                    # Данные обновляем из АГРЕГИРОВАННОЙ по oid истории (сплиты!),
+                    # иначе refresh хватала бы первую (частичную) запись.
+                    buys_by_oid = aggregate_buys_by_oid(trades_history)
                     for retry_oid, retry_buy in list(client._retry_tp_buys.items()):
                         if retry_oid in client._processed_buy_trades:
                             client._retry_tp_buys.pop(retry_oid, None)
                             client._pending_tp_oids.discard(retry_oid)
                             continue
                         # Обновляем данные из свежей истории, если покупка там есть
-                        for trade in (trades_history or []):
-                            if trade.get('oid') == retry_oid:
-                                try:
-                                    px = float(trade.get('px', 0))
-                                    sz = float(trade.get('sz', 0))
-                                    if px > 0 and sz > 0:
-                                        retry_buy = {
-                                            'oid': retry_oid,
-                                            'price': px,
-                                            'amount': sz,
-                                            'timestamp': trade.get('time', retry_buy.get('timestamp', 0)),
-                                        }
-                                        client._retry_tp_buys[retry_oid] = retry_buy
-                                except Exception:
-                                    pass
-                                break
+                        grp = buys_by_oid.get(retry_oid)
+                        if grp is not None:
+                            retry_buy = {
+                                'oid': retry_oid,
+                                'price': grp["price"],
+                                'amount': grp["amount"],
+                                'timestamp': grp["timestamp"],
+                            }
+                            client._retry_tp_buys[retry_oid] = retry_buy
                         if not any(b['oid'] == retry_oid for b in new_buys):
                             new_buys.append(retry_buy)
                     # Обрабатываем все новые покупки (от новых к старым)
@@ -1485,6 +1509,25 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             trade_oid = buy['oid']
                             buy_price = buy['price']
                             buy_amount = buy['amount']
+
+                            # Dedupe-guard: sell такого же размера уже висит —
+                            # второй TP не ставим (иначе дубли вида 2×0.00022).
+                            # Только проверка размера: цена TP всегда entry+STEP,
+                            # одинаковый размер = та же защита.
+                            tp_tol = 10 ** (-sz_decimals)
+                            if any(
+                                sz > 0 and abs(sz - buy_amount) <= tp_tol
+                                for sz in (float(o.get("sz", 0)) for o in current_tp_orders)
+                            ):
+                                client.browser.log_message(
+                                    f"🔍 TP already resting for buy oid {trade_oid} "
+                                    f"({buy_amount:.6f} {token_name}) — skipping duplicate",
+                                    level="INFO"
+                                )
+                                client._processed_buy_trades.add(trade_oid)
+                                client._retry_tp_buys.pop(trade_oid, None)
+                                client._pending_tp_oids.discard(trade_oid)
+                                continue
 
                             # Размер TP: min(fill, свободный остаток), округление ВНИЗ.
                             # Обычно равен fill; чуть меньше — только на величину комиссии.
