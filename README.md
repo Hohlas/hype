@@ -17,7 +17,7 @@
 - Web3 кошелек (MetaMask, Trust Wallet)
 - Приватный ключ кошелька
 - Telegram Bot Token
-- PostgreSQL база данных (опционально)
+- Локальное состояние в JSON (`databases/`) и Excel (`hype_stat.xlsx`)
 
 ## 🛠 Установка
 
@@ -42,32 +42,30 @@ cp settings.py.example settings.py
 
 ### 1. Настройка кошелька
 
-В файле `settings.py` укажите:
-- `WALLET_ADDRESS` - адрес вашего кошелька
-- `PRIVATE_KEY` - приватный ключ кошелька
-- `WEB3_RPC_URL` - RPC URL для подключения к сети
+Кошельки задаются НЕ в `settings.py`, а в файле `input_data/wallets.txt`
+(формат строки: `label|wallet_address|private_key|proxy`, прокси опционально).
+При первом запуске режим `(Re)Create Database` собирает из него
+зашифрованную `databases/modules.json`. Адрес может быть основным кошельком,
+а ключ — ключом API Wallet (agent-режим): бот сам определяет это по несовпадению.
+
+Подпись ордеров — локальная (`eth-account`, EIP-712), внешний RPC не нужен.
 
 ### 2. Настройка Telegram
 
-```python
-TG_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-TG_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
-WARNING_BOT_TOKEN = "YOUR_WARNING_BOT_TOKEN"
-WARNING_CHAT_ID = "YOUR_WARNING_CHAT_ID"
-```
+Токены читаются НЕ из `settings.py`, а из `input_data/tg_bot_tokens.txt`
+(формат `KEY = 'value'`, ключи: `TG_BOT_TOKEN`, `PROFIT_BOT_TOKEN`, `TG_USER_ID = [...]`).
 
 ### 3. Настройка торговли
 
 ```python
-TRADE_AMOUNTS = {
-    "percent": [15, 15],  # Процент от баланса для ордеров
-    "fixed": [100, 50],   # Фиксированные суммы в USDC
-}
-
-FUTURES_LIMITS = {
-    "price_diff_amount": [10.0, 20.0],  # Расстояние TP в долларах
-    "max_averaging_orders": 35,         # Максимальное количество ордеров
-}
+# settings.py (фактические ключи)
+SPOT_TOKEN = "BTC"          # спот-токен
+POSITION_SIZE_PERCENT = 5   # размер входа в % от баланса
+STEP = 200                  # шаг сетки / дистанция TP в долларах
+AGGR = 0.5                  # агрессивность (0.1 - 1.0)
+THREADS = 3                 # параллельных аккаунтов
+LOG_LEVEL = "DEBUG"         # уровень логов
+LOG_FILE = "hyperliquid_bot.log"
 ```
 
 ## 🎯 Поддерживаемые режимы

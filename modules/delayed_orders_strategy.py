@@ -124,60 +124,6 @@ def normalize_price(price_value: float, decimals: int) -> float:
 
 
 
-async def get_actual_fill_price_from_history(client, token_name: str, order_time: float, timeout: int = 10):
-    """
-    Получает фактическую цену исполнения из истории сделок
-    
-    Args:
-        client: HyperliquidClient instance
-        token_name: Название токена (например, "BTC")
-        order_time: Время размещения ордера (timestamp)
-        timeout: Таймаут ожидания в секундах
-    
-    Returns:
-        tuple: (actual_price, actual_quantity) или (None, None) если не найдено
-    """
-    try:
-        import time
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout:
-            # Получаем историю сделок
-            trades_history = await client.browser.get_all_orders_history(token_name, limit=10)
-            
-            if trades_history:
-                # Ищем самую свежую сделку BUY после времени размещения ордера
-                for trade in trades_history:
-                    trade_time = trade.get('time', 0) / 1000  # Конвертируем из миллисекунд
-                    
-                    # Проверяем, что это сделка после нашего ордера
-                    if trade_time > order_time:
-                        side = trade.get('side', '').upper()
-                        if side in ['BUY', 'B']:
-                            actual_price = float(trade.get('px', 0))
-                            actual_quantity = float(trade.get('sz', 0))
-                            
-                            if actual_price > 0 and actual_quantity > 0:
-                                client.browser.log_message(
-                                    f"✅ Found actual fill price from history: ${actual_price:.2f}, qty: {actual_quantity:.6f}", 
-                                    level="INFO"
-                                )
-                                return actual_price, actual_quantity
-            
-            # Ждем 1 секунду перед следующей попыткой
-            await asyncio.sleep(1)
-        
-        client.browser.log_message(
-            f"⚠️ Could not find actual fill price in history after {timeout}s timeout", 
-            level="INFO"
-        )
-        return None, None
-        
-    except Exception as e:
-        client.browser.log_message(f"Failed to get actual fill price from history: {e}", level="ERROR")
-        return None, None
-
-
 async def find_matching_buy_trade(client, token_name: str, tp_order_id: int, sell_size: float, sell_price: float, tp_order_time: int = None, sz_decimals: int = None):
     """
     Находит связанную покупку для исполненного TP ордера.
@@ -750,7 +696,10 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         if orders is None:
             orders = await client.browser.get_account_orders()
         
-        # Рассчитываем сумму Order Value для всех лимитных ордеров на продажу
+        # Рассчитываем сумму Order Value для всех лимитных ордеров на продажу.
+        # Это ВАЛОВАЯ стоимость висящих sell (notional), а не чистая прибыль:
+        # себестоимость позиций не вычитается. Имя колонки 'Limit Profit'
+        # сохранено для совместимости существующего hype_stat.xlsx.
         limit_profit = 0.0
         for order in orders:
             # Проверяем, что это лимитный ордер на продажу
@@ -818,10 +767,10 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         # Путь к файлу статистики
         stats_file = "hype_stat.xlsx"
         
-        # Определяем список колонок
+        # Определяем список колонок (имена от token_name, как в initialize_statistics_file)
         expected_columns = [
-            'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
-            'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value',
+            'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount',
+            'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value',
             'Hold Benchmark', 'Profit'
         ]
         
@@ -950,113 +899,6 @@ async def check_minimum_order_size(client, token_name: str, usdc_amount: float, 
         return False, f"Check failed: {e}"
 
 
-async def safe_place_order(client, **kwargs):
-    """
-    Безопасное открытие ордера с обработкой ошибок.
-    Возвращает (success: bool, result: dict или None)
-    """
-    try:
-        # Проверяем минимальный размер ордера, если переданы лимиты
-        if kwargs.get('min_qty') and kwargs.get('min_notional') and kwargs.get('usdc_amount'):
-            # Для LIMIT ордеров используем цену лимитного ордера, для остальных - текущую цену
-            checked_price = None
-            if kwargs.get('order_type') == 'LIMIT' and kwargs.get('price'):
-                checked_price = float(kwargs['price'])
-            
-            is_valid, reason = await check_minimum_order_size(
-                client, 
-                kwargs.get('token'), 
-                float(kwargs['usdc_amount']), 
-                float(kwargs['min_qty']), 
-                float(kwargs['min_notional']),
-                checked_price=checked_price
-            )
-            
-            if not is_valid:
-                if can_log_warning_message(client.label, "order_skipped"):
-                    client.browser.log_message(
-                        f"⚠️ Order skipped: {reason}",
-                        level="WARNING"
-                    )
-                return False, None
-        
-        # Логируем детали расчета позиции перед открытием
-        if kwargs.get('usdc_amount'):
-            try:
-                balance = float(await client.browser.get_balance())
-                token_price = float(await client.browser.get_token_price(kwargs.get('token')))
-                usdc_amt = float(kwargs['usdc_amount'])
-                token_amount = usdc_amt / token_price
-                notional = token_amount * token_price
-                
-                # Показываем реальное соотношение
-                calculation_balance = kwargs.get('calculation_balance', balance)
-                percent = (usdc_amt / calculation_balance * 100) if calculation_balance > 0 else 0
-                
-                # Определяем тип операции
-                operation_type = kwargs.get('operation_type', 'Trading')
-                
-                # Объединенное сообщение для всех деталей ордера согласно требованиям
-                client.browser.log_message(
-                    f"💸 {operation_type} at ${token_price:.2f} | "
-                    f"{token_amount:.3f}'{kwargs.get('token')}' (${notional:.2f}) | "
-                    f"Free=${balance:.2f}, Trying=${usdc_amt:.2f} ({percent:.1f}%), "
-                    f"Notional=${notional:.2f}",
-                    level="INFO"
-                )
-                
-            except Exception as log_err:
-                pass
-        
-        # Удаляем дополнительные параметры перед передачей в place_order
-        order_kwargs = kwargs.copy()
-        order_kwargs.pop('calculation_balance', None)
-        order_kwargs.pop('min_qty', None)
-        order_kwargs.pop('min_notional', None)
-        order_kwargs.pop('operation_type', None)
-        
-        # Размещаем ордер
-        result = await client.place_order(**order_kwargs)
-        
-        return True, result
-        
-    except Exception as e:
-        # Ловим ВСЕ ошибки для отладки
-        error_msg = str(e)
-        error_type = type(e).__name__
-        
-        # Недостаточно средств - просто ждём освобождения средств
-        if 'insufficient' in error_msg.lower() or 'balance' in error_msg.lower():
-            if can_log_warning_message(client.label, "insufficient_margin"):
-                client.browser.log_message(
-                    f"⚠️ Insufficient margin, waiting for positions to close...",
-                    level="WARNING"
-                )
-            return False, None
-        
-        # Количество меньше минимального - пропускаем
-        if 'quantity' in error_msg.lower() or 'size' in error_msg.lower():
-            if can_log_warning_message(client.label, "quantity_below_minimum"):
-                client.browser.log_message(
-                    f"⚠️ Order quantity below minimum (free margin too low), skipping...",
-                    level="WARNING"
-                )
-            return False, None
-        
-        # Объем ордера меньше минимального - пропускаем
-        if 'notional' in error_msg.lower() or 'amount' in error_msg.lower():
-            if can_log_warning_message(client.label, "order_size_small"):
-                client.browser.log_message(
-                    f"⚠️ Order size < $5, waiting for positions to close...",
-                    level="WARNING"
-                )
-            return False, None
-        
-        # Другие ошибки - логируем и пропускаем
-        client.browser.log_message(f"⚠️ Order failed: {error_msg}", level="WARNING")
-        return False, None
-
-
 async def send_tg_notification(client, text: str, save_to_report: bool = True):
     """
     Отправляет уведомление в Telegram немедленно (без ожидания окончания работы модуля).
@@ -1067,75 +909,10 @@ async def send_tg_notification(client, text: str, save_to_report: bool = True):
             logger.warning("⛔ Bot stop flag is set, skipping Telegram notification")
             return
         await TgReport().send_log(logs=text)
-        
-        if save_to_report:
-            await client.db.append_report(
-                key=client.wallet_address,
-                text=text,
-                success=True
-            )
+        # PostgreSQL-отчёты удалены (I2): персистентность — JSON/Excel/TG.
+        # save_to_report оставлен в сигнатуре для совместимости вызовов.
     except Exception as e:
         pass
-
-
-async def create_tp_order(client, token_name: str, entry_price: Decimal, order_qty: Decimal, step: Decimal):
-    """
-    Создает TP ордер для стратегии с отложенными ордерами.
-    TP_price = entry_price + STEP
-    """
-    try:
-        # Рассчитываем цену TP согласно стратегии
-        tp_price = entry_price + step
-        
-        # Создаем TP ордер (продажа)
-        tp_order_data = {
-            "token": token_name,
-            "side": "SELL",
-            "order_type": "LIMIT",
-            "quantity": float(order_qty),
-            "price": float(tp_price),
-        }
-        
-        tp_result = await client.place_order(**tp_order_data)
-        
-        client.browser.log_message(
-            f"📉 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}",
-            level="INFO"
-        )
-        
-        # Отправляем уведомление в Telegram
-        await send_tg_notification(
-            client,
-            text=f'📉 Set TP: {order_qty:.6f} {token_name} at ${tp_price:.2f}',
-            save_to_report=False
-        )
-        
-    except Exception as e:
-        client.browser.log_message(f"❌ Failed to create TP order: {e}", level="ERROR")
-
-
-async def get_active_buy_orders(client, token_name: str):
-    """
-    Получает активные BUY ордера для токена
-    """
-    try:
-        orders = await client.browser.get_account_orders()
-        
-        # Фильтруем только BUY ордера для данного токена
-        buy_orders = []
-        for order in orders:
-            coin = order.get("coin", "")
-            is_buy = order.get("isBuy", True)
-            
-            # Проверяем, что это BUY ордер для нашего токена
-            if coin == token_name and is_buy:
-                buy_orders.append(order)
-        
-        return buy_orders
-        
-    except Exception as e:
-        client.browser.log_message(f"Failed to get active BUY orders: {e}", level="ERROR")
-        return []
 
 
 async def get_active_tp_orders(client, token_name: str):
@@ -1179,98 +956,6 @@ async def get_active_tp_orders(client, token_name: str):
     except Exception as e:
         client.browser.log_message(f"Failed to get active TP orders: {e}", level="ERROR")
         return []
-
-
-async def calculate_min_tp_price(tp_orders: list) -> float:
-    """
-    Рассчитывает минимальную цену TP ордеров
-    """
-    try:
-        if not tp_orders:
-            return 0.0
-        
-        tp_prices = []
-        for order in tp_orders:
-            price = float(order.get("limitPx", 0))
-            if price > 0:
-                tp_prices.append(price)
-        
-        if not tp_prices:
-            return 0.0
-        
-        return min(tp_prices)
-        
-    except Exception as e:
-        return 0.0
-
-
-async def check_take_profit_execution(client, token_name: str, tp_orders: list):
-    """
-    Проверяет, сработал ли какой-то TP ордер (отключено - используем альтернативный метод)
-    """
-    # Эта функция больше не используется, так как мы используем альтернативный метод
-    # отслеживания через сравнение состояний активных ордеров
-    return False, None
-
-
-async def create_stop_market_order(client, token_name: str, stop_price: float, usdc_amount: float, min_qty: float, min_notional: float, step: Decimal):
-    """
-    Создает стоп-маркет ордер на пробой
-    """
-    try:
-        current_calculation_balance = float(await client.browser.get_balance())
-        
-        success, order_result = await safe_place_order(
-            client,
-            token=token_name,
-            side="BUY",
-            order_type="STOP_MARKET",  # Стоп-маркет ордер
-            usdc_amount=usdc_amount,
-            calculation_balance=current_calculation_balance,
-            min_qty=min_qty,
-            min_notional=min_notional,
-            operation_type="Stop Market Breakout",
-            stop_price=stop_price  # Цена активации стоп-ордера
-        )
-        
-        if success and order_result:
-            return True
-        
-        return False
-        
-    except Exception as e:
-        client.browser.log_message(f"❌ Failed to create stop market order: {e}", level="ERROR")
-        return False
-
-
-async def create_limit_order(client, token_name: str, limit_price: float, usdc_amount: float, min_qty: float, min_notional: float, step: Decimal):
-    """
-    Создает лимитный ордер на откат
-    """
-    try:
-        current_calculation_balance = float(await client.browser.get_balance())
-        
-        success, order_result = await safe_place_order(
-            client,
-            token=token_name,
-            side="BUY",
-            order_type="LIMIT",
-            usdc_amount=usdc_amount,
-            calculation_balance=current_calculation_balance,
-            min_qty=min_qty,
-            min_notional=min_notional,
-            operation_type="Limit Pullback",
-            price=limit_price
-        )
-        
-        if success and order_result:
-            return True
-        
-        return False
-        
-    except Exception as e:
-        client.browser.log_message(f"❌ Failed to create limit order: {e}", level="ERROR")
-        return False
 
 
 async def trade_delayed_orders_strategy(client, token_name: str):
@@ -1788,8 +1473,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 #     for tp_order in tp_orders:
                 #         client.browser.log_message(f"🔍 DEBUG: TP order: {tp_order}", level="INFO")
                 
-                tp_executed, executed_order = await check_take_profit_execution(client, token_name, tp_orders)
-                
                 # Альтернативная проверка через сравнение с предыдущим состоянием
                 if not hasattr(client, '_previous_tp_orders'):
                     client._previous_tp_orders = {}
@@ -1830,7 +1513,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     
                                     # Извлекаем балансы
                                     usdc_balance = all_balances.get("USDC", 0.0)
-                                    btc_balance = all_balances.get("UBTC", 0.0)
+                                    btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                                     
                                     # Рассчитываем общую стоимость
                                     total_usd_value = usdc_balance
@@ -2074,6 +1757,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     oid = order.get("oid")
                     if oid:
                         client._previous_tp_orders[oid] = order
+
+                # Чистим исполненные: иначе словарь растёт весь прогон
+                for executed_id in executed_tp_ids:
+                    client._previous_tp_orders.pop(executed_id, None)
                 
                 # Логируем сырой ответ API (отключено для чистоты логов)
                 # client.browser.log_message(f"🔍 RAW API Response: {open_orders}", level="DEBUG")

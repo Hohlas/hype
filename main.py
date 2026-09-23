@@ -66,8 +66,7 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
             except Exception as err:
                 if hyperliquid_client:
                     logger.error(f'[-] {hyperliquid_client.label} | Account Error: {err}')
-                    await db.append_report(key=hyperliquid_client.wallet_address, text=str(err), success=False)
-                    
+
                     # Отправляем уведомление об ошибке аккаунта
                     await send_warning_notification(
                         error_type="Account Error",
@@ -85,84 +84,24 @@ async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
                     )
 
             finally:
+                # hyperliquid_client is None, если initialize_account упал
+                # (битый ключ/прокси): атрибутов клиента нет — только очередь.
                 if hyperliquid_client:
                     await hyperliquid_client.browser.close_sessions()
 
-                if type(module_data) == dict:
-                    if mode in [0, 1, 2]:
-                        last_module = await db.remove_module(module_data=module_data)
-                    else:
-                        last_module = await db.remove_account(module_data=module_data)
+                if mode in [0, 1, 2]:
+                    await db.remove_module(module_data=module_data)
+                else:
+                    await db.remove_account(module_data=module_data)
 
-                    reports = await db.get_account_reports(
-                        key=hyperliquid_client.wallet_address,
-                        label=hyperliquid_client.label,
-                        address=hyperliquid_client.wallet_address,
-                        last_module=last_module,
-                        mode=mode,
-                    )
-                    if reports:
-                        await TgReport().send_log(logs="\n".join(reports))
-
-                    await async_sleep(5)
-
-
-async def run_pair(mode: int, group_data: dict, sem: asyncio.Semaphore):
-    # Инициализируем блокировки для всех адресов кошельков
-    wallet_addresses = [wallet_data["wallet_address"] for wallet_data in group_data["wallets_data"]]
-    for address in wallet_addresses:
-        if address not in address_locks:
-            address_locks[address] = asyncio.Lock()
-    
-    async with MultiLock(wallet_addresses):
-        async with sem:
-            hyperliquid_clients = []
-            try:
-                hyperliquid_clients = [
-                    initialize_account(wallet_data, group_data=group_data)
-                    for wallet_data in group_data["wallets_data"]
-                ]
-                group_data["module_info"]["status"] = await PairAccounts(
-                    accounts=hyperliquid_clients,
-                    mode=mode,
-                    db=db,
-                )
-
-            except Exception as err:
-                logger.error(f'[-] Pair Error: {err}')
-                await send_warning_notification(
-                    error_type="Pair Error",
-                    error_message=str(err),
-                    account_label="Pair Trading"
-                )
-
-            finally:
-                for client in hyperliquid_clients:
-                    await client.browser.close_sessions()
-
-                if type(group_data) == dict:
-                    if mode in [3]:
-                        last_module = await db.remove_group(group_data=group_data)
-                    else:
-                        last_module = await db.remove_account(module_data=group_data)
-
-                    reports = await db.get_account_reports(
-                        key=group_data["wallets_data"][0]["wallet_address"],
-                        label=group_data["wallets_data"][0]["label"],
-                        address=group_data["wallets_data"][0]["wallet_address"],
-                        last_module=last_module,
-                        mode=mode,
-                    )
-                    if reports:
-                        await TgReport().send_log(logs="\n".join(reports))
-
-                    await async_sleep(5)
+                await async_sleep(5)
 
 
 async def get_account_startup_info(module_data: dict):
     """
     Получает информацию об аккаунте для стартового сообщения
     """
+    client = None
     try:
         client = initialize_account(module_data)
         await client.browser.start_session()
@@ -199,8 +138,6 @@ async def get_account_startup_info(module_data: dict):
                 if size > 0:
                     limit_profit += size * limit_price
         
-        await client.browser.close_sessions()
-        
         return {
             "label": module_data["label"],
             "usdc_balance": usdc_balance,
@@ -211,74 +148,65 @@ async def get_account_startup_info(module_data: dict):
     except Exception as e:
         logger.error(f"Failed to get startup info for {module_data.get('label', 'Unknown')}: {e}")
         return None
+    finally:
+        # Сессию закрываем и при исключении (иначе утечка aiohttp-сессии)
+        if client is not None:
+            try:
+                await client.browser.close_sessions()
+            except Exception:
+                pass
 
 
 async def runner(mode: int):
     sem = asyncio.Semaphore(settings.THREADS)
-    
-    if mode in [3]:
-        all_groups = db.get_all_groups()
-        if all_groups != 'No more accounts left':
-            # Для режима 3 (pair trading) отправляем простое сообщение
-            mode_names = {
-                0: "Averaging Market",
-                4: "Cancel Orders", 
-                5: "Parse"
-            }
-            mode_name = mode_names.get(mode, f"Mode {mode}")
-            await TgReport().send_log(logs=f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}\nRisk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
-            logger.info(f"🚀 Hyperliquid Bot Started, v.{settings.version}")
-            logger.info(f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}")
-            
-            await asyncio.gather(*[
-                run_pair(group_data=group_data, mode=mode, sem=sem)
-                for group_data in all_groups
-            ])
 
+    all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
+
+    if all_modules == 'No more accounts left':
+        logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")
+        logger.info("Please check input_data/wallets.txt file - it should contain wallet data in format: label|wallet_address|private_key|proxy")
+    elif not all_modules:
+        logger.warning("get_all_modules returned empty list or None")
     else:
-        all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
-        
-        if all_modules == 'No more accounts left':
-            logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")
-            logger.info("Please check input_data/wallets.txt file - it should contain wallet data in format: label|wallet_address|private_key|proxy")
-        elif not all_modules:
-            logger.warning("get_all_modules returned empty list or None")
-        else:
-            # Подсчитываем уникальные аккаунты
-            unique_accounts = list(set([m['label'] for m in all_modules]))
-            logger.opt(colors=True).info(
-                f'[•] Loaded <white>{len(unique_accounts)}</white> account(s): '
-                f'<white>{", ".join(unique_accounts)}</white> | '
-                f'Total modules: <white>{len(all_modules)}</white>'
-            )
-            
-            # Получаем информацию о стартовом состоянии аккаунтов
-            account_infos = []
-            for module_data in all_modules:
-                info = await get_account_startup_info(module_data)
-                if info:
-                    account_infos.append(info)
-            
-            # Формируем стартовое сообщение
-            message_lines = [f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
-            log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
-            
-            for info in account_infos:
-                account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, LimProfit = ${info['limit_profit']:.0f}"
-                message_lines.append(account_line)
-                log_lines.append(account_line)
-            
-            # Отправляем сообщение в Telegram
-            await TgReport().send_log(logs="\n".join(message_lines))
-            
-            # Выводим в логах
-            for line in log_lines:
-                logger.info(line)
-            
-            await asyncio.gather(*[
-                run_modules(module_data=module_data, mode=mode, sem=sem)
-                for module_data in all_modules
-            ])
+        # Подсчитываем уникальные аккаунты
+        unique_accounts = list(set([m['label'] for m in all_modules]))
+        logger.opt(colors=True).info(
+            f'[•] Loaded <white>{len(unique_accounts)}</white> account(s): '
+            f'<white>{", ".join(unique_accounts)}</white> | '
+            f'Total modules: <white>{len(all_modules)}</white>'
+        )
+
+        # Получаем информацию о стартовом состоянии аккаунтов
+        account_infos = []
+        for module_data in all_modules:
+            info = await get_account_startup_info(module_data)
+            if info:
+                account_infos.append(info)
+
+        # Формируем стартовое сообщение
+        message_lines = [f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
+        log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
+
+        for info in account_infos:
+            account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, SellValue = ${info['limit_profit']:.0f}"
+            message_lines.append(account_line)
+            log_lines.append(account_line)
+
+        # Отправляем сообщение в Telegram
+        await TgReport().send_log(logs="\n".join(message_lines))
+
+        # Выводим в логах
+        for line in log_lines:
+            logger.info(line)
+
+        # return_exceptions: один упавший аккаунт не роняет остальные
+        results = await asyncio.gather(*[
+            run_modules(module_data=module_data, mode=mode, sem=sem)
+            for module_data in all_modules
+        ], return_exceptions=True)
+        for module_data, result in zip(all_modules, results):
+            if isinstance(result, Exception):
+                logger.error(f'[-] {module_data.get("label", "?")} | Unhandled error: {result!r}')
 
     logger.success(f'All accounts done.')
     return 'Ended'

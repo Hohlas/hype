@@ -1,0 +1,38 @@
+# Hyperliquid Bot Settings — пример. Скопируйте в settings.py:
+#   cp settings.py.example settings.py
+version = "1.3.4"
+
+# Risk Management
+SPOT_TOKEN = "BTC"  # Spot Trading token
+POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
+STEP = 200  # Шаг сетки (TP) в долларах для усреднения
+AGGR = 0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
+
+# Hyperliquid API Configuration
+HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"        # Основной API
+HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестовая сеть
+
+# Threading
+THREADS = 3  # Количество одновременных потоков
+
+# Database Settings (не используются: персистентность — JSON в databases/ + hype_stat.xlsx)
+DB_HOST = "localhost"
+DB_PORT = 5432
+DB_NAME = "hyperliquid_bot"
+DB_USER = "postgres"
+DB_PASSWORD = "password"
+
+# Proxy Settings (ОПЦИОНАЛЬНО)
+USE_PROXY = False
+PROXY_LIST = []
+
+# Hyperliquid Specific Settings
+HYPERLIQUID_CHAIN_ID = 42161  # Arbitrum One (mainnet)
+HYPERLIQUID_TESTNET_CHAIN_ID = 421614  # Arbitrum Sepolia (testnet)
+
+# Logging
+LOG_LEVEL = "DEBUG"
+LOG_FILE = "hyperliquid_bot.log"
+LOG_ROTATION = "1 day"
+LOG_RETENTION = "7 days"
+ENABLE_DEBUG_LOGS = True

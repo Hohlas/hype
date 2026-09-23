@@ -12,7 +12,6 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_account.signers.local import LocalAccount
 from eth_utils import keccak
-import web3
 from loguru import logger
 import settings
 from modules.retry import retry_async
@@ -37,9 +36,6 @@ class HyperliquidBrowser:
         
         # Trading parameters
         self.btc_tick_size = 0.5  # Default tick size for BTC
-        
-        # Web3 setup
-        self.w3 = web3.Web3(web3.HTTPProvider(settings.WEB3_RPC_URL))
         
             # Инициализация аккаунта
         if private_key:

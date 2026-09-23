@@ -6,12 +6,13 @@ asyncpg>=0.28.0
 loguru>=0.7.0
 
 # Web3 and blockchain
-web3>=6.0.0
 eth-account>=0.8.0
 eth-typing>=3.0.0
 
 # Data processing
 pydantic>=2.0.0
+pandas>=2.0
+openpyxl>=3.1
 
 # HTTP and networking
 requests>=2.28.0

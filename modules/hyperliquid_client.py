@@ -1,10 +1,9 @@
 import asyncio
 import time
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import settings
 from modules.hyperliquid_browser import HyperliquidBrowser
-from modules.utils import async_sleep
 
 
 class HyperliquidClient:
@@ -107,11 +106,9 @@ class HyperliquidClient:
                                     continue
                         
                         # Если не нашли минимальный размер, используем очень маленькое значение
+                        # (в spotMeta токена нет полей minSz — для UBTC всегда fallback)
                         if min_qty is None:
-                            min_qty = 0.0001  # Очень маленькое значение
-                        
-                        # Устанавливаем очень маленькое значение для тестирования
-                        min_qty = 0.0001
+                            min_qty = 0.0001
                         
                         # Получаем minNotional из API, если доступно, иначе используем значение из ошибки биржи (10.0)
                         min_notional = float(meta.get("minNotional", "10.0"))
@@ -306,80 +303,6 @@ class HyperliquidClient:
         except Exception as e:
             self.browser.log_message(f"Failed to place order: {e}", level="ERROR")
             raise
-            
-    async def get_position_info(self, token_name: str) -> dict:
-        """
-        Получение информации о позиции для spot торговли.
-        Для spot торговли позиции - это просто баланс токенов.
-        """
-        try:
-            # Получаем баланс токена
-            account_info = await self.browser.get_account_info()
-            
-            # Поиск позиции по токену
-            for asset in account_info.get("assetPositions", []):
-                if asset["position"]["coin"] == token_name:
-                    position_size = float(asset["position"]["szi"])
-                    entry_price = float(asset["position"]["entryPx"]) if asset["position"]["entryPx"] else 0.0
-                    
-                    return {
-                        "size": position_size,
-                        "entry_price": entry_price,
-                        "unrealized_pnl": 0.0,  # Для spot торговли PnL рассчитывается отдельно
-                        "side": "LONG" if position_size > 0 else "SHORT" if position_size < 0 else "NONE"
-                    }
-                    
-            # Если позиции нет
-            return {
-                "size": 0.0,
-                "entry_price": 0.0,
-                "unrealized_pnl": 0.0,
-                "side": "NONE"
-            }
-            
-        except Exception as e:
-            self.browser.log_message(f"Failed to get position info: {e}", level="ERROR")
-            return {
-                "size": 0.0,
-                "entry_price": 0.0,
-                "unrealized_pnl": 0.0,
-                "side": "NONE"
-            }
-            
-    async def get_open_orders(self, token_name: str) -> List[dict]:
-        """
-        Получение открытых ордеров для токена
-        """
-        try:
-            orders = await self.browser.get_account_orders()
-            
-            # Фильтруем ордера по токену
-            filtered_orders = []
-            for order in orders:
-                if order.get("coin") == token_name:
-                    filtered_orders.append(order)
-                    
-            return filtered_orders
-            
-        except Exception as e:
-            self.browser.log_message(f"Failed to get open orders: {e}", level="ERROR")
-            return []
-            
-    async def cancel_all_orders(self, token_name: str):
-        """
-        Отмена всех ордеров для токена
-        """
-        try:
-            orders = await self.get_open_orders(token_name)
-            
-            for order in orders:
-                order_id = order.get("oid")  # Order ID
-                if order_id:
-                    await self.browser.cancel_order(token_name, order_id)
-                    await async_sleep(0.1)  # Небольшая пауза между отменами
-                    
-        except Exception as e:
-            self.browser.log_message(f"Failed to cancel all orders: {e}", level="ERROR")
             
     async def run_mode(self, mode: int):
         """
