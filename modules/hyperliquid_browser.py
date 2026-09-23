@@ -36,6 +36,10 @@ class HyperliquidBrowser:
         
         # Trading parameters
         self.btc_tick_size = 0.5  # Default tick size for BTC
+
+        # Тикер -> спот-индекс ("BTC" -> "@142"). Строится из spotMeta
+        # при первом запросе цены, дальше кэш на инстанс.
+        self._spot_px_map = None
         
             # Инициализация аккаунта
         if private_key:
@@ -573,13 +577,23 @@ class HyperliquidBrowser:
                     raise Exception("API returned None response")
             
                 # Спот торгуем по спот-цене: в allMids лежат и perp-мид ("BTC"),
-                # и спот-мид ("@142" = UBTC/USDC) — раньше первым совпадал perp,
-                # базис искажал входы/TP. Других токенов не касается.
-                _spot_key = {"BTC": "@142", "UBTC": "@142"}.get(
-                    token_name.upper() if isinstance(token_name, str) else ""
-                )
-                if _spot_key and _spot_key in result:
-                    return Decimal(str(result[_spot_key]))
+                # и спот-мид ("@142" = UBTC/USDC). Ключ берём из таблицы spotMeta
+                # (хардкод — страховка, если таблица не загрузилась).
+                _spot_key = None
+                if isinstance(token_name, str):
+                    _t = token_name.upper()
+                    _spot_key = ((await self._load_spot_price_map()).get(_t)
+                                 or {"BTC": "@142", "UBTC": "@142"}.get(_t))
+                if _spot_key:
+                    if _spot_key in result:
+                        return Decimal(str(result[_spot_key]))
+                    # Ключа нет в ответе — так быть не должно: диагностика
+                    # в лог и терминал (дедуп 60с), дальше старый фолбэк.
+                    self.log_message(
+                        f"⚠️ Spot price key {_spot_key} for {token_name} missing "
+                        f"in allMids — using fallback price",
+                        level="WARNING",
+                    )
 
                 # Пробуем разные варианты названий токенов
                 possible_keys = [
@@ -741,6 +755,40 @@ class HyperliquidBrowser:
             self.log_message(f"Failed to create order: {e}", level="ERROR")
             raise
     
+
+    async def _load_spot_price_map(self):
+        """
+        Таблица соответствия тикера спот-индексу allMids ("BTC" -> "@142")
+        из spotMeta (пары к USDC). Один HTTP-запрос за прогон, дальше кэш.
+        Алиасы: "UBTC" и "BTC" указывают на один индекс.
+        """
+        if self._spot_px_map is not None:
+            return self._spot_px_map
+        self._spot_px_map = {}
+        try:
+            url = f"{self.BASE_URL}/info"
+            response = await self.send_request("POST", url, data={"type": "spotMeta"}, build_signature=False)
+            if response.status != 200:
+                return self._spot_px_map
+            spot_meta = await response.json()
+            tokens = {t.get("index"): t.get("name", "") for t in spot_meta.get("tokens", [])}
+            usdc_idx = next((i for i, n in tokens.items() if n == "USDC"), None)
+            for asset in spot_meta.get("universe", []):
+                pair_tokens = asset.get("tokens", [])
+                # Только пары к USDC; tokens = [base, quote]
+                if usdc_idx is None or len(pair_tokens) < 2 or pair_tokens[1] != usdc_idx:
+                    continue
+                base = tokens.get(pair_tokens[0], "")
+                if not base:
+                    continue
+                key = f"@{asset.get('index')}"
+                base_up = base.upper()
+                self._spot_px_map[base_up] = key
+                if base_up.startswith("U") and len(base_up) > 1:
+                    self._spot_px_map[base_up[1:]] = key  # UBTC -> BTC
+        except Exception as e:
+            self.log_message(f"Failed to load spot price map: {e}", level="WARNING")
+        return self._spot_px_map
 
     async def _get_spot_asset_id(self, coin: str) -> int:
         """
