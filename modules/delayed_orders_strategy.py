@@ -58,6 +58,56 @@ def get_bot_stop_flag() -> bool:
     return _bot_stop_flag
 
 
+# Кулдаун повторной заливки одного BuyLimit-уровня, сек.
+# Фолбэк: если TP fill-а так и не подтвердился висящим ордером
+# (не выставился / исполнился мгновенно / снят), уровень разблокируется сам.
+BUYLIMIT_LEVEL_COOLDOWN_SEC = 600
+
+
+def _buylimit_level_allowed(client, target_buy_price: float, current_tp_orders) -> bool:
+    """
+    Правило refill BuyLimit-уровня: тот же уровень — только после того, как TP
+    предыдущего fill-а подтвержден висящим sell-ордером. Иначе на проливе бот
+    заливает один уровень дважды (кейс 84447 + 84439 с одного $84509).
+
+    - TP подтвержден (висящий sell ~ OWисполненной цене входа + STEP) → можно, wait снят.
+    - Уровень сменился (другая ступень лесенки) → можно сразу.
+    - Тот же уровень без подтвержденного TP → ждать, но не дольше кулдауна.
+    """
+    wait = getattr(client, "_buylimit_wait_tp", None)
+    if not wait:
+        return True
+    try:
+        expect_px = float(wait.get("expect_tp_px", 0) or 0)
+        if expect_px > 0:
+            for o in (current_tp_orders or []):
+                try:
+                    if abs(float(o.get("limitPx", 0)) - expect_px) <= 1.0:
+                        client._buylimit_wait_tp = None
+                        return True
+                except Exception:
+                    continue
+        if abs(float(target_buy_price) - float(wait.get("level", 0) or 0)) > 1.0:
+            return True
+        since = float(wait.get("since", 0) or 0)
+        if datetime.now().timestamp() - since >= BUYLIMIT_LEVEL_COOLDOWN_SEC:
+            client.browser.log_message(
+                f"⏳ BuyLimit ${target_buy_price:.2f}: TP not confirmed within "
+                f"{BUYLIMIT_LEVEL_COOLDOWN_SEC}s — level cooldown expired, allowing refill",
+                level="WARNING"
+            )
+            client._buylimit_wait_tp = None
+            return True
+        client.browser.log_message(
+            f"⏳ BuyLimit ${target_buy_price:.2f}: waiting TP confirmation "
+            f"for fill (TP ${expect_px:.2f} expected) — refill paused",
+            level="INFO"
+        )
+        return False
+    except Exception:
+        return True
+
+
 def normalize_price(price_value: float, decimals: int) -> float:
     """
     Нормализует цену, округляя до указанного количества знаков после запятой.
@@ -1302,6 +1352,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
             client._retry_tp_buys = {}
         if not hasattr(client, '_pending_tp_oids'):
             client._pending_tp_oids = set()
+        # Трекинг BuyLimit-ордеров для правила refill (один уровень — один fill
+        # до подтвержденного TP): _buylimit_open: order oid -> {level},
+        # _buylimit_wait_tp: {level, expect_tp_px, since} | None
+        if not hasattr(client, '_buylimit_open'):
+            client._buylimit_open = {}
+        if not hasattr(client, '_buylimit_wait_tp'):
+            client._buylimit_wait_tp = None
         
         # Стартовое сканирование сирот (фикс 4): покупки из истории без TP.
         # Только чтение + постановка в retry-очередь, торговую логику не меняет.
@@ -1457,8 +1514,34 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         client._retry_tp_buys = {}
                     if not hasattr(client, '_pending_tp_oids'):
                         client._pending_tp_oids = set()
+                    if not hasattr(client, '_buylimit_open'):
+                        client._buylimit_open = {}
+                    if not hasattr(client, '_buylimit_wait_tp'):
+                        client._buylimit_wait_tp = None
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
+                    # Трекинг fills выставленных нами BuyLimit-ордеров: fill уровня ->
+                    # ждем подтверждения его TP перед refill того же уровня.
+                    # (oid fill-а совпадает с oid ордера.)
+                    try:
+                        for trade in (trades_history or []):
+                            if trade.get('side', '').upper() not in ['BUY', 'B']:
+                                continue
+                            foid = trade.get('oid')
+                            if foid is not None and foid in client._buylimit_open:
+                                lvl = client._buylimit_open.pop(foid).get("level", 0.0)
+                                try:
+                                    fpx = float(trade.get('px', 0))
+                                except Exception:
+                                    fpx = 0.0
+                                if fpx > 0:
+                                    client._buylimit_wait_tp = {
+                                        "level": float(lvl),
+                                        "expect_tp_px": fpx + float(step),
+                                        "since": datetime.now().timestamp(),
+                                    }
+                    except Exception:
+                        pass
                     # Собираем новые покупки: fills группируем по oid ордера, т.к.
                     # биржа разбивает одно исполнение на несколько записей (сплиты).
                     # Без группировки каждая запись выглядела бы отдельной покупкой
@@ -2261,6 +2344,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     
                     if not active_buy_limits:
                         # Нет активного Buy Limit - размещаем новый лимитный ордер
+                        # Правило refill: тот же уровень — только после подтвержденного TP
+                        # предыдущего fill-а (иначе двойные заливки как 84447 + 84439).
+                        if not _buylimit_level_allowed(client, target_buy_price, current_tp_orders):
+                            continue
                         # Проверка баланса
                         if usdc_balance < usdc_amount:
                             if can_log_warning_message(client.label, "insufficient_usdc_averaging", cooldown_minutes=10):
@@ -2328,6 +2415,27 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         except Exception as e:
                                             client.browser.log_message(f"Failed to extract BuyLimit fill price from API: {e}", level="ERROR")
                                         
+                                        # Трекинг для правила refill: запоминаем выставленный
+                                        # BuyLimit (oid -> уровень) либо сразу ставим wait,
+                                        # если ордер исполнился мгновенно.
+                                        try:
+                                            if not hasattr(client, '_buylimit_open'):
+                                                client._buylimit_open = {}
+                                            if is_filled:
+                                                client._buylimit_wait_tp = {
+                                                    "level": float(target_buy_price),
+                                                    "expect_tp_px": float(actual_price) + float(step),
+                                                    "since": datetime.now().timestamp(),
+                                                }
+                                            else:
+                                                resting_oid = (statuses[0].get("resting", {}) or {}).get("oid")
+                                                if resting_oid is not None:
+                                                    client._buylimit_open[resting_oid] = {
+                                                        "level": float(target_buy_price),
+                                                    }
+                                        except Exception:
+                                            pass
+
                                         # Обновляем баланс после исполнения ордера (если был исполнен)
                                         if is_filled:
                                             all_balances = await client.browser.get_all_balances()

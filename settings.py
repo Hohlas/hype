@@ -1,5 +1,5 @@
 # Hyperliquid Bot Settings
-version = "1.3.1"
+version = "1.3.2"
 
 # Risk Management
 
