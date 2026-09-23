@@ -572,6 +572,15 @@ class HyperliquidBrowser:
                 if result is None:
                     raise Exception("API returned None response")
             
+                # Спот торгуем по спот-цене: в allMids лежат и perp-мид ("BTC"),
+                # и спот-мид ("@142" = UBTC/USDC) — раньше первым совпадал perp,
+                # базис искажал входы/TP. Других токенов не касается.
+                _spot_key = {"BTC": "@142", "UBTC": "@142"}.get(
+                    token_name.upper() if isinstance(token_name, str) else ""
+                )
+                if _spot_key and _spot_key in result:
+                    return Decimal(str(result[_spot_key]))
+
                 # Пробуем разные варианты названий токенов
                 possible_keys = [
                     f"{token_name}USD",
