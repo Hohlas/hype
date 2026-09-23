@@ -492,13 +492,19 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
                            max_age_days: int = 7, min_qty: float = 0.0):
     """
     Стартовое сканирование сирот: покупки из истории, у которых нет ни
-    висящего TP SELL того же размера, ни более поздней продажи того же
-    размера. Такие покупки обычному SET_TP уже не видны (их timestamp не
-    новее last_buy_timestamp), без этого скана они остались бы без TP навсегда.
+    висящего TP SELL, ни более поздней продажи. Такие покупки обычному SET_TP
+    уже не видны (их timestamp не новее last_buy_timestamp), без этого скана
+    они остались бы без TP навсегда.
+
+    Покрытие ЖАДНОЕ и ПОШТУЧНОЕ: один висящий sell покрывает одну покупку
+    (старые первыми), совпадение — по размеру И по цене (ожидаемый TP =
+    entry + STEP). Иначе одинаковые размеры разных входов дают ложные
+    пропуски, а «близнецы» (размер+цена совпали) — ложных сирот.
+    Fills одного ордера предварительно группируются по oid
+    (см. aggregate_buys_by_oid).
 
     Суммарный размер сирот ограничивается свободным балансом (от новых к старым),
     чтобы не ставить TP на пыль сверх имеющихся средств.
-    Fills одного ордера предварительно группируются по oid (см. aggregate_buys_by_oid).
 
     Returns:
         list[{oid, price, amount, timestamp}] от старых к новым.
@@ -509,11 +515,13 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
             return orphans
 
         tolerance = 10 ** (-sz_decimals)
+        price_tol = 1.0  # TP-цены целочисленные, STEP=200 >> 1.0 — чужие уровни не зацепит
+        step_val = float(settings.STEP)
         now_ms = datetime.now().timestamp() * 1000
         max_age_ms = max_age_days * 24 * 3600 * 1000
 
-        # Висящие продажи нашего токена (защита уже есть)
-        resting_sell_sizes = []
+        # Висящие продажи нашего токена: список (oid, sz, px), каждый покрывает одну покупку
+        resting_sells = []
         for order in (open_orders or []):
             try:
                 is_buy = order.get("isBuy", True)
@@ -521,8 +529,9 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
                 is_sell = side in ["SELL", "S", "A"] or (not is_buy)
                 if is_sell:
                     sz = float(order.get("sz", 0))
-                    if sz > 0:
-                        resting_sell_sizes.append(sz)
+                    px = float(order.get("limitPx", 0))
+                    if sz > 0 and px > 0:
+                        resting_sells.append({"oid": order.get("oid"), "sz": sz, "px": px})
             except Exception:
                 continue
 
@@ -532,7 +541,8 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
             if t.get("side", "").upper() in ["SELL", "S", "A"]
         ]
 
-        # Группируем сплит-записи fills по oid ордера
+        # Кандидаты oldest-first; покрытие — жадное, один sell = один buy
+        candidates = []
         for buy_oid, grp in aggregate_buys_by_oid(trades_history).items():
             buy_time = grp["timestamp"]
             buy_price = grp["price"]
@@ -546,18 +556,31 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
                 continue
             if now_ms - buy_time > max_age_ms:
                 continue
-            # Есть висящий TP того же размера → защищена
-            if any(abs(sz - buy_amount) <= tolerance for sz in resting_sell_sizes):
-                continue
-            # Есть более поздняя продажа того же размера → позиция закрыта
-            if any(st > buy_time and abs(ssz - buy_amount) <= tolerance for st, ssz in sells):
-                continue
-            orphans.append({
+            candidates.append({
                 "oid": buy_oid,
                 "price": buy_price,
                 "amount": buy_amount,
                 "timestamp": buy_time,
             })
+        candidates.sort(key=lambda x: x["timestamp"])
+
+        used_rest = set()
+        for cand in candidates:
+            expect_px = cand["price"] + step_val
+            hit_idx = None
+            for idx, r in enumerate(resting_sells):
+                if idx in used_rest:
+                    continue
+                if abs(r["sz"] - cand["amount"]) <= tolerance and abs(r["px"] - expect_px) <= price_tol:
+                    hit_idx = idx
+                    break
+            if hit_idx is not None:
+                used_rest.add(hit_idx)
+                continue  # защищена висящим TP
+            # Есть более поздняя продажа того же размера → позиция закрыта
+            if any(st > cand["timestamp"] and abs(ssz - cand["amount"]) <= tolerance for st, ssz in sells):
+                continue
+            orphans.append(cand)
 
         if not orphans:
             return orphans
@@ -1461,7 +1484,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     'oid': trade_oid,
                                     'price': grp["price"],
                                     'amount': grp["amount"],
-                                    'timestamp': grp["timestamp"]
+                                    'timestamp': grp["timestamp"],
+                                    # Свежая покупка: ее TP заведомо еще не выставлен,
+                                    # dedupe-guard ниже ее не касается
+                                    'retry': False,
                                 })
                     # Добираем ретраи (фикс 2): покупки, чей TP не выставился ранее.
                     # Они обрабатываются ВНЕ зависимости от timestamp — иначе после
@@ -1475,18 +1501,69 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             client._retry_tp_buys.pop(retry_oid, None)
                             client._pending_tp_oids.discard(retry_oid)
                             continue
-                        # Обновляем данные из свежей истории, если покупка там есть
+                        # Обновляем данные из свежей истории, если покупка там есть.
+                        # ВАЖНО: amount только УМЕНЬШАЕМ (min) — в записи может лежать
+                        # непокрытый остаток частичного TP, полный размер из истории
+                        # его бы затер и вернул перекрытие.
                         grp = buys_by_oid.get(retry_oid)
                         if grp is not None:
+                            kept_amount = retry_buy.get("amount", grp["amount"])
                             retry_buy = {
                                 'oid': retry_oid,
                                 'price': grp["price"],
-                                'amount': grp["amount"],
+                                'amount': min(kept_amount, grp["amount"]),
                                 'timestamp': grp["timestamp"],
+                                'retry': True,
                             }
                             client._retry_tp_buys[retry_oid] = retry_buy
                         if not any(b['oid'] == retry_oid for b in new_buys):
-                            new_buys.append(retry_buy)
+                            entry = dict(retry_buy)
+                            entry['retry'] = True
+                            new_buys.append(entry)
+                    # Dedupe-guard ТОЛЬКО для retry/orphan (свежие покупки его не
+                    # проходят: их TP заведомо еще не выставлен). Связка размер+цена
+                    # (ожидаемый TP = entry + STEP) + поштучный учет: один висящий
+                    # sell покрывает одну покупку, старые первыми. Иначе одинаковые
+                    # размеры разных входов дают ложные пропуски, а «близнецы»
+                    # (размер+цена совпали у разных входов) — ложных сирот.
+                    if new_buys:
+                        tp_tol = 10 ** (-sz_decimals)
+                        rested = []
+                        for o in current_tp_orders:
+                            try:
+                                rsz = float(o.get("sz", 0))
+                                rpx = float(o.get("limitPx", 0))
+                                if rsz > 0 and rpx > 0:
+                                    rested.append({"oid": o.get("oid"), "sz": rsz, "px": rpx})
+                            except Exception:
+                                continue
+                        used_rest = set()
+                        kept = []
+                        for b in sorted(new_buys, key=lambda x: x["timestamp"]):
+                            if not b.get("retry"):
+                                kept.append(b)
+                                continue
+                            expect_px = b["price"] + float(step)
+                            hit_idx = None
+                            for idx, r in enumerate(rested):
+                                if idx in used_rest:
+                                    continue
+                                if abs(r["sz"] - b["amount"]) <= tp_tol and abs(r["px"] - expect_px) <= 1.0:
+                                    hit_idx = idx
+                                    break
+                            if hit_idx is not None:
+                                used_rest.add(hit_idx)
+                                client.browser.log_message(
+                                    f"🔍 TP already resting for buy oid {b['oid']} "
+                                    f"({b['amount']:.6f} {token_name} -> ${expect_px:.2f}) — skipping duplicate",
+                                    level="INFO"
+                                )
+                                client._processed_buy_trades.add(b["oid"])
+                                client._retry_tp_buys.pop(b["oid"], None)
+                                client._pending_tp_oids.discard(b["oid"])
+                            else:
+                                kept.append(b)
+                        new_buys = sorted(kept, key=lambda x: x["timestamp"], reverse=True)
                     # Обрабатываем все новые покупки (от новых к старым)
                     if new_buys:
                         # Сортируем по timestamp (от новых к старым)
@@ -1509,25 +1586,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             trade_oid = buy['oid']
                             buy_price = buy['price']
                             buy_amount = buy['amount']
-
-                            # Dedupe-guard: sell такого же размера уже висит —
-                            # второй TP не ставим (иначе дубли вида 2×0.00022).
-                            # Только проверка размера: цена TP всегда entry+STEP,
-                            # одинаковый размер = та же защита.
-                            tp_tol = 10 ** (-sz_decimals)
-                            if any(
-                                sz > 0 and abs(sz - buy_amount) <= tp_tol
-                                for sz in (float(o.get("sz", 0)) for o in current_tp_orders)
-                            ):
-                                client.browser.log_message(
-                                    f"🔍 TP already resting for buy oid {trade_oid} "
-                                    f"({buy_amount:.6f} {token_name}) — skipping duplicate",
-                                    level="INFO"
-                                )
-                                client._processed_buy_trades.add(trade_oid)
-                                client._retry_tp_buys.pop(trade_oid, None)
-                                client._pending_tp_oids.discard(trade_oid)
-                                continue
 
                             # Размер TP: min(fill, свободный остаток), округление ВНИЗ.
                             # Обычно равен fill; чуть меньше — только на величину комиссии.
@@ -1561,8 +1619,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
 
                                 # Успех: только теперь помечаем обработанной (фикс 2)
                                 client._processed_buy_trades.add(trade_oid)
-                                client._retry_tp_buys.pop(trade_oid, None)
-                                client._pending_tp_oids.discard(trade_oid)
+                                # Частичный TP: непокрытый остаток (>= min_qty) остается
+                                # в retry — иначе он без защиты навсегда. Пыль (< min_qty)
+                                # не queued: копится на балансе до ручной продажи.
+                                remainder = buy_amount - tp_qty
+                                if remainder >= min_qty:
+                                    client._retry_tp_buys[trade_oid] = {
+                                        'oid': trade_oid,
+                                        'price': buy_price,
+                                        'amount': remainder,
+                                        'timestamp': buy['timestamp'],
+                                        'retry': True,
+                                    }
+                                    client._pending_tp_oids.add(trade_oid)
+                                else:
+                                    client._retry_tp_buys.pop(trade_oid, None)
+                                    client._pending_tp_oids.discard(trade_oid)
                                 if last_buy_timestamp is None or buy['timestamp'] > last_buy_timestamp:
                                     last_buy_timestamp = buy['timestamp']
                                 # Дублируем timestamp на диск (порт из lighter) — переживет рестарт.
