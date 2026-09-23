@@ -108,6 +108,59 @@ def _buylimit_level_allowed(client, target_buy_price: float, current_tp_orders) 
         return True
 
 
+# Сторожевой heartbeat цикла: как часто проверять прогресс и какая тишина
+# считается подвисанием. Метка client._watchdog_last_mark обновляется каждую
+# итерацию; фоновая задача _cycle_watchdog ругается в лог+терминал.
+WATCHDOG_INTERVAL_SEC = 60
+WATCHDOG_STALL_SEC = 300
+
+
+async def _cycle_watchdog(client):
+    """
+    Фоновая задача: раз в WATCHDOG_INTERVAL_SEC проверяет метку прогресса
+    цикла. Тишина дольше WATCHDOG_STALL_SEC — WARNING (дедуп 10 мин).
+    Ничего не перезапускает и не отменяет — только диагностика.
+    """
+    import time
+    try:
+        while True:
+            await asyncio.sleep(WATCHDOG_INTERVAL_SEC)
+            if get_bot_stop_flag():
+                return
+            last = getattr(client, "_watchdog_last_mark", None)
+            if last is None:
+                continue
+            stalled = time.monotonic() - last
+            if stalled > WATCHDOG_STALL_SEC:
+                if can_log_warning_message(client.label, "watchdog_stall", cooldown_minutes=10):
+                    client.browser.log_message(
+                        f"🐶 Watchdog: no cycle progress for {stalled:.0f}s "
+                        f"(threshold {WATCHDOG_STALL_SEC}s) — loop possibly stuck",
+                        level="WARNING",
+                    )
+                    # TG-дубль: лог/терминал могут быть не под рукой. Если сеть
+                    # жива (подвис не интернет) — уведомление дойдёт сюда.
+                    # Ошибка отправки не должна убивать сторожа.
+                    try:
+                        await send_tg_notification(
+                            client,
+                            f"🐶 <b>Watchdog</b>\n{client.label}: no cycle progress "
+                            f"for {stalled:.0f}s — loop possibly stuck",
+                            save_to_report=False,
+                        )
+                    except Exception as tg_err:
+                        client.browser.log_message(
+                            f"Watchdog TG failed: {tg_err}", level="ERROR"
+                        )
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        try:
+            client.browser.log_message(f"Watchdog error: {e}", level="ERROR")
+        except Exception:
+            pass
+
+
 def normalize_price(price_value: float, decimals: int) -> float:
     """
     Нормализует цену, округляя до указанного количества знаков после запятой.
@@ -958,6 +1011,17 @@ async def get_active_tp_orders(client, token_name: str):
         return []
 
 
+async def _stop_watchdog(watchdog_task):
+    """Аккуратно гасит задачу-сторожа (None-safe, без warnings event loop)."""
+    if watchdog_task is None:
+        return
+    try:
+        watchdog_task.cancel()
+        await watchdog_task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
 async def trade_delayed_orders_strategy(client, token_name: str):
     """
     Новая стратегия:
@@ -967,6 +1031,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
     - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
     """
     try:
+        watchdog_task = None  # задача-сторож, создаётся перед циклом; остановка None-safe
         step = Decimal(str(settings.STEP))
         client.browser.log_message(f"📊 New Strategy: STEP ${step}", level="INFO")
         
@@ -1078,6 +1143,10 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         cycle_count = 0
         cycle_log_every = 120
 
+        # Сторожевой heartbeat: метка прогресса + фоновая задача-сторож.
+        client._watchdog_last_mark = time.monotonic()
+        watchdog_task = asyncio.create_task(_cycle_watchdog(client))
+
         while True:
             try:
                 # Чистое завершение по stop-флагу (порт из lighter)
@@ -1088,6 +1157,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     )
                     break
                 cycle_count += 1
+                client._watchdog_last_mark = time.monotonic()
                 if cycle_count % cycle_log_every == 0:
                     client.browser.log_message(f"🔄 CYCLE #{cycle_count}", level="INFO")
                 # Задержка между итерациями основного цикла
@@ -1107,7 +1177,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # Получаем данные параллельно для оптимизации
                 try: # Отдельная обработка для получения данных
-                    import asyncio
                     tasks = [
                         client.browser.get_token_price(token_name),
                         client.browser.get_account_orders(),
@@ -2327,7 +2396,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
     except Exception as e:
         client.browser.log_message(f"❌ Strategy error: {e}", level="ERROR")
+        await _stop_watchdog(watchdog_task)
         return False
     
+    await _stop_watchdog(watchdog_task)
     # Функция должна работать бесконечно, но если по какой-то причине завершилась
     return True

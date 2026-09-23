@@ -1,6 +1,6 @@
 # Hyperliquid Bot Settings — пример. Скопируйте в settings.py:
 #   cp settings.py.example settings.py
-version = "1.3.5"
+version = "1.3.7"
 
 # Risk Management
 SPOT_TOKEN = "BTC"  # Spot Trading token
