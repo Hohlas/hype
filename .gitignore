@@ -79,5 +79,8 @@ stat/*
 # Encrypted database
 databases/
 
+# Local statistics / reports (пересоздаются ботом при запуске)
+*.xlsx
+
 # workspace
 *.code-workspace

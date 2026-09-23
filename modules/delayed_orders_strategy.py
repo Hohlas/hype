@@ -419,6 +419,26 @@ def floor_size(amount: float, decimals: int) -> float:
     return math.floor(float(amount) * factor) / factor
 
 
+def fee_to_usdc(fee_str, fee_token: str, ref_price: float, token_name: str) -> float:
+    """
+    Конвертирует комиссию из API в USDC.
+    Важно: биржа возвращает feeToken с U-префиксом (UBTC), а token_name
+    в стратегии без него (BTC) — прямое сравнение их не матчит, и комиссия
+    молча обнулялась (все BUY-комиссии считались $0.0000). Нормализуем.
+    """
+    try:
+        fee = float(fee_str or 0)
+    except Exception:
+        return 0.0
+    t = (fee_token or "").upper()
+    base = (token_name or "").upper()
+    if t == "USDC":
+        return fee
+    if t == base or t == f"U{base}" or (t.startswith("U") and t[1:] == base):
+        return fee * float(ref_price)
+    return 0.0
+
+
 async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
                            sz_decimals: int, last_buy_timestamp=None,
                            max_age_days: int = 7):
@@ -529,7 +549,7 @@ def initialize_statistics_file(token_name: str = "BTC"):
     expected_columns = [
         'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount', 
         'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value',
-        'Hold Benchmark'
+        'Hold Benchmark', 'Profit'
     ]
     
     # Проверяем, существует ли файл
@@ -559,6 +579,12 @@ def initialize_statistics_file(token_name: str = "BTC"):
                 df['Hold Benchmark'] = 0.0
                 df.to_excel(stats_file, index=False)
                 logger.info(f"✅ Updated statistics file structure: added 'Hold Benchmark' column")
+
+            # Если столбец "Profit" отсутствует, добавляем его в конец
+            if 'Profit' not in df.columns:
+                df['Profit'] = 0.0
+                df.to_excel(stats_file, index=False)
+                logger.info(f"✅ Updated statistics file structure: added 'Profit' column")
             
             # Убеждаемся, что все ожидаемые колонки присутствуют
             missing_columns = [col for col in expected_columns if col not in df.columns]
@@ -574,7 +600,7 @@ def initialize_statistics_file(token_name: str = "BTC"):
 async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
                                  usdc_balance: float, btc_balance: float, total_value: float, 
                                  orders=None, sz_decimals: int = None, token_name: str = "BTC",
-                                 hold_benchmark: float = None):
+                                 hold_benchmark: float = None, profit: float = None):
     """
     Записывает статистику операции в Excel файл hype_stat.xlsx
     
@@ -591,6 +617,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         token_name: Название торгуемого токена (по умолчанию "BTC")
         hold_benchmark: Эталон buy-and-hold (опционально; если не передан —
             считается внутри из якоря client: депо_старт / цена_старт × цена_сейчас)
+        profit: Профит сделки в USDC (то же значение, что уходит в Telegram).
+            Заполняется только для Take Profit, иначе None.
     """
     try:
         # Получаем текущую цену токена
@@ -656,7 +684,8 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             f'{token_name} Balance': btc_balance,
             'Limit Profit': limit_profit,
             'Total Value': total_value,
-            'Hold Benchmark': hold_benchmark
+            'Hold Benchmark': hold_benchmark,
+            'Profit': profit
         }
         
         # Путь к файлу статистики
@@ -666,7 +695,7 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         expected_columns = [
             'Timestamp', 'Current BTC Price', 'Operation', 'BTC Amount', 
             'Operation Price', 'USDC Balance', 'BTC Balance', 'Limit Profit', 'Total Value',
-            'Hold Benchmark'
+            'Hold Benchmark', 'Profit'
         ]
         
         # Проверяем, существует ли файл
@@ -688,6 +717,10 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             # Если столбец "Hold Benchmark" отсутствует, добавляем его в конец
             if 'Hold Benchmark' not in df.columns:
                 df['Hold Benchmark'] = 0.0
+
+            # Если столбец "Profit" отсутствует, добавляем его в конец
+            if 'Profit' not in df.columns:
+                df['Profit'] = 0.0
             
             # Убеждаемся, что все ожидаемые колонки присутствуют
             for col in expected_columns:
@@ -1186,9 +1219,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         status_interval = 1800  # 30 минут в секундах
         last_status_time = 0  # Установлено в 0, чтобы статус выводился сразу при запуске
 
-        # Счетчик итераций для throttled heartbeat (CYCLE пишется каждую 30-ю)
+        # Счетчик итераций для throttled heartbeat (CYCLE пишется каждую 120-ю, ~раз в 22 мин)
         cycle_count = 0
-        cycle_log_every = 30
+        cycle_log_every = 120
 
         while True:
             try:
@@ -1619,7 +1652,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             buy_trade = await find_matching_buy_trade(
                                                 client, token_name, tp_order_id, filled_qty, tp_price, tp_order_time, sz_decimals
                                             )
-                                            
+
                                             # Рассчитываем прибыль на основе конкретных сделок покупки и продажи
                                             if buy_trade:
                                                 buy_price = buy_trade['px']
@@ -1630,12 +1663,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 buy_fee_token = buy_trade.get('feeToken', '')
                                                 
                                                 # Рассчитываем комиссию покупки в USDC
-                                                buy_fee_usdc = 0.0
-                                                if buy_fee_token == 'USDC':
-                                                    buy_fee_usdc = float(buy_fee_str)
-                                                elif buy_fee_token == token_name:
-                                                    # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене покупки
-                                                    buy_fee_usdc = float(buy_fee_str) * buy_price
+                                                # (fee_to_usdc нормализует UBTC->BTC, иначе комиссия обнуляется)
+                                                buy_fee_usdc = fee_to_usdc(buy_fee_str, buy_fee_token, buy_price, token_name)
                                                 
                                                 # Получаем данные о продаже из Trade History для точной комиссии продажи
                                                 # Используем уже полученный sell_trade_from_history
@@ -1645,12 +1674,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                 if sell_trade_from_history:
                                                     sell_fee_str = sell_trade_from_history.get('fee', '0')
                                                     sell_fee_token = sell_trade_from_history.get('feeToken', 'USDC')
-                                                    
-                                                    if sell_fee_token == 'USDC':
-                                                        sell_fee_usdc = float(sell_fee_str)
-                                                    elif sell_fee_token == token_name:
-                                                        # Если комиссия в токене торговли (BTC, ETH, MNT и т.д.), конвертируем в USDC по цене продажи
-                                                        sell_fee_usdc = float(sell_fee_str) * tp_price
+                                                    sell_fee_usdc = fee_to_usdc(sell_fee_str, sell_fee_token, tp_price, token_name)
                                                 
                                                 
                                                 # Расчет выручки от продажи
@@ -1664,13 +1688,18 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     level="INFO"
                                                 )
                                                 
-                                                # Расчет затрат на покупку
-                                                buy_total = buy_size * buy_price
-                                                buy_cost = buy_total + buy_fee_usdc
-                                                
+                                                # Расчет затрат на покупку ПРОПОРЦИОНАЛЬНО проданной доле:
+                                                # TP может продать меньше входа (размер срезан до свободного
+                                                # остатка), остаток-пыль остается на балансе и в себестоимость
+                                                # этой продажи не входит (иначе каждая частичная продажа
+                                                # показывала бы ложный убыток).
+                                                qty_ratio = filled_qty / buy_size if buy_size > 0 else 1.0
+                                                buy_total = filled_qty * buy_price
+                                                buy_cost = buy_total + buy_fee_usdc * qty_ratio
+
                                                 client.browser.log_message(
-                                                    f"  💵 BUY: {buy_size:.6f} {token_name} × ${buy_price:.2f} = ${buy_total:.2f} "
-                                                    f"| Fee: ${buy_fee_usdc:.4f} ({buy_fee_token}) | "
+                                                    f"  💵 BUY: {filled_qty:.6f}/{buy_size:.6f} {token_name} × ${buy_price:.2f} = ${buy_total:.2f} "
+                                                    f"| Fee: ${buy_fee_usdc * qty_ratio:.4f} ({buy_fee_token}) | "
                                                     f"Total cost: ${buy_cost:.2f}",
                                                     level="INFO"
                                                 )
@@ -1711,6 +1740,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             client._previous_usdc_balance = usdc_balance
                                             
                                             # Записываем статистику операции Take Profit
+                                            # (Profit — то же значение, что уходит в Telegram)
                                             try:
                                                 await log_statistics_to_excel(
                                                     client=client,
@@ -1722,7 +1752,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                                     total_value=total_usd_value,
                                                     orders=open_orders,
                                                     sz_decimals=sz_decimals,
-                                                    token_name=token_name
+                                                    token_name=token_name,
+                                                    profit=profit
                                                 )
                                             except Exception as e:
                                                 client.browser.log_message(f"Failed to log Take Profit statistics: {e}", level="ERROR")
@@ -2054,9 +2085,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 )
                             else:
                                 # Размещение лимитного ордера на покупку
-                                client.browser.log_message("🔵 try to set BuyLimit ", level="INFO")
                                 try:
-                                    client.browser.log_message("🔵 try to place_order ", level="INFO")
                                     order_result = await client.place_order(
                                         token=token_name,
                                         side="BUY",
@@ -2071,11 +2100,8 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         actual_price = normalize_price(target_buy_price, sz_decimals)  # fallback
                                         token_amount = usdc_amount / target_buy_price
                                         is_filled = False
-                                        client.browser.log_message("🔵 try to order_result ", level="INFO")
                                         try:
                                             statuses = response_data.get('data', {}).get('statuses', [])
-                                            client.browser.log_message("🔵 response_data = " + str(response_data), level="INFO")
-                                            client.browser.log_message("🔵 statuses = " + str(statuses), level="INFO")
                                             if statuses and len(statuses) > 0:
                                                 first_status = statuses[0]
                                                 if 'filled' in first_status:
@@ -2152,7 +2178,6 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                         
                                 except Exception as e:
                                     client.browser.log_message(f"❌ Failed to create Buy Limit order: {e}", level="ERROR")
-                                client.browser.log_message("🔵 BuyLimit module end", level="INFO")    
                     else:
                         # Есть активные Buy Limit ордера - проверяем их актуальность
                         threshold = min_tp_price - float(step) * 2.5
