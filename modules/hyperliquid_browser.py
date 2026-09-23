@@ -474,6 +474,35 @@ class HyperliquidBrowser:
         except Exception as e:
             self.log_message(f"Failed to get {token_name} balance: {e}", level="ERROR")
             return 0.0
+
+    async def get_available_token_balance(self, token_name: str):
+        """
+        Свободный баланс токена: total - hold (за вычетом средств,
+        заблокированных в открытых ордерах). Нужен для корректного размера
+        TP SELL: биржа реджектит продажу, если размер хоть на пыль выше
+        свободного остатка (зачисление после fill меньше на комиссию).
+        """
+        try:
+            spot_info = await self.get_spot_account_info()
+            balances = spot_info.get("balances", [])
+
+            wanted = {token_name}
+            if token_name.startswith("U"):
+                wanted.add(token_name[1:])
+            else:
+                wanted.add(f"U{token_name}")
+
+            for balance in balances:
+                if balance.get("coin", "") in wanted:
+                    total = float(balance.get("total", 0))
+                    hold = float(balance.get("hold", 0) or 0)
+                    return max(0.0, total - hold)
+
+            return 0.0
+
+        except Exception as e:
+            self.log_message(f"Failed to get available {token_name} balance: {e}", level="ERROR")
+            return 0.0
             
     async def get_available_balance(self):
         """
@@ -1715,9 +1744,12 @@ class HyperliquidBrowser:
         except Exception as e:
             self.log_message(f"❌ API diagnosis failed: {e}", level="ERROR")
 
-    def log_message(self, message: str, level: str = "INFO"):
+    def log_message(self, message: str, level: str = "INFO", dedup: bool = True):
         """
-        Логирование сообщений с упрощенным форматом и кэшированием частых сообщений
+        Логирование сообщений с упрощенным форматом и кэшированием частых сообщений.
+        dedup=False отключает 60-секундное подавление дубликатов — использовать
+        для служебных строк цикла (CYCLE START, SET_TP), иначе итерации
+        «пропадают» из логов и диагностика слепнет.
         """
         # Пропускаем DEBUG сообщения если они отключены
         if level == "DEBUG":
@@ -1730,7 +1762,8 @@ class HyperliquidBrowser:
                 return
         
         # Кэширование для частых сообщений (раз в минуту) - НЕ применяется к DEBUG
-        if level != "DEBUG":
+        # и к сообщениям с dedup=False (служебные строки цикла)
+        if level != "DEBUG" and dedup:
             if not hasattr(self, '_log_cache'):
                 self._log_cache = {}
             

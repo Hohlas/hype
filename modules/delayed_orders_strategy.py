@@ -32,6 +32,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import json
+import math
 import asyncio
 from .utils import round_cut, async_sleep, TgReport, send_warning_notification, send_profit_notification
 from .retry import CustomError
@@ -407,6 +408,111 @@ def calc_hold_benchmark(client, current_price: float):
     if not depo_start or not price_start or not current_price:
         return None
     return depo_start / price_start * float(current_price)
+
+
+def floor_size(amount: float, decimals: int) -> float:
+    """
+    Округление размера ВНИЗ до decimals знаков. Для SELL важно именно вниз:
+    биржа реджектит продажу, если размер хоть на пыль выше свободного остатка.
+    """
+    factor = 10 ** decimals
+    return math.floor(float(amount) * factor) / factor
+
+
+async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
+                           sz_decimals: int, last_buy_timestamp=None,
+                           max_age_days: int = 7):
+    """
+    Стартовое сканирование сирот: покупки из истории, у которых нет ни
+    висящего TP SELL того же размера, ни более поздней продажи того же
+    размера. Такие покупки обычному SET_TP уже не видны (их timestamp не
+    новее last_buy_timestamp), без этого скана они остались бы без TP навсегда.
+
+    Суммарный размер сирот ограничивается свободным балансом (от новых к старым),
+    чтобы не ставить TP на пыль сверх имеющихся средств.
+
+    Returns:
+        list[{oid, price, amount, timestamp}] от старых к новым.
+    """
+    orphans = []
+    try:
+        if not trades_history:
+            return orphans
+
+        tolerance = 10 ** (-sz_decimals)
+        now_ms = datetime.now().timestamp() * 1000
+        max_age_ms = max_age_days * 24 * 3600 * 1000
+
+        # Висящие продажи нашего токена (защита уже есть)
+        resting_sell_sizes = []
+        for order in (open_orders or []):
+            try:
+                is_buy = order.get("isBuy", True)
+                side = order.get("side", "")
+                is_sell = side in ["SELL", "S", "A"] or (not is_buy)
+                if is_sell:
+                    sz = float(order.get("sz", 0))
+                    if sz > 0:
+                        resting_sell_sizes.append(sz)
+            except Exception:
+                continue
+
+        sells = [
+            (t.get("time", 0), float(t.get("sz", 0)))
+            for t in trades_history
+            if t.get("side", "").upper() in ["SELL", "S", "A"]
+        ]
+
+        for trade in trades_history:
+            if trade.get("side", "").upper() not in ["BUY", "B"]:
+                continue
+            buy_time = trade.get("time", 0)
+            buy_price = float(trade.get("px", 0))
+            buy_amount = float(trade.get("sz", 0))
+            buy_oid = trade.get("oid")
+            if not (buy_price > 0 and buy_amount > 0 and buy_oid):
+                continue
+            # Свежие покупки разберет обычный поток SET_TP — скану они не нужны
+            if last_buy_timestamp is None or buy_time > last_buy_timestamp:
+                continue
+            if now_ms - buy_time > max_age_ms:
+                continue
+            # Есть висящий TP того же размера → защищена
+            if any(abs(sz - buy_amount) <= tolerance for sz in resting_sell_sizes):
+                continue
+            # Есть более поздняя продажа того же размера → позиция закрыта
+            if any(st > buy_time and abs(ssz - buy_amount) <= tolerance for st, ssz in sells):
+                continue
+            orphans.append({
+                "oid": buy_oid,
+                "price": buy_price,
+                "amount": buy_amount,
+                "timestamp": buy_time,
+            })
+
+        if not orphans:
+            return orphans
+
+        # Ограничиваем суммарный размер свободным балансом (от новых к старым)
+        try:
+            free_btc = float(await client.browser.get_available_token_balance(token_name))
+        except Exception:
+            free_btc = 0.0
+        orphans.sort(key=lambda x: x["timestamp"], reverse=True)
+        picked, cum = [], 0.0
+        for o in orphans:
+            if cum + o["amount"] <= free_btc + tolerance:
+                picked.append(o)
+                cum += o["amount"]
+        picked.sort(key=lambda x: x["timestamp"])
+        return picked
+
+    except Exception as e:
+        try:
+            client.browser.log_message(f"Failed to scan orphan buys: {e}", level="ERROR")
+        except Exception:
+            pass
+        return []
 
 
 def initialize_statistics_file(token_name: str = "BTC"):
@@ -1044,18 +1150,51 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         except Exception as e:
             client.browser.log_message(f"Failed to get last buy info: {e}", level="WARNING")
         
+        # Структуры незащищенных покупок (фиксы 2-4):
+        # _retry_tp_buys: oid -> buy info, TP не выставлен — ретраить вне зависимости от timestamp
+        # _pending_tp_oids: oids покупок без TP — блокируют First Position (фикс 3)
+        if not hasattr(client, '_retry_tp_buys'):
+            client._retry_tp_buys = {}
+        if not hasattr(client, '_pending_tp_oids'):
+            client._pending_tp_oids = set()
+        
+        # Стартовое сканирование сирот (фикс 4): покупки из истории без TP.
+        # Только чтение + постановка в retry-очередь, торговую логику не меняет.
+        try:
+            startup_orders = await client.browser.get_account_orders()
+            orphans = await find_orphan_buys(
+                client, token_name, trades_history, startup_orders,
+                sz_decimals, last_buy_timestamp=last_buy_timestamp,
+            )
+            for orphan in orphans:
+                client._retry_tp_buys[orphan["oid"]] = orphan
+                client._pending_tp_oids.add(orphan["oid"])
+                client.browser.log_message(
+                    f"🔍 Orphan buy without TP: {orphan['amount']:.6f} {token_name} "
+                    f"at ${orphan['price']:.2f} (oid: {orphan['oid']}) — queued for TP",
+                    level="INFO"
+                )
+        except Exception as e:
+            client.browser.log_message(f"Failed orphan TP scan: {e}", level="WARNING")
+        
         # Кэш для отслеживания изменений в ордерах и балансах
         previous_orders_state = None
         previous_balance_state = None
         
-        # Время последнего статусного сообщения (для дежурных сообщений каждые 10 минут)
+        # Время последнего статусного сообщения (для дежурных сообщений каждые 30 минут)
         import time
-        status_interval = 600  # 10 минут в секундах
+        status_interval = 1800  # 30 минут в секундах
         last_status_time = 0  # Установлено в 0, чтобы статус выводился сразу при запуске
-        
+
+        # Счетчик итераций для throttled heartbeat (CYCLE пишется каждую 30-ю)
+        cycle_count = 0
+        cycle_log_every = 30
+
         while True:
             try:
-                client.browser.log_message("🔄 CYCLE START", level="INFO")  #
+                cycle_count += 1
+                if cycle_count % cycle_log_every == 0:
+                    client.browser.log_message(f"🔄 CYCLE #{cycle_count}", level="INFO")
                 # Задержка между итерациями основного цикла
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
@@ -1080,7 +1219,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     await async_sleep(5)
                     continue  # Пропускаем итерацию, НО внешний try не прерывается
 
-                # Дежурное статусное сообщение каждые 10 минут
+                # Дежурное статусное сообщение каждые 30 минут
                 current_time = time.time()
                 if current_time - last_status_time >= status_interval:
                     # Получаем балансы
@@ -1151,18 +1290,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Этот модуль работает независимо от блоков покупки.
                 # Он проверяет историю сделок и выставляет тейк-профит для всех новых покупок.
                 try:
-                    client.browser.log_message("DEBUG SET_TP: [1] Begin", level="INFO")
-                    
                     # Инициализируем множество обработанных покупок (если еще не создано)
                     if not hasattr(client, '_processed_buy_trades'):
                         client._processed_buy_trades = set()
-                    client.browser.log_message("DEBUG SET_TP: [2] ", level="INFO")
+                    if not hasattr(client, '_retry_tp_buys'):
+                        client._retry_tp_buys = {}
+                    if not hasattr(client, '_pending_tp_oids'):
+                        client._pending_tp_oids = set()
                     # Получаем историю торговли (последние 100 сделок)
                     trades_history = await client.browser.get_all_orders_history(token_name, limit=100)
-                    client.browser.log_message("DEBUG SET_TP: [3] ", level="INFO")
                     # Собираем все новые покупки (timestamp > last_buy_timestamp)
                     new_buys = []
-                    client.browser.log_message("DEBUG SET_TP: [4] ", level="INFO")
                     if trades_history:
                         # История уже отсортирована от новых к старым
                         for trade in trades_history:
@@ -1194,53 +1332,107 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             'amount': trade_amount,
                                             'timestamp': trade_timestamp
                                         })
-                    client.browser.log_message("DEBUG SET_TP: [5] ", level="INFO")
+                    # Добираем ретраи (фикс 2): покупки, чей TP не выставился ранее.
+                    # Они обрабатываются ВНЕ зависимости от timestamp — иначе после
+                    # сдвига last_buy_timestamp вперед они не были бы «новыми»
+                    # и остались бы без TP навсегда (так потерялся первый вход).
+                    for retry_oid, retry_buy in list(client._retry_tp_buys.items()):
+                        if retry_oid in client._processed_buy_trades:
+                            client._retry_tp_buys.pop(retry_oid, None)
+                            client._pending_tp_oids.discard(retry_oid)
+                            continue
+                        # Обновляем данные из свежей истории, если покупка там есть
+                        for trade in (trades_history or []):
+                            if trade.get('oid') == retry_oid:
+                                try:
+                                    px = float(trade.get('px', 0))
+                                    sz = float(trade.get('sz', 0))
+                                    if px > 0 and sz > 0:
+                                        retry_buy = {
+                                            'oid': retry_oid,
+                                            'price': px,
+                                            'amount': sz,
+                                            'timestamp': trade.get('time', retry_buy.get('timestamp', 0)),
+                                        }
+                                        client._retry_tp_buys[retry_oid] = retry_buy
+                                except Exception:
+                                    pass
+                                break
+                        if not any(b['oid'] == retry_oid for b in new_buys):
+                            new_buys.append(retry_buy)
                     # Обрабатываем все новые покупки (от новых к старым)
                     if new_buys:
-                        # Сортируем по timestamp (от новых к старым) для правильного обновления last_buy_timestamp
+                        # Сортируем по timestamp (от новых к старым)
                         new_buys.sort(key=lambda x: x['timestamp'], reverse=True)
-                        
-                        # Обновляем last_buy_timestamp на максимальный из новых покупок
-                        max_timestamp = max(buy['timestamp'] for buy in new_buys)
-                        if last_buy_timestamp is None or max_timestamp > last_buy_timestamp:
-                            last_buy_timestamp = max_timestamp
-                        
+
+                        # Свободный остаток для корректного размера TP (фикс 1):
+                        # биржа реджектит продажу, если размер хоть на пыль выше
+                        # доступного (зачисление после fill меньше на комиссию).
+                        try:
+                            free_btc = float(await client.browser.get_available_token_balance(token_name))
+                        except Exception:
+                            free_btc = 0.0
+
+                        # NOTE: last_buy_timestamp и _processed_buy_trades обновляются
+                        # ТОЛЬКО после успешного выставления TP (фикс 2). Неуспех —
+                        # в retry-очередь, повторная попытка на следующих итерациях.
+
                         # Обрабатываем каждую новую покупку
                         for buy in new_buys:
                             trade_oid = buy['oid']
                             buy_price = buy['price']
                             buy_amount = buy['amount']
-                            
-                            # Помечаем покупку как обработанную сразу, чтобы избежать дубликатов
-                            client._processed_buy_trades.add(trade_oid)
-                            
+
+                            # Размер TP: min(fill, свободный остаток), округление ВНИЗ.
+                            # Обычно равен fill; чуть меньше — только на величину комиссии.
+                            tp_qty = floor_size(min(buy_amount, free_btc), sz_decimals)
+
+                            if tp_qty < min_qty:
+                                client.browser.log_message(
+                                    f"⚠️ TP skipped for buy oid {trade_oid}: "
+                                    f"available {free_btc:.6f} {token_name} < min {min_qty} "
+                                    f"(will retry when balance grows)",
+                                    level="WARNING"
+                                )
+                                client._retry_tp_buys[trade_oid] = buy
+                                client._pending_tp_oids.add(trade_oid)
+                                continue
+
                             # Рассчитываем цену TP
                             tp_price = normalize_price(buy_price + float(step), sz_decimals)
-                            
+
                             # Размещение TP-ордера на бирже
                             try:
                                 tp_order_data = {
                                     "token": token_name,
                                     "side": "SELL",
                                     "order_type": "LIMIT",
-                                    "quantity": buy_amount,
+                                    "quantity": tp_qty,
                                     "price": tp_price,
                                 }
-                                
+
                                 tp_result = await client.place_order(**tp_order_data)
-                                
+
+                                # Успех: только теперь помечаем обработанной (фикс 2)
+                                client._processed_buy_trades.add(trade_oid)
+                                client._retry_tp_buys.pop(trade_oid, None)
+                                client._pending_tp_oids.discard(trade_oid)
+                                if last_buy_timestamp is None or buy['timestamp'] > last_buy_timestamp:
+                                    last_buy_timestamp = buy['timestamp']
+                                free_btc = max(0.0, free_btc - tp_qty)
+
                                 client.browser.log_message(
-                                    f"🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
+                                    f"🎯 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f} (buy oid: {trade_oid})",
                                     level="INFO"
                                 )
-                                
+
                                 # Отправляем уведомление в Telegram
                                 await send_tg_notification(
                                     client,
-                                    text=f'🎯 Set TP: {buy_amount:.6f} {token_name} at ${tp_price:.2f}',
+                                    text=f'🎯 Set TP: {tp_qty:.6f} {token_name} at ${tp_price:.2f}',
                                     save_to_report=False
                                 )
-                                
+
                                 # Записываем статистику операции Set TP
                                 try:
                                     btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
@@ -1248,7 +1440,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     await log_statistics_to_excel(
                                         client=client,
                                         operation="Set TP",
-                                        btc_amount=buy_amount,
+                                        btc_amount=tp_qty,
                                         price=tp_price,
                                         usdc_balance=all_balances.get("USDC", 0.0),
                                         btc_balance=btc_balance,
@@ -1258,17 +1450,22 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                     )
                                 except Exception as e:
                                     client.browser.log_message(f"Failed to log Set TP statistics: {e}", level="ERROR")
-                                
+
                                 # Обновляем last_buy_price на цену последней обработанной покупки
                                 last_buy_price = buy_price
-                                
+
                             except Exception as e:
                                 client.browser.log_message(f"❌ Failed to create TP order for buy oid {trade_oid}: {e}", level="ERROR")
-                                # Удаляем из обработанных, чтобы попробовать снова на следующей итерации
-                                client._processed_buy_trades.discard(trade_oid)
-                        
-                        # Прерываем цикл после создания TP ордеров
-                        # Это дает время ордерам появиться в API перед следующей итерацией
+                                # В retry-очередь и pending — повторная попытка на
+                                # следующих итерациях (фикс 2). Из _processed_buy_trades
+                                # НЕ удаляем, а просто туда не добавляем.
+                                client._retry_tp_buys[trade_oid] = buy
+                                client._pending_tp_oids.add(trade_oid)
+
+                        # Прерываем цикл после обработки TP
+                        # Это дает время ордерам появиться в API перед следующей итерацией.
+                        # Продолжаем и при частичном неуспехе: First Position ниже
+                        # дополнительно защищен проверкой _pending_tp_oids (фикс 3).
                         if new_buys:
                             continue
                                                 
@@ -1706,6 +1903,19 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 
                 # 1. При отсутствии TP ордеров: маркет покупка + TP ордер
                 if min_tp_price == 0 and max_tp_price == 0:
+                    # Фикс 3: не стреляем второй маркет, пока есть покупки без TP
+                    # (TP не выставился/отклонила биржа). Ждем и даем SET_TP
+                    # ретраить, иначе получаем дублирующиеся входы по одной цене.
+                    pending_tp = getattr(client, '_pending_tp_oids', set()) or set()
+                    retry_tp = getattr(client, '_retry_tp_buys', {}) or {}
+                    if pending_tp or retry_tp:
+                        client.browser.log_message(
+                            f"⏳ TP pending for {len(pending_tp | set(retry_tp))} buy(s) — "
+                            f"waiting for TP retry, skipping First Position",
+                            level="INFO"
+                        )
+                        continue
+
                     client.browser.log_message(
                         f"🚀 No TP Orders: creating MARKET BUY at current price ${current_price:.2f}",
                         level="INFO"
