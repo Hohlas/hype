@@ -3,11 +3,47 @@
 ## Анализ проблем
 
 1. **Интерактивный ввод режима** — `modules/utils/modes.py:59` использует `inquirer.prompt()`, требует TTY
-2. **Интерактивный ввод пароля** — `modules/database.py:145` использует `input()` в `get_password()`, требует TTY
+2. **Интерактивный ввода пароля** — `modules/database.py:145` использует `input()` в `get_password()`, требует TTY
 3. **Секреты в файлах** — `input_data/wallets.txt` содержит приватные ключи, `input_data/tg_bot_tokens.txt` — токены Telegram-ботов. Файлы в `.gitignore` и не попадут в CI-чекаут — секреты нужно передавать через env/secrets
 4. **Бесконечный цикл стратегии** — `modules/delayed_orders_strategy.py:1150` `while True` — в CI нужно ограничение по времени. `main.py:233` — цикл меню, не проблема CI (при env-режиме завершится после одного прогона)
 5. **Локальное состояние** — `databases/modules.json`, `databases/stats.json`, `databases/last_buy_timestamps.json`, `hype_stat.xlsx` теряются между запусками
 6. **Блокирующий `input()` в конце** — `main.py:265,269,286` — падение с EOFError (или hang до timeout — зависит от stdin раннера)
+
+## Переключатель режимов: VPS vs GitHub Actions
+
+Бот должен работать в двух режимах:
+
+| Режим | Как определяется | Источник секретов | Состояние | Ввод режима |
+|---|---|---|---|---|
+| **VPS** (по умолчанию) | `BOT_RUNTIME` не задан или `=vps` | Файлы `input_data/` | Зашифрованная БД на диске | Интерактивный (`inquirer`) |
+| **GitHub Actions** | `BOT_RUNTIME=github_actions` или авто (есть `WALLETS_DATA`) | GitHub Secrets → env | Пересоздаётся каждый ран | Env `BOT_MODE` |
+
+### Логика автоопределения
+
+```python
+def get_runtime_mode():
+    explicit = os.getenv('BOT_RUNTIME', '').lower()
+    if explicit in ('vps', 'github_actions'):
+        return explicit
+    # Автоопределение: есть WALLETS_DATA — значит CI
+    return 'github_actions' if os.getenv('WALLETS_DATA') else 'vps'
+```
+
+### Поведение в каждом режиме
+
+**VPS-режим (как раньше):**
+- Интерактивный выбор режима через `inquirer`
+- Кошельки из `input_data/wallets.txt`
+- Токены TG из `input_data/tg_bot_tokens.txt`
+- Зашифрованная БД `databases/modules.json` на диске
+- Пароль запрашивается интерактивно (или дефолт)
+
+**GitHub Actions-режим:**
+- Режим из `BOT_MODE` env (без интерактива)
+- Кошельки из `WALLETS_DATA` env (JSON)
+- Токены TG из env
+- БД пересоздаётся из `WALLETS_DATA` каждый запуск (ключи не кэшируются)
+- Пароль шифрования из `DB_ENCRYPTION_PASSWORD` env
 
 ## Варианты харнесов
 
@@ -36,36 +72,18 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Restore state
-        id: restore-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            databases/
-            hype_stat.xlsx
-          key: bot-state-${{ github.run_id }}
-          restore-keys: bot-state-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run bot
         env:
+          BOT_RUNTIME: "github_actions"
           BOT_MODE: "0"
           DB_ENCRYPTION_PASSWORD: ${{ secrets.DB_ENCRYPTION_PASSWORD }}
           WALLETS_DATA: ${{ secrets.WALLETS_DATA }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_USER_ID: ${{ secrets.TG_USER_ID }}
         run: python main.py < /dev/null
-
-      - name: Save state
-        if: always() && steps.restore-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            databases/
-            hype_stat.xlsx
-          key: bot-state-${{ github.run_id }}
 
       - name: Upload logs
         if: always()
@@ -98,21 +116,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Restore state
-        id: restore-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            databases/
-            hype_stat.xlsx
-          key: bot-state-${{ github.run_id }}
-          restore-keys: bot-state-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run bot
         env:
+          BOT_RUNTIME: "github_actions"
           BOT_MODE: "0"
           DB_ENCRYPTION_PASSWORD: ${{ secrets.DB_ENCRYPTION_PASSWORD }}
           WALLETS_DATA: ${{ secrets.WALLETS_DATA }}
@@ -120,15 +129,6 @@ jobs:
           TG_USER_ID: ${{ secrets.TG_USER_ID }}
           BOT_MAX_RUNTIME: "330"  # минут
         run: python main.py < /dev/null
-
-      - name: Save state
-        if: always() && steps.restore-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            databases/
-            hype_stat.xlsx
-          key: bot-state-${{ github.run_id }}
 ```
 
 ### Вариант 3: Разделение по режимам
@@ -177,13 +177,24 @@ jobs:
 
 ## Необходимые изменения кода
 
-### 1. Замена интерактивного выбора режима
+### 1. Переключатель режимов + замена интерактивного выбора режима
 
-**Файл: `main.py`** — заменить вызов `choose_mode()` на чтение из переменной окружения:
+**Файл: `main.py`**:
 
 ```python
 import os
 from types import SimpleNamespace
+
+def get_runtime_mode():
+    explicit = os.getenv('BOT_RUNTIME', '').lower()
+    if explicit in ('vps', 'github_actions'):
+        return explicit
+    return 'github_actions' if os.getenv('WALLETS_DATA') else 'vps'
+
+def get_mode():
+    if get_runtime_mode() == 'github_actions':
+        return get_mode_from_env()
+    return choose_mode()  # интерактивный для VPS
 
 def get_mode_from_env():
     mode_id = os.getenv('BOT_MODE', '0')
@@ -244,7 +255,7 @@ def get_password(self):
     except InvalidToken:
         pass
 
-    # Fallback на интерактивный ввод (только для локального запуска)
+    # Fallback на интерактивный ввод (только для VPS)
     print('\n' + '='*60)
     print('🔐 Database is encrypted. Please enter password to decrypt.')
     print('='*60)
@@ -283,7 +294,27 @@ def load_tg_tokens_from_env():
 
 ### 4. Модификация `wallet_loader.py` и `tg_tokens_loader.py`
 
-Добавить fallback на переменные окружения при отсутствии файлов.
+Добавить fallback на переменные окружения при отсутствии файлов:
+
+```python
+# wallet_loader.py
+def get_wallet_modules(db=None):
+    # Сначала пробуем env (CI-режим)
+    env_wallets = load_wallets_from_env()
+    if env_wallets:
+        return [
+            {
+                "label": w["label"],
+                "wallet_address": w["wallet_address"],
+                "private_key": w["private_key"],
+                "proxy": w.get("proxy"),
+                "module_info": {"status": True}
+            }
+            for w in env_wallets
+        ]
+    # Fallback на файлы (VPS-режим)
+    ...
+```
 
 ### 5. Удаление блокирующих `input()` в `main.py`
 
@@ -306,24 +337,23 @@ if MAX_RUNTIME_SECONDS and (time.time() - _start_time) > MAX_RUNTIME_SECONDS:
     break
 ```
 
-### 7. Сохранение состояния между запусками
+### 7. Пересоздание БД в CI-режиме (вариант A)
 
-Использовать `actions/cache/restore@v4` + `actions/cache/save@v4` (save с `if: always()`) для файлов:
-- `databases/modules.json` (зашифрованная БД)
-- `databases/stats.json`
-- `databases/last_buy_timestamps.json`
-- `hype_stat.xlsx`
+В GitHub Actions `databases/modules.json` **не кэшируется**. БД пересоздаётся из `WALLETS_DATA` каждый запуск:
+
+```python
+# main.py или database.py
+def ensure_database_for_ci(db):
+    """В CI-режиме пересоздаёт БД из WALLETS_DATA, если modules.json отсутствует."""
+    if get_runtime_mode() != 'github_actions':
+        return
+    if not os.getenv('WALLETS_DATA'):
+        raise RuntimeError("WALLETS_DATA is required in github_actions mode")
+    # Пересоздаём БД из env (ключи не попадают в кэш)
+    db.create_modules_from_env()
+```
 
 ## Риски
-
-### Критичный: кэш с зашифрованными ключами + дефолтный пароль в коде
-
-`databases/modules.json` содержит Fernet-шифртексты приватных ключей. Дефолтный пароль шифрования захардкожен в коде (`database.py:95,129,150`). GitHub docs не рекомендуют хранить секреты в кэше — любой с read-доступом может открыть PR и прочитать кэш base-ветки.
-
-**Митигация:**
-- Использовать только нестандартный `DB_ENCRYPTION_PASSWORD` (не дефолт)
-- Рассмотреть `upload-artifact` с retention и ограничением доступа вместо кэша
-- Либо отказаться от persist `modules.json` — пересоздавать БД из `WALLETS_DATA` каждый ран (ключи только из secrets, не в кэше)
 
 ### Важный: параллельные запуски
 
@@ -331,14 +361,21 @@ if MAX_RUNTIME_SECONDS and (time.time() - _start_time) > MAX_RUNTIME_SECONDS:
 
 **Митигация:** `concurrency` с `cancel-in-progress: false` (уже добавлено в YAML выше).
 
+### Средний: потеря состояния при пересоздании БД
+
+При варианте A `databases/modules.json` пересоздаётся каждый ран. Файлы `stats.json` и `last_buy_timestamps.json` также не кэшируются — бот теряет историю покупок между запусками.
+
+**Митигация:** критично только для `last_buy_timestamps.json` (используется для детекции филлов после рестарта). Можно кэшировать только этот файл, либо принять потерю как ограничение CI-режима.
+
 ## Шаги реализации
 
 1. Создать `.github/workflows/bot.yml`
-2. Модифицировать `main.py` — убрать интерактивный ввод, добавить `get_mode_from_env()`
+2. Модифицировать `main.py` — добавить `get_runtime_mode()`, `get_mode()`, `get_mode_from_env()`, убрать блокирующие `input()`
 3. Модифицировать `modules/database.py` — поддержка `DB_ENCRYPTION_PASSWORD` env в `get_password()`
 4. Создать `modules/ci_loader.py` — загрузка секретов из env
 5. Модифицировать `wallet_loader.py` и `tg_tokens_loader.py` — fallback на env
 6. Добавить таймаут в `delayed_orders_strategy.py`
-7. Протестировать локально: `BOT_MODE=0 DB_ENCRYPTION_PASSWORD=test WALLETS_DATA='[...]' python main.py < /dev/null`
-8. Добавить секреты в GitHub Repository Settings
-9. Проверить, что `.github/workflows/*.yml` и `settings.py` закоммичены
+7. Протестировать VPS-режим: `python main.py` (как раньше)
+8. Протестировать CI-режим: `BOT_RUNTIME=github_actions BOT_MODE=0 DB_ENCRYPTION_PASSWORD=test WALLETS_DATA='[...]' python main.py < /dev/null`
+9. Добавить секреты в GitHub Repository Settings
+10. Проверить, что `.github/workflows/*.yml` и `settings.py` закоммичены
