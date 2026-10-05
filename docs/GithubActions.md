@@ -1,187 +1,226 @@
-# План: запуск бота в GitHub Actions
+# Hype в GitHub Actions — план бесперебойного дежурства (по опыту ChatSum)
 
-## Анализ проблем
+> Исполнитель (ИИ-агент): этот документ — перенос проверенного в проде решения соседнего проекта `Hohlas/ChatSum` (тот же хостинг: public-репо + cron-раны, дежурство 24/7 доказано неделями работы, тремя ночами таймаут-киллов и чистой ротацией). Все архитектурные решения ниже оплачены боем и не обсуждаются заново. Что чинить в коде бота (§9) — твоя работа по месту; архитектуру дежурства (§§0–8) реализуй как написано, адаптируя только имена файлов и содержимое итерации.
+>
+> Обновлено: 2026-10-05. Заменён черновой план «сериализованные вахты по 28 мин через concurrency» — он давал зазоры и каскадные отставания; неверные выводы (cron `0 */6`, `*/30`, короткие вахты, `concurrency.group` как арбитраж) удалены.
 
-1. **Интерактивный ввод режима** — `modules/utils/modes.py:59` использует `inquirer.prompt()`, требует TTY
-2. **Интерактивный ввода пароля** — `modules/database.py:145` использует `input()` в `get_password()`, требует TTY
-3. **Секреты в файлах** — `input_data/wallets.txt` содержит приватные ключи, `input_data/tg_bot_tokens.txt` — токены Telegram-ботов. Файлы в `.gitignore` и не попадут в CI-чекаут — секреты нужно передавать через env/secrets
-4. **Бесконечный цикл стратегии** — `modules/delayed_orders_strategy.py:1150` `while True` — в CI нужно ограничение по времени. `main.py:233` — цикл меню, не проблема CI (при env-режиме завершится после одного прогона)
-5. **Локальное состояние** — `databases/modules.json`, `databases/stats.json`, `databases/last_buy_timestamps.json`, `hype_stat.xlsx` теряются между запусками
-6. **Блокирующий `input()` в конце** — `main.py:265,269,286` — падение с EOFError (или hang до timeout — зависит от stdin раннера)
+## 0. Замороженные решения
 
-## Переключатель режимов: VPS vs GitHub Actions
+1. Репозиторий **public**. Причина: бюджет 0 ₽; private Free (2000 мин/мес) не покрывает дежурство; Pro/VPS отвергнуты владельцем. Public + standard runner = бесплатно и безлимитно.
+2. Режим — **бесперебойное дежурство, как в ChatSum**: короткие cron-раны образуют эстафету, в каждый момент один лидер ведёт торговый цикл, остальные раны — standby. Зазоров между вахтами нет по построению (перекрытие ранов — дизайн, а не авария).
+3. Каденс: cron **`*/11 * * * *`** (UTC). 11 взаимно просто с 60 — тики дрейфуют и не залипают на минутном пике нагрузки `:00`, куда ломится весь GitHub. Ровные 10/15/30 брать запрещено (проверено: залипание на пике = регулярные задержки старта).
+4. Job `timeout-minutes: 355` (потолок платформы 360; наш топор падает раньше и предсказуемо — минута на выход + минута запаса). Внутренний вотч лидера **330 мин**. Бюджет: `330 (вотч) + 10 (хвост) + 2 (установка) = 342 ≤ 355`, запас 13 мин. Формула load-bearing, см. §2.
+5. **`concurrency` в workflow нет.** Перекрытие ранов — основа дизайна; арбитраж «кто лидер» делает протокол дежурства (§3), а не очередь GitHub. `cancel-in-progress` любого вида запрещён (убивает перекрытие).
+6. Секреты только через env/Secrets. Ключи — agent-ключи Hyperliquid **без права вывода**. Никогда не печатать секреты/ключи/токены в лог (репо public, логи артефактов видны всем).
+7. `pandas + numpy + openpyxl` **удаляются полностью** (единый `requirements.txt`). Статистика — stdlib-`csv`, тот же набор колонок. Торговые решения excel не читают (читают биржу + состояние).
+8. Кап «не стартовать работу у дедлайна» — **решение «нет», а не «потом»** (владелец ChatSum отклонил явно): хвост в бюджете существует именно для того, чтобы начатая итерация доработала; запрет стартовать превращает покрываемый перерасход в регулярное простаивание. Хвост работает по назначению.
 
-Бот должен работать в двух режимах:
+## 1. Архитектура дежурства (перенос ChatSum целиком)
 
-| Режим | Как определяется | Источник секретов | Состояние | Ввод режима |
-|---|---|---|---|---|
-| **VPS** (по умолчанию) | `BOT_RUNTIME` не задан или `=vps` | Файлы `input_data/` | Зашифрованная БД на диске | Интерактивный (`inquirer`) |
-| **GitHub Actions** | `BOT_RUNTIME=github_actions` или авто (есть `WALLETS_DATA`) | GitHub Secrets → env | Пересоздаётся каждый ран | Env `BOT_MODE` |
+Каждый cron-тик стартует ран. Ран подключается к бирже, читает ветку `state` и либо становится лидером (никого живого нет), либо уходит в standby (дежурит рядом, готов подхватить). Лидер ведёт торговый цикл до конца своего вотча, за ~минуты до дедлайна пишет `retiring` — свежий standby подхватывает мгновенно, без зазора.
 
-### Логика автоопределения
+### 1.1. Ветка `state` (через GitHub Contents API)
 
-```python
-def get_runtime_mode():
-    explicit = os.getenv('BOT_RUNTIME', '').lower()
-    if explicit in ('vps', 'github_actions'):
-        return explicit
-    # Автоопределение: есть WALLETS_DATA — значит CI
-    return 'github_actions' if os.getenv('WALLETS_DATA') else 'vps'
+Отдельная долгоживущая ветка `state` (создаётся один раз вручную, пустой коммит). Файлы:
+
+| Файл | Содержимое (для hype) | Кто пишет |
+|---|---|---|
+| `state.json` | `completed` (метки reconciled-слотов/действий — аналог торговых меток; формат `ключ: дата`, см. §4), `last_run_utc`, счётчики (курсоры ротации, если появятся), счётчики ошибок | лидер (ритмом heartbeat) + финальный Persist-шаг |
+| `leader.json` | `run_id`, `ready` (false→true), `heartbeat_utc`, `watch_started_utc`, `retiring` (bool) | лидер |
+| `standby.json` | общий файл дежурных: `run_id`, `heartbeat_utc` (последний активный standby; «побеждает свежайший») | standby-раны |
+| `work.json` | `run_id`, `last_work_utc` — маркер «работа движется» (дёргается каждую итерацию лидера) | лидер |
+
+Почему не артефакты и не кэш: артефакты/кэш привязаны к рану и недоступны из другого рана; ветка через Contents API — единственное общее персистентное место, доступное любому рану без сторонних сервисов.
+
+### 1.2. Протокол лидер ↔ standby (все числа load-bearing)
+
+- **Claim:** check-then-PUT флага, last-writer-wins + один ретрай при sha-конфликте. Новый ран клеймит `ready: false`, и только после успешного подключения к бирже (и первичного parse!) ставит `ready: true`. Ран, не достучавшийся до биржи, лидером выглядеть не должен никогда.
+- **Новичок при живом лидере** → standby-цикл: без торговли, только GET флага каждые ~30 сек + собственный heartbeat в общий `standby.json`. Старый standby уступает свежайшему («побеждает свежайший» — промоутит обычно ран возрастом ≤11 мин, правления остаются длинными).
+- **Уступка:** лидер уступает только живому + ready + строго более новому лидеру; равное время старта → побеждает больший `run_id`.
+- **Промоушен:** флага нет, heartbeat протух (старше `LEADER_STALE_SEC=300`), или лидер `retiring` — подтверждается `PROMOTE_CONFIRM_READS=2` последовательными чтениями (защита от флэпа на одном медленном GET).
+- **Чистая ротация:** лидер у дедлайна пишет `retiring` + пушит → standby подхватывает мгновенно, зазор — секунды. Это норма, к которой стремимся; килл таймаутом — авария (см. §2).
+- **Зависший лидер (wedge):** heartbeat отвечает «процесс жив», `work.json` — «работа движется» (дёргается каждую итерацию). Heartbeat свежий, но маркер того же `run_id` протух дольше `WORK_STALE_SEC=900` → takeover после тех же 2 подтверждающих чтений. Нет маркера (старый код) / чужой `run_id` / метка из будущего → takeover по этому основанию запрещён.
+- **Наследование дедлайна (критично, оплачено двумя убитыми лидерами):** promoted standby ведёт ОСТАТОК собственного вотча (`watch_started_utc` свой, не момент промоушена), а не полный вотч заново. Иначе новый дедлайн переживает джоб — ротация умирает киллом платформы. Остаток ≤0 → одна полезная итерация, затем `retiring`.
+- **Сплит-брейны** разрешаются правилом «побеждает новейший»; дубли ордеров гасятся claim-check перед постановкой (§5) — параллель не страшна, если каждая постановка предварена сверкой.
+
+### 1.3. Слияние состояния — один инвариант
+
+Слияние локального и удалённого `state.json` — **объединение, никогда пересечение**: метки — свежайшая дата на ключ, счётчики — `max()` (локальное значение не должно откатывать чужой прогресс), `last_run_utc` — max. Протухшие счётчики чистятся (окно 3 суток).
+
+Запись: GET → merge → PUT → при sha-конфликте один повтор. Затем **проверка записи**: перечитать ветку, убедиться, что все локальные метки на месте; расхождение → ещё один PUT + громкий `🚨` в лог (tripwire). Ран никогда не выходит с ненулевым кодом из-за проблем состояния — в худшем случае локальный файл увозит финальный `Persist state`-шаг workflow.
+
+Очистка/выход лидера: pull-merge ПЕРЕД сохранением/пушем — молчаливый standby или уступающий лидер пишут только надмножество, никогда не затирают чужой прогресс.
+
+### 1.4. Самодиагностика зазоров (ловит аварии минутами, а не днями)
+
+Новый лидер ДО claim'а читает последний чужой heartbeat (лидер+standby, свой `run_id` исключён). Тишина дольше `GAP_WARN_SEC=240` → варнинг владельцу в Telegram с длительностью и временем последнего heartbeat. Ниже порога — только строка в лог. В ChatSum первый же варнинг подтвердил зазор 10–12 мин секунда в секунду с форензикой по ветке — метод доказан боем.
+
+## 2. Каденс и бюджет времени
+
+### 2.1. Почему `*/11`
+
+11 взаимно просто с 60: тики `*/11` дрейфуют по циферблату и не залипают на `:00` — минуте пиковой нагрузки планировщика GitHub, куда приходится старт всех «ровных» кронов. Ровные делители часа (10/15/30) дают систематические задержки старта. Это решение ChatSum, перенесено как есть.
+
+### 2.2. Формула бюджета (нарушение = киллы, доказано)
+
+```
+вотч + хвост + установка ≤ timeout-minutes, запас ≥ 5 мин
 ```
 
-### Поведение в каждом режиме
+- **Установка** = checkout + setup-python + `pip install`. Замеряется по первым ранам из логов (~1–2 мин с кэшем pip; холодный кэш после смены `requirements.txt` — дольше). Удаление pandas (§0.п7) ускоряет и холодную установку.
+- **Хвост** = время, на которое одна начатая итерация может наехать на внутренний дедлайн. Дедлайн проверяется *между* итерациями, стартовавшая итерация всегда дорабатывает целиком. У ChatSum допущение «хвост 15» один раз не покрыло патологию (~24 мин: стек таймаут×ретраи×ротации) — три рана подряд были убиты ровно на минуте таймаута, все здоровыми посреди цикла.
+- **Наши числа:** `330 + 10 + 2 = 342 ≤ 355`, запас 13 мин. Хвост 10 покрывает итерацию (секунды-минуты, см. §5) многократно. Если средняя установка из логов превысит 3 мин — уменьшить вотч, а не надеяться.
+- **Подпись килла:** `conclusion: cancelled` с длительностью ≈ `timeout-minutes` («ровно 355» — это усечение киллом, а не длительность зависания). Любой такой ран — разбор бюджета, а не «перезапустить и посмотреть».
+- **Метод контроля:** держать числа комментарием в yml и/или assert'ом в тестах дежурной логики (у ChatSum — `test_timeout_budget`: парсит workflow regex'ом без зависимостей и утверждает неравенство).
 
-**VPS-режим (как раньше):**
-- Интерактивный выбор режима через `inquirer`
-- Кошельки из `input_data/wallets.txt`
-- Токены TG из `input_data/tg_bot_tokens.txt`
-- Зашифрованная БД `databases/modules.json` на диске
-- Пароль запрашивается интерактивно (или дефолт)
-
-**GitHub Actions-режим:**
-- Режим из `BOT_MODE` env (без интерактива)
-- Кошельки из `WALLETS_DATA` env (JSON)
-- Токены TG из env
-- БД пересоздаётся из `WALLETS_DATA` каждый запуск (ключи не кэшируются)
-- Пароль шифрования из `DB_ENCRYPTION_PASSWORD` env
-
-## Варианты харнесов
-
-### Вариант 1: Периодический запуск (рекомендуется)
+## 3. Workflow (`.github/workflows/bot.yml`, создать)
 
 ```yaml
-# .github/workflows/bot.yml
-name: Hyperliquid Bot
+name: Hyperliquid Bot Duty
 on:
-  schedule:
-    - cron: '0 */6 * * *'  # каждые 6 часов (UTC)
-  workflow_dispatch:        # ручной запуск
-
-concurrency:
-  group: bot-${{ github.ref }}
-  cancel-in-progress: false
-
+  schedule: [{cron: '*/11 * * * *'}]   # UTC; 11 — см. §2.1, менять запрещено
+  workflow_dispatch: {}                 # ручной ран участвует в дежурстве как обычный
+permissions: {contents: write}          # нужно: ветка state пишется через API
+# concurrency НЕТ — перекрытие ранов является дизайном (§0.п5)
 jobs:
-  bot:
+  duty:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 355                 # потолок 360; бюджет §2.2 в комментариях
     steps:
       - uses: actions/checkout@v4
+        with: {fetch-depth: 0}           # нужен доступ к ветке state
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run bot
+        with: {python-version: '3.11', cache: 'pip', cache-dependency-path: 'requirements.txt'}
+      - run: pip install -r requirements.txt
+      - name: Run duty
         env:
-          BOT_RUNTIME: "github_actions"
-          BOT_MODE: "0"
+          BOT_RUNTIME: github_actions
+          WATCH_SECONDS: '19800'         # 330 мин вотч; хвост 10 + установка 2 ≤ 355
+          BOT_POLL_INTERVAL: '60'       # секунд, см. §5
           DB_ENCRYPTION_PASSWORD: ${{ secrets.DB_ENCRYPTION_PASSWORD }}
           WALLETS_DATA: ${{ secrets.WALLETS_DATA }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          PROFIT_BOT_TOKEN: ${{ secrets.PROFIT_BOT_TOKEN }}
           TG_USER_ID: ${{ secrets.TG_USER_ID }}
-        run: python main.py < /dev/null
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-logs
-          path: hyperliquid_bot.log
+        run: |
+          echo "::add-mask::${{ secrets.WALLETS_DATA }}"
+          echo "::add-mask::${{ secrets.DB_ENCRYPTION_PASSWORD }}"
+          echo "::add-mask::${{ secrets.TG_BOT_TOKEN }}"
+          echo "::add-mask::${{ secrets.PROFIT_BOT_TOKEN }}"
+          python -m modules.duty --watch   # дежурный цикл (§1); < /dev/null на всякий случай
+      - name: Persist state              # финальный сейв: килл заканчивается сейвом
+        if: always()                     # ALWAYS, не !cancelled() — иначе килл = потеря меток
+        run: python -m modules.duty --persist
+      - uses: actions/upload-artifact@v4
+        if: always()                     # убитые раны тоже оставляют логи (форензика §6)
+        with: {name: bot-logs, path: hyperliquid_bot.log}
 ```
 
-### Вариант 2: Долгоживущий процесс (макс. 6 часов)
+Отдельный редкий job полного cancel (`mode 4`, cron раз в сутки + `workflow_dispatch`, `timeout-minutes: 10`): в дежурстве не участвует, флаг не трогает, работает напрямую с биржей. Метки своих действий в `state.json` пишет (чтобы лидер видел, что cancel был).
 
-```yaml
-# .github/workflows/bot-long.yml
-name: Hyperliquid Bot Long Run
-on:
-  workflow_dispatch:
+## 4. Состояние между ранами
 
-concurrency:
-  group: bot-${{ github.ref }}
-  cancel-in-progress: false
+Источник истины по ордерам и балансам — **биржа**: каждая вахта начинается с полного parse. Файлы `databases/*.json`, `*.csv`, `*.log`, `input_data/` эфемерны (умирают с ВМ) — это принято; ничего из них в git не коммитить (уже в `.gitignore`).
 
-jobs:
-  bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 345  # запас на корректное завершение
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
+Но часть бывшего «локального» состояния переживает смерть только через ветку `state`:
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+- `last_buy_timestamps.json` (детекция филлов после рестарта) — вести в `state.json` как метки/счётчики, а не принимать потерю. Потеря допустима лишь как деградация: первая итерация вахты восстанавливается сверкой с биржей.
+- Курсоры ротаций/счётчики ошибок — в `state.json` с семантикой `max()` (§1.3): локальное значение никогда не откатывает чужое.
+- `hype_stat.csv` — best-effort: дописывается локально, прикладывается артефактом; сквозная история не требуется (торговые решения его не читают).
 
-      - name: Run bot
-        env:
-          BOT_RUNTIME: "github_actions"
-          BOT_MODE: "0"
-          DB_ENCRYPTION_PASSWORD: ${{ secrets.DB_ENCRYPTION_PASSWORD }}
-          WALLETS_DATA: ${{ secrets.WALLETS_DATA }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_USER_ID: ${{ secrets.TG_USER_ID }}
-          BOT_MAX_RUNTIME: "330"  # минут
-        run: python main.py < /dev/null
-```
+## 5. Итерация лидера (каждые ~60 сек внутри вахты)
 
-### Вариант 3: Разделение по режимам
+Строго в этом порядке (аналог inbox-first + due-cap из ChatSum: дешёвое и защитное — раньше, дорогое и необратимое — позже, объём — ограничен):
 
-Два отдельных файла:
+1. **Parse** — балансы + открытые ордера + цена BTC. Read-only, один проход. Первая итерация каждой вахты — только parse + reconcile-без-постановок? Нет: parse затем обычная итерация, но постановки только после полной сверки (см. п.4).
+2. **Мягкий cancel** — снимать **только** stale/orphan (TP без buy, дубли BuyLimit-уровня без подтверждённого TP; кулдаун уровня `BUYLIMIT_LEVEL_COOLDOWN_SEC=600` оставить). Полный wipe всех ордеров в этом цикле **запрещён**.
+3. **Averaging reconcile** — доставить недостающие buy-limit / TP / пирамидинг по правилам стратегии. Перед КАЖДОЙ постановкой — claim-check «такой ордер уже висит» (защита от дубля при ретрае и при сплит-брейне — параллель не страшна, если сверка перед каждой постановкой). После постановки — записать id ордера в лог (форензика).
+4. **Граница итерации:** объём постановок на итерацию ограничен (аналог `MAX_DUE_PER_ITERATION=1`): лучше недоставить один уровень за 60 сек (доставит следующая итерация), чем раздуть итерацию до десятков минут и наехать хвостом на дедлайн. Худшая задержка реакции ≈ длительность одной итерации.
 
-```yaml
-# .github/workflows/averaging.yml
-name: Bot - Averaging
-on:
-  schedule:
-    - cron: '0 */4 * * *'  # UTC
-  workflow_dispatch:
+Почему шаг именно 60 сек (не меньше): (а) публичный API Hyperliquid рейт-лимитит — опрос каждые 10–20 сек × часы × (балансы+ордера+цена) упирается в 429/бан; (б) итерация сама длится секунды — при sleep 10 сек нагрузка почти непрерывная + спам логов/TG; (в) сетка со `STEP=$200` не требует тиковой реакции — ордера уже стоят на бирже; (г) интервал — env-переменная (`BOT_POLL_INTERVAL`), не константа.
 
-concurrency:
-  group: bot-averaging-${{ github.ref }}
-  cancel-in-progress: false
+Дедлайн вотча проверяется вверху каждой итерации; heartbeat лидера — **отдельной фоновой задачей** (не раз в N итераций!). Инцидент ChatSum: heartbeat по итерациям замерзал во время длинных задач — лидер выглядел мёртвым посреди работы и получал сплит-брейнового конкурента. Heartbeat должен жить на ожиданиях ввода-вывода, а не в теле цикла.
 
-jobs:
-  bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      # ... аналогично варианту 1 с BOT_MODE: "0"
-```
+`settings.py` (торговые параметры) внутри длинной вахты протухает: рефреш конфига с `origin/main` каждые ~10 мин (аналог `SCHEDULE_REFRESH_SEC=600`).
 
-```yaml
-# .github/workflows/cancel.yml
-name: Bot - Cancel Orders
-on:
-  schedule:
-    - cron: '0 2 * * *'  # раз в день в 2:00 UTC
-  workflow_dispatch:
+## 6. Наблюдаемость: минимум, без которого киллы немы
 
-concurrency:
-  group: bot-cancel-${{ github.ref }}
-  cancel-in-progress: false
+1. **Границы вахты в логе.** Первая строка — `shift start: run_id, время, сводка (балансы, число ордеров)`; последняя — `shift complete: итераций N` — или `retiring` при передаче. Отсутствие второй при `conclusion: cancelled` = подпись килла. У ChatSum отсутствие `retiring` + свежий heartbeat за 40–90 сек до смерти доказали «убит здоровым», а не «завис».
+2. **Артефакт логов при любом исходе** (`if: always()`, §3). Без этого килл не расследуется — рантайм умирает вместе с ВМ.
+3. **Сигналы здоровья снаружи:**
+   - `gh run list` — взгляд на conclusion: любой `cancelled` ≈ timeout расследуется по §2.2.
+   - TG-алерты только об аномалиях: ошибки API/парсинга, повторные `cancelled`, ордер не встал дважды подряд, варнинг зазора (§1.4). НЕ слать сводку каждую вахту (130 сообщений/сутки — спам, отучает читать; тишина = здоровье).
+   - Маски секретов (`::add-mask::`, §3) + правило дословно из ChatSum: секреты не коммитить, не печатать, не показывать. Здесь цена нарушения выше: репозиторий public.
 
-jobs:
-  bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      # ... аналогично варианту 1 с BOT_MODE: "4"
-```
+## 7. Дисциплина внешних вызовов
 
-## Необходимые изменения кода
+Патология ChatSum (~12 мин на один чанк, потом ~24 мин перерасхода) сложилась из стека «таймаут HTTP × ретраи × ротация × повтор». Перенос дословно:
 
-### 1. Переключатель режимов + замена интерактивного выбора режима
+- Каждый HTTP-вызов к бирже — с явным таймаутом. Нет таймаута = висящая итерация = висящая вахта = килл.
+- Ретраи на итерацию — не более 2–3 попыток суммарно, затем итерация пропускается до следующей минутной. Следующая итерация повторит — это и есть устойчивость, а не бесконечный долбёж внутри одной.
+- Fail-fast относится к итерации, не к вахте: одна пропущенная минута harmless, зависшая вахта — потеря слежения за сеткой.
+- Честная оценка времени действий в лог (сколько заняла итерация/постановка): без замеров хвост не посчитать, а без хвоста нет бюджета (§2.2).
 
-**Файл: `main.py`**:
+## 8. Секреты: метод доставки и хранения
+
+- Доставка — только скриптом типа `scripts/push_github_secrets.sh` (читает локальные файлы, кладёт в Secrets/Variables через `gh`, значения не печатает). Руками через веб — только в крайнем случае.
+- Приватные ключи кошельков и пароли — в **Secrets** (не Variables): `WALLETS_DATA`, `DB_ENCRYPTION_PASSWORD`, токены. Проверить размер `WALLETS_DATA` (лимит секрета 48 КБ): не влезет — разбивать на части `WALLETS_DATA_1..N` со склейкой в лоадере.
+- Права workflow — минимальные, но с записью (нужна ветка `state`): `permissions: {contents: write}`. Это осознанное исключение из least-privilege, записать комментарием.
+- Agent-ключи Hyperliquid без права вывода (§0.п6) — чтобы компрометация рантайма не стоила средств.
+
+## 9. Что чинить в коде (все пути от корня репо hype)
+
+| # | Файл | Проблема | Требуемое изменение |
+|---|---|---|---|
+| 1 | `main.py` | `choose_mode()` → `inquirer.prompt()` требует TTY; `input('\n > Exit\n')` в конце вешает/роняет CI | `get_runtime_mode()` (явный `BOT_RUNTIME` ∈ {vps, github_actions}, автофолбэк: есть `WALLETS_DATA` → github_actions, иначе vps). В CI-режиме: режим из `get_mode_from_env()` (карта `BOT_MODE`: `0`→Averaging, `4`→Cancel, `5`→Parse; остальное → `ValueError`), все `input()` в CI-ветке удалить/заменить `sys.exit(0)` |
+| 2 | `modules/database.py` (`get_password`) | `input()` требует TTY | Приоритет: `DB_ENCRYPTION_PASSWORD` из env → проба дефолтного пароля → только в vps-режиме интерактив. Неверный env-пароль = fail-fast с ошибкой, не молчаливый фолбэк |
+| 3 | NEW `modules/ci_loader.py` | Секреты лежат в `input_data/` (gitignore, в CI их нет) | `load_wallets_from_env()` (`WALLETS_DATA`: JSON-массив `[{label, wallet_address, private_key, proxy?}]`), `load_tg_tokens_from_env()` (`TG_BOT_TOKEN`, `PROFIT_BOT_TOKEN`, `TG_USER_ID`). Пустой/malformed `WALLETS_DATA` в CI-режиме = fail-fast |
+| 4 | wallet/tg-token лоадеры | Читают только файлы | Фолбэк: сначала env (CI), потом файлы (VPS). Формат записей из env — тот же dict, что строит файловый лоадер (`label/wallet_address/private_key/proxy/module_info.status=True`) |
+| 5 | `modules/delayed_orders_strategy.py` (цикл `while True`) | Бесконечный вотч | Выход по двум условиям: `_bot_stop_flag` (уже есть) ИЛИ `elapsed > WATCH_SECONDS` (вотч 330 мин, §2.2; имя env — `WATCH_SECONDS`, секунды, дефолт 19800). Проверять вверху каждой итерации. Итерация = `parse → soft-cancel → averaging reconcile` (§5), затем `sleep(BOT_POLL_INTERVAL)` |
+| 6 | `modules/delayed_orders_strategy.py` (статистика) | `pandas`/`openpyxl`, `hype_stat.xlsx` | Переписать `initialize_statistics_file` + `log_statistics_to_excel` на stdlib `csv` (файл `hype_stat.csv`, те же колонки: `Timestamp, Current {T} Price, Operation, {T} Amount, Operation Price, USDC Balance, {T} Balance, Limit Profit, Total Value, Hold Benchmark, Profit`). Поведение при отсутствии/устаревших колонках — как сейчас (создать/дополнить). Форматирования не требуется (его и не было) |
+| 7 | `requirements.txt` | Тяжёлые зависимости | Удалить `pandas`, `openpyxl` (и тем самым `numpy` как транзитивную). Остальное не трогать |
+| 8 | NEW `modules/duty.py` (по образцу `run_once.py` из ChatSum) | Нет дежурного слоя вообще | Весь §1: claim/standby/promote/retiring/wedge/inheritance/merge/verify/gap-диагностика/work-маркер/heartbeat отдельной задачей/Persist. Это самый большой кусок работы; торговые вызовы — только через существующие функции стратегии |
+| 9 | Тесты дежурной логики | Непроверяемый протокол = повторение ночи киллов | Минимум: тест слияния (union, max счётчиков), тест наследования дедлайна, тест бюджета (парсит yml, утверждает `вотч+хвост+установка ≤ timeout`). У ChatSum такой набор поймал бы структурный баг до прода |
+
+Готовые скетчи пп.1–4,6–7 — в Приложении (§14): имена env и поведение — по настоящему документу; скетчи — стартовая точка, не догма.
+
+## 10. Лестница первого запуска (порядок ввода в прод)
+
+Каждый шаг — минимум 2–3 чистые вахты (`conclusion: success` + строка `shift complete`) подряд:
+
+1. Ручной ран в режиме Parse (`workflow_dispatch`, `BOT_MODE=5`, вотч 10 мин): проверяются секреты, дешифровка БД, цикл, тайминги, артефакты — без постановки ордеров.
+2. Cron в режиме Parse: сутки read-only дежурства — проверка ротаций (`retiring` в логах, зазоры в секундах, варнингов нет), бюджета установки, heartbeat/standby-механики. Торговли нет, риск нулевой.
+3. Ручной ран Averaging (1 вахта) под наблюдением: первые постановки.
+4. Cron Averaging: штатное дежурство. Первый `cancelled` ≈ timeout — стоп и разбор по §2.2, а не «перезапустить и посмотреть».
+
+## 11. Приёмка
+
+- `BOT_RUNTIME=github_actions ... python main.py < /dev/null` локально: без TTY, завершается сам, exit 0.
+- В логе нет секретов (проверить отсутствие значений `WALLETS_DATA`, ключей, токенов даже частично).
+- `pip install` без pandas/numpy/openpyxl; `hype_stat.csv` создаётся и дописывается.
+- Два ручных запуска подряд не ставят дублей (второй видит ордера первого — claim-check §5).
+- Cron-раны зелёные (`success`), в логах `retiring` на ротациях, зазоры — секунды; артефакт логов приложен даже у убитых (`if: always()`).
+- Тесты дежурной логики зелёные (§9.п9).
+
+## 12. Известные ограничения (не чинить, принять)
+
+Джиттер старта schedule ±2–5 мин; после инцидентов платформы — десятки минут (факт ChatSum: 72 мин), опоздавший ран ужимается наследованием дедлайна (§1.2), отставшие тики встают следующими — отставание рассасывается само. Отключение schedule после 60 дней без коммитов (лечится любым коммитом). Худший лаг реакции в штате ≈ шаг опроса (60 сек) + джиттер — на порядок лучше сериализованных вахт (там было бы ~35 мин). Реакция <10 сек — только VPS, вне скоупа.
+
+## 13. Инциденты ChatSum, сформировавшие §§0–8 (не переизучать)
+
+1. Окно догона роняло слоты при зазорах шире окна → per-key метки `completed` вместо окон. (У hype аналог: reconcile-марки в `state.json`, а не «что успел за вахту».)
+2. Короткий `timeout-minutes` убил ран посреди анализа; недоделанное выглядело «повтором» → бюджет 355 (вотч + хвост + установка) + ретраи внутри, а не рестартами.
+3. Heartbeat раз в N итераций замерзал на длинных задачах → heartbeat отдельной фоновой задачей. (Дословно перенесено в §5.)
+4. Шторм догона (все немаркированные слоты подряд) морил голодом inbox → inbox-first + кап объёма на итерацию. (Аналог — граница итерации в §5.)
+5. Ночь трёх киллов (10-2026): вотч + установка не влезли в timeout; promoted-лидеры начинали полный вотч заново и были обречены на килл → наследование дедлайна (§1.2) + `Persist always()` (§3) + снижение порога варнингов для замера дыр.
+6. E2E-лог «5× выполнено» при одной осевшей метке, без ошибок, один писатель, все пути union-safe → гипотеза: транзиентная несогласованность Contents API при частых PUT; лечение — `_verify_push` + `🚨` (§1.3). Не рецидивировало. Вывод для hype: верификация записи обязательна с первого дня, а не «когда-нибудь».
+
+## 14. Приложение: готовые код-скетчи (§9 пп.1–4,6–7)
+
+Исполнитель: имена env и поведение — по §§0–8 настоящего документа; скетчи — стартовая точка, не догма.
 
 ```python
+# main.py — определение рантайма и выбор режима без TTY
 import os
 from types import SimpleNamespace
 
@@ -190,11 +229,6 @@ def get_runtime_mode():
     if explicit in ('vps', 'github_actions'):
         return explicit
     return 'github_actions' if os.getenv('WALLETS_DATA') else 'vps'
-
-def get_mode():
-    if get_runtime_mode() == 'github_actions':
-        return get_mode_from_env()
-    return choose_mode()  # интерактивный для VPS
 
 def get_mode_from_env():
     mode_id = os.getenv('BOT_MODE', '0')
@@ -209,80 +243,16 @@ def get_mode_from_env():
     return SimpleNamespace(soft_id=m['soft_id'], type=m['type'], text=m['text'])
 ```
 
-### 2. Замена интерактивного ввода пароля
-
-**Файл: `modules/database.py`** — добавить поддержку переменной окружения в `get_password()`:
-
 ```python
-def get_password(self):
-    if self.personal_key is not None:
-        logger.debug('Password already set, skipping password request')
-        return
-
-    if not path.isfile(self.modules_db_name):
-        logger.debug(f'Database file {self.modules_db_name} not found')
-        return
-
-    with open(self.modules_db_name, encoding="utf-8") as f:
-        modules_db = json.load(f)
-
-    if not modules_db:
-        logger.debug('Database is empty')
-        return
-
-    test_key = list(modules_db.keys())[0]
-
-    # Пробуем пароль из переменной окружения
-    env_password = os.getenv('DB_ENCRYPTION_PASSWORD')
-    if env_password:
-        try:
-            temp_key = Fernet(urlsafe_b64encode(md5(env_password.encode()).hexdigest().encode()))
-            self.decode_pk(pk=test_key, key=temp_key)
-            self.personal_key = temp_key
-            logger.info('[+] Soft | Password from env worked\n')
-            return
-        except InvalidToken:
-            logger.error('[-] Soft | DB_ENCRYPTION_PASSWORD is set but invalid!\n')
-            raise
-
-    # Пробуем дефолтный пароль
-    try:
-        temp_key = Fernet(urlsafe_b64encode(md5("@karamelniy dumb shit encrypting".encode()).hexdigest().encode()))
-        self.decode_pk(pk=test_key, key=temp_key)
-        self.personal_key = temp_key
-        logger.info('[+] Soft | Default password worked\n')
-        return
-    except InvalidToken:
-        pass
-
-    # Fallback на интерактивный ввод (только для VPS)
-    print('\n' + '='*60)
-    print('🔐 Database is encrypted. Please enter password to decrypt.')
-    print('='*60)
-    while True:
-        try:
-            print('\nEnter password to decrypt your privatekeys (empty for default):')
-            raw_password = input("> ")
-            # ... остальная часть интерактивного ввода
-```
-
-### 3. Загрузка кошельков из переменных окружения
-
-**Новый файл: `modules/ci_loader.py`**:
-
-```python
-import os
-import json
+# modules/ci_loader.py (новый файл) — загрузка секретов из env
+import os, json
 
 def load_wallets_from_env():
-    """
-    Загружает кошельки из переменной окружения WALLETS_DATA.
-    Формат: JSON-массив объектов [{"label": "...", "wallet_address": "...", "private_key": "...", "proxy": "..."}]
-    """
-    wallets_json = os.getenv('WALLETS_DATA')
-    if not wallets_json:
+    """WALLETS_DATA: JSON-массив [{label, wallet_address, private_key, proxy?}]."""
+    raw = os.getenv('WALLETS_DATA')
+    if not raw:
         return None
-    return json.loads(wallets_json)
+    return json.loads(raw)
 
 def load_tg_tokens_from_env():
     return {
@@ -292,90 +262,54 @@ def load_tg_tokens_from_env():
     }
 ```
 
-### 4. Модификация `wallet_loader.py` и `tg_tokens_loader.py`
-
-Добавить fallback на переменные окружения при отсутствии файлов:
-
 ```python
-# wallet_loader.py
+# wallet_loader.py — fallback: сначала env (CI), потом файлы (VPS)
 def get_wallet_modules(db=None):
-    # Сначала пробуем env (CI-режим)
     env_wallets = load_wallets_from_env()
     if env_wallets:
         return [
-            {
-                "label": w["label"],
-                "wallet_address": w["wallet_address"],
-                "private_key": w["private_key"],
-                "proxy": w.get("proxy"),
-                "module_info": {"status": True}
-            }
+            {"label": w["label"], "wallet_address": w["wallet_address"],
+             "private_key": w["private_key"], "proxy": w.get("proxy"),
+             "module_info": {"status": True}}
             for w in env_wallets
         ]
-    # Fallback на файлы (VPS-режим)
-    ...
+    ...  # существующий файловый путь без изменений
 ```
 
-### 5. Удаление блокирующих `input()` в `main.py`
-
-Заменить все `input('\n > Exit\n')` на `sys.exit(0)` или просто убрать.
-
-### 6. Ограничение времени работы для режима Averaging
-
-**Файл: `modules/delayed_orders_strategy.py`** — добавить проверку таймаута:
+```python
+# modules/database.py get_password() — приоритет env, интерактив только на VPS
+env_password = os.getenv('DB_ENCRYPTION_PASSWORD')
+if env_password:
+    try:
+        temp_key = Fernet(urlsafe_b64encode(md5(env_password.encode()).hexdigest().encode()))
+        self.decode_pk(pk=test_key, key=temp_key)
+        self.personal_key = temp_key
+        return
+    except InvalidToken:
+        raise  # заданный пароль неверен — fail-fast, молчаливого фолбэка нет
+...  # далее существующий дефолтный пароль, затем input() только если get_runtime_mode() == 'vps'
+```
 
 ```python
-import os
-import time
-
-MAX_RUNTIME_SECONDS = int(os.getenv('BOT_MAX_RUNTIME', '0')) * 60  # минуты -> секунды
+# modules/delayed_orders_strategy.py — лимит вахты (имена — по §3)
+import os, time
+WATCH_SECONDS = int(os.getenv('WATCH_SECONDS', '19800'))  # 330 мин, см. §2.2
+POLL_INTERVAL = int(os.getenv('BOT_POLL_INTERVAL', '60'))
 _start_time = time.time()
-
-# В цикле стратегии (после проверки stop-флага):
-if MAX_RUNTIME_SECONDS and (time.time() - _start_time) > MAX_RUNTIME_SECONDS:
-    logger.info("Max runtime reached, stopping gracefully")
+# вверху каждой итерации цикла, после проверки _bot_stop_flag:
+if time.time() - _start_time > WATCH_SECONDS:
+    logger.info("retiring: watch over, yielding to next run")
     break
 ```
 
-### 7. Пересоздание БД в CI-режиме (вариант A)
-
-В GitHub Actions `databases/modules.json` **не кэшируется**. БД пересоздаётся из `WALLETS_DATA` каждый запуск:
-
 ```python
-# main.py или database.py
+# main.py / database.py — пересоздание БД в CI (ключи не кэшируются на диске)
 def ensure_database_for_ci(db):
-    """В CI-режиме пересоздаёт БД из WALLETS_DATA, если modules.json отсутствует."""
     if get_runtime_mode() != 'github_actions':
         return
     if not os.getenv('WALLETS_DATA'):
         raise RuntimeError("WALLETS_DATA is required in github_actions mode")
-    # Пересоздаём БД из env (ключи не попадают в кэш)
     db.create_modules_from_env()
 ```
 
-## Риски
-
-### Важный: параллельные запуски
-
-`schedule` может запаздывать, `workflow_dispatch` позволяет ручной запуск поверх работающего scheduled-джоба. Блокировки `address_locks` действуют только в рамках одного процесса — между раннерами дедупликации нет.
-
-**Митигация:** `concurrency` с `cancel-in-progress: false` (уже добавлено в YAML выше).
-
-### Средний: потеря состояния при пересоздании БД
-
-При варианте A `databases/modules.json` пересоздаётся каждый ран. Файлы `stats.json` и `last_buy_timestamps.json` также не кэшируются — бот теряет историю покупок между запусками.
-
-**Митигация:** критично только для `last_buy_timestamps.json` (используется для детекции филлов после рестарта). Можно кэшировать только этот файл, либо принять потерю как ограничение CI-режима.
-
-## Шаги реализации
-
-1. Создать `.github/workflows/bot.yml`
-2. Модифицировать `main.py` — добавить `get_runtime_mode()`, `get_mode()`, `get_mode_from_env()`, убрать блокирующие `input()`
-3. Модифицировать `modules/database.py` — поддержка `DB_ENCRYPTION_PASSWORD` env в `get_password()`
-4. Создать `modules/ci_loader.py` — загрузка секретов из env
-5. Модифицировать `wallet_loader.py` и `tg_tokens_loader.py` — fallback на env
-6. Добавить таймаут в `delayed_orders_strategy.py`
-7. Протестировать VPS-режим: `python main.py` (как раньше)
-8. Протестировать CI-режим: `BOT_RUNTIME=github_actions BOT_MODE=0 DB_ENCRYPTION_PASSWORD=test WALLETS_DATA='[...]' python main.py < /dev/null`
-9. Добавить секреты в GitHub Repository Settings
-10. Проверить, что `.github/workflows/*.yml` и `settings.py` закоммичены
+Точные зацепки кода hype (номера строк — на момент черновика, сверять с текущим кодом): интерактив режима — `modules/utils/modes.py:59`; пароль — `modules/database.py:145`; секреты в файлах — `input_data/wallets.txt`, `input_data/tg_bot_tokens.txt` (оба в `.gitignore`, в CI-чекаут не попадут); бесконечный цикл — `modules/delayed_orders_strategy.py:1150`, цикл меню `main.py:233` (не проблема CI); блокирующий `input()` в конце — `main.py:265,269,286`.
