@@ -35,7 +35,9 @@ pip install -r requirements.txt
 3. **Настройте конфигурацию:**
 ```bash
 cp settings.py.example settings.py
-# Отредактируйте settings.py с вашими данными
+cp input_data/wallets.txt.example input_data/wallets.txt
+cp input_data/tg_bot_tokens.txt.example input_data/tg_bot_tokens.txt
+# Отредактируйте созданные файлы своими данными
 ```
 
 ## ⚙️ Настройка
@@ -77,6 +79,7 @@ LOG_FILE = "hyperliquid_bot.log"
 ## 🚀 Запуск
 
 ```bash
+source venv/bin/activate
 python main.py
 ```
 

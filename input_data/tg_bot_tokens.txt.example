@@ -1,0 +1,17 @@
+# Hyperliquid Bot — токены Telegram-ботов и получатели уведомлений.
+#
+# Скопируйте файл в input_data/tg_bot_tokens.txt и заполните своими данными:
+#   cp input_data/tg_bot_tokens.txt.example input_data/tg_bot_tokens.txt
+#
+# Формат строки:
+#   KEY = 'value'
+#
+#   TG_BOT_TOKEN     — токен основного бота для уведомлений о старте и ошибках
+#   PROFIT_BOT_TOKEN — токен бота для уведомлений о прибыли (тейках)
+#   TG_USER_ID       — получатель(и) в виде списка, берётся первый элемент
+#
+# Пустые строки и строки, начинающиеся с #, игнорируются.
+
+TG_BOT_TOKEN     = 'ЗАМЕНИТЕ_НА_ТОКЕН'
+PROFIT_BOT_TOKEN = 'ЗАМЕНИТЕ_НА_ТОКЕН'
+TG_USER_ID       = [ЗАМЕНИТЕ_НА_CHAT_ID]
