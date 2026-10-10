@@ -28,7 +28,7 @@ Hyperliquid Delayed Orders Strategy Module
 from random import uniform, randint
 from decimal import Decimal
 from loguru import logger
-import pandas as pd
+import csv
 from datetime import datetime
 import os
 import json
@@ -656,75 +656,91 @@ async def find_orphan_buys(client, token_name: str, trades_history, open_orders,
         return []
 
 
-def initialize_statistics_file(token_name: str = "BTC"):
-    """
-    Инициализирует файл статистики с правильной структурой колонок при старте программы.
-    Вызывается один раз при запуске стратегии.
-    
-    Args:
-        token_name: Название торгуемого токена (по умолчанию "BTC")
-    """
-    stats_file = "hype_stat.xlsx"
-    
-    # Определяем список колонок (используем token_name для универсальности)
-    expected_columns = [
-        'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount', 
+def _statistics_columns(token_name: str) -> list:
+    """Единый список колонок файла статистики (имена зависят от токена)."""
+    return [
+        'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount',
         'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value',
         'Hold Benchmark', 'Profit'
     ]
-    
-    # Проверяем, существует ли файл
-    if not os.path.exists(stats_file):
-        # Создаем новый пустой DataFrame с заголовками и сохраняем
-        df = pd.DataFrame(columns=expected_columns)
-        df.to_excel(stats_file, index=False)
-        logger.info(f"✅ Created statistics file: {stats_file}")
-    else:
-        # Файл существует - проверяем структуру
-        try:
-            df = pd.read_excel(stats_file)
-            
-            # Если столбец "Limit Profit" отсутствует, добавляем его
-            if 'Limit Profit' not in df.columns:
-                if 'Total Value' in df.columns:
-                    total_value_idx = df.columns.get_loc('Total Value')
-                    df.insert(total_value_idx, 'Limit Profit', 0.0)
-                else:
-                    df['Limit Profit'] = 0.0
-                df.to_excel(stats_file, index=False)
-                logger.info(f"✅ Updated statistics file structure: added 'Limit Profit' column")
-
-            # Если столбец "Hold Benchmark" отсутствует, добавляем его в конец
-            # (рядом с Total Value — Total Value последняя из старых колонок)
-            if 'Hold Benchmark' not in df.columns:
-                df['Hold Benchmark'] = 0.0
-                df.to_excel(stats_file, index=False)
-                logger.info(f"✅ Updated statistics file structure: added 'Hold Benchmark' column")
-
-            # Если столбец "Profit" отсутствует, добавляем его в конец
-            if 'Profit' not in df.columns:
-                df['Profit'] = 0.0
-                df.to_excel(stats_file, index=False)
-                logger.info(f"✅ Updated statistics file structure: added 'Profit' column")
-            
-            # Убеждаемся, что все ожидаемые колонки присутствуют
-            missing_columns = [col for col in expected_columns if col not in df.columns]
-            if missing_columns:
-                for col in missing_columns:
-                    df[col] = None
-                df.to_excel(stats_file, index=False)
-                logger.info(f"✅ Updated statistics file structure: added missing columns")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to check statistics file structure: {e}")
 
 
-async def log_statistics_to_excel(client, operation: str, btc_amount: float, price: float, 
-                                 usdc_balance: float, btc_balance: float, total_value: float, 
-                                 orders=None, sz_decimals: int = None, token_name: str = "BTC",
-                                 hold_benchmark: float = None, profit: float = None):
+def _stats_value_to_str(value) -> str:
+    """CSV не хранит типы: None пишем пустой строкой, прочее — как есть."""
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _migrate_stats_rows(header: list, rows: list, expected_columns: list) -> tuple:
     """
-    Записывает статистику операции в Excel файл hype_stat.xlsx
-    
+    Приводит старый файл к актуальной структуре, не теряя строки:
+    колонку 'Limit Profit' вставляет перед 'Total Value' (как делал pandas),
+    остальные недостающие — в конец. Возвращает (new_header, new_rows).
+    """
+    new_header = list(header)
+    if 'Limit Profit' not in new_header and 'Total Value' in new_header:
+        idx = new_header.index('Total Value')
+        new_header.insert(idx, 'Limit Profit')
+    for col in expected_columns:
+        if col not in new_header:
+            new_header.append(col)
+
+    new_rows = [new_header]
+    for row in rows:
+        # Выравниваем строку по старому заголовку, недостающее — 0.0.
+        old_by_name = {col: (row[i] if i < len(row) else None) for i, col in enumerate(header)}
+        new_rows.append([old_by_name.get(col) if old_by_name.get(col) is not None else '0.0'
+                         for col in new_header])
+    return new_header, new_rows
+
+
+def initialize_statistics_file(token_name: str = "BTC"):
+    """
+    Инициализирует файл статистики (CSV) с правильной структурой колонок при старте.
+    Вызывается один раз при запуске стратегии.
+
+    Args:
+        token_name: Название торгуемого токена (по умолчанию "BTC")
+    """
+    stats_file = "hype_stat.csv"
+    expected_columns = _statistics_columns(token_name)
+
+    if not os.path.exists(stats_file):
+        with open(stats_file, 'w', encoding='utf-8', newline='') as f:
+            csv.writer(f).writerow(expected_columns)
+        logger.info(f"✅ Created statistics file: {stats_file}")
+        return
+
+    # Файл существует — дополняем недостающие колонки, не теряя данные.
+    try:
+        with open(stats_file, 'r', encoding='utf-8', newline='') as f:
+            rows = list(csv.reader(f))
+
+        if not rows:
+            with open(stats_file, 'w', encoding='utf-8', newline='') as f:
+                csv.writer(f).writerow(expected_columns)
+            logger.info(f"✅ Updated statistics file structure: empty file initialized")
+            return
+
+        header = rows[0]
+        missing = [col for col in expected_columns if col not in header]
+        if missing:
+            new_header, new_rows = _migrate_stats_rows(header, rows[1:], expected_columns)
+            with open(stats_file, 'w', encoding='utf-8', newline='') as f:
+                csv.writer(f).writerows(new_rows)
+            logger.info(f"✅ Updated statistics file structure: added {len(missing)} column(s)")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to check statistics file structure: {e}")
+
+
+async def log_statistics_to_csv(client, operation: str, btc_amount: float, price: float,
+                                usdc_balance: float, btc_balance: float, total_value: float,
+                                orders=None, sz_decimals: int = None, token_name: str = "BTC",
+                                hold_benchmark: float = None, profit: float = None):
+    """
+    Записывает статистику операции в CSV файл hype_stat.csv
+
     Args:
         client: HyperliquidClient instance
         operation: Тип операции (First Position/set BuyLimit/Pyramiding/set TP/Take Profit)
@@ -744,51 +760,48 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
     try:
         # Получаем текущую цену токена
         current_token_price = float(await client.browser.get_token_price(token_name))
-        
+
         # Если ордера не переданы, получаем их
         if orders is None:
             orders = await client.browser.get_account_orders()
-        
+
         # Рассчитываем сумму Order Value для всех лимитных ордеров на продажу.
         # Это ВАЛОВАЯ стоимость висящих sell (notional), а не чистая прибыль:
         # себестоимость позиций не вычитается. Имя колонки 'Limit Profit'
-        # сохранено для совместимости существующего hype_stat.xlsx.
+        # сохранено для совместимости со старым форматом статистики.
         limit_profit = 0.0
         for order in orders:
             # Проверяем, что это лимитный ордер на продажу
             side = order.get("side", "")
             is_buy = order.get("isBuy", True)
             limit_price = float(order.get("limitPx", 0))
-            
+
             # Ордер на продажу: side in ["SELL", "S", "A"] или isBuy == False
             is_sell = side in ["SELL", "S", "A"] or (not is_buy)
-            
+
             # Проверяем, что это лимитный ордер (есть limitPx > 0)
             is_limit = limit_price > 0
-            
+
             if is_sell and is_limit:
                 # Получаем размер ордера
                 size = float(order.get("sz", 0))
-                
+
                 # Order Value = размер * цена
                 if size > 0:
                     limit_profit += size * limit_price
-        
+
         # Создаем запись статистики
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         # Получаем sz_decimals из клиента, если не передан
         if sz_decimals is None:
             try:
                 sz_decimals = client.get_token_sz_decimals(token_name)
             except:
                 sz_decimals = 5  # Fallback
-        
+
         # Округляем btc_amount до sz_decimals для соответствия формату биржи
         btc_amount = round(btc_amount, sz_decimals)
-        
-        # Цена уже нормализована при расчете через normalize_price, записываем как число
-        # Excel автоматически отформатирует число согласно настройкам ячейки
 
         # Hold Benchmark: если явно не передан — считаем из якоря client.
         # Якорь фиксируется один раз при First Position (см. ensure_hold_anchor),
@@ -796,13 +809,12 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
         if hold_benchmark is None:
             ensure_hold_anchor(client)
             hold_benchmark = calc_hold_benchmark(client, current_token_price)
-        
-        # Подготавливаем данные для записи
-        # Profit=None (не Take Profit) -> 0.0: в файле так заведены все
-        # неторговые строки, плюс это убирает all-NA колонку в new_df
-        # (источник FutureWarning при concat).
+
+        # Profit=None (не Take Profit) -> 0.0: так заведены все неторговые строки.
         if profit is None:
             profit = 0.0
+
+        expected_columns = _statistics_columns(token_name)
         new_row = {
             'Timestamp': timestamp,
             f'Current {token_name} Price': current_token_price,
@@ -816,75 +828,21 @@ async def log_statistics_to_excel(client, operation: str, btc_amount: float, pri
             'Hold Benchmark': hold_benchmark,
             'Profit': profit
         }
-        
-        # Путь к файлу статистики
-        stats_file = "hype_stat.xlsx"
-        
-        # Определяем список колонок (имена от token_name, как в initialize_statistics_file)
-        expected_columns = [
-            'Timestamp', f'Current {token_name} Price', 'Operation', f'{token_name} Amount',
-            'Operation Price', 'USDC Balance', f'{token_name} Balance', 'Limit Profit', 'Total Value',
-            'Hold Benchmark', 'Profit'
-        ]
-        
-        # Проверяем, существует ли файл
-        if os.path.exists(stats_file):
-            # Читаем существующий файл
-            df = pd.read_excel(stats_file)
-            
-            # Если столбец "Limit Profit" отсутствует, добавляем его
-            if 'Limit Profit' not in df.columns:
-                # Находим позицию столбца "Total Value"
-                if 'Total Value' in df.columns:
-                    total_value_idx = df.columns.get_loc('Total Value')
-                    # Вставляем столбец "Limit Profit" перед "Total Value"
-                    df.insert(total_value_idx, 'Limit Profit', 0.0)
-                else:
-                    # Если "Total Value" нет, добавляем в конец
-                    df['Limit Profit'] = 0.0
 
-            # Если столбец "Hold Benchmark" отсутствует, добавляем его в конец
-            if 'Hold Benchmark' not in df.columns:
-                df['Hold Benchmark'] = 0.0
+        stats_file = "hype_stat.csv"
 
-            # Если столбец "Profit" отсутствует, добавляем его в конец
-            if 'Profit' not in df.columns:
-                df['Profit'] = 0.0
-            
-            # Убеждаемся, что все ожидаемые колонки присутствуют
-            for col in expected_columns:
-                if col not in df.columns:
-                    df[col] = None
-        else:
-            # Создаем новый пустой DataFrame с заголовками
-            df = pd.DataFrame(columns=expected_columns)
-        
-        # Создаем новый DataFrame из строки с явным указанием колонок
-        new_df = pd.DataFrame([new_row], columns=expected_columns)
-        
-        # Убеждаемся, что колонки в обоих DataFrame совпадают и в правильном порядке
-        df = df.reindex(columns=expected_columns, fill_value=None)
-        
-        # Конкатенируем с явным указанием колонок
-        # Если df пустой (нет строк), используем new_df напрямую, иначе конкатенируем
-        if len(df) == 0:
-            df = new_df
-        else:
-            # FutureWarning (pandas>=2.1): concat с пустыми/all-NA колонками
-            # deprecated — исключаем такие колонки из ОБОИХ фреймов заранее,
-            # значения подтянутся при финальном выравнивании.
-            na_cols = [c for c in df.columns if df[c].isna().all()]
-            if na_cols:
-                df = df.drop(columns=na_cols)
-            na_new = [c for c in new_df.columns if new_df[c].isna().all()]
-            if na_new:
-                new_df = new_df.drop(columns=na_new)
-            df = pd.concat([df, new_df], ignore_index=True, sort=False)
-            df = df.reindex(columns=expected_columns)
-        
-        # Сохраняем в Excel файл
-        df.to_excel(stats_file, index=False)
-        
+        # Гарантируем наличие файла и корректный заголовок перед дозаписью.
+        initialize_statistics_file(token_name)
+
+        # Читаем существующий заголовок, чтобы упорядочить значения.
+        with open(stats_file, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.reader(f)
+            header = next(reader, expected_columns)
+
+        with open(stats_file, 'a', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([_stats_value_to_str(new_row.get(col)) for col in header])
+
     except Exception as e:
         client.browser.log_message(f"Failed to log statistics: {e}", level="ERROR")
 
@@ -1501,7 +1459,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                 try:
                                     btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                                     total_value = all_balances.get("USDC", 0.0) + (btc_balance * current_price)
-                                    await log_statistics_to_excel(
+                                    await log_statistics_to_csv(
                                         client=client,
                                         operation="Set TP",
                                         btc_amount=tp_qty,
@@ -1771,7 +1729,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             # Записываем статистику операции Take Profit
                                             # (Profit — то же значение, что уходит в Telegram)
                                             try:
-                                                await log_statistics_to_excel(
+                                                await log_statistics_to_csv(
                                                     client=client,
                                                     operation="Take Profit",
                                                     btc_amount=filled_qty,
@@ -2069,7 +2027,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                             depo_start=total_value,
                             price_start=actual_price,
                         )
-                        await log_statistics_to_excel(
+                        await log_statistics_to_csv(
                             client=client,
                             operation="First Position",
                             btc_amount=token_amount,
@@ -2229,7 +2187,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                                             total_value = usdc_balance + (btc_balance * current_price)
                                             # Для лимитного ордера используем целевую цену и расчетное количество
                                             token_amount = usdc_amount / target_buy_price
-                                            await log_statistics_to_excel(
+                                            await log_statistics_to_csv(
                                                 client=client,
                                                 operation="set BuyLimit",
                                                 btc_amount=token_amount,
@@ -2348,7 +2306,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         try:
                             btc_balance = all_balances.get(token_name, 0.0) or all_balances.get("UBTC", 0.0)
                             total_value = usdc_balance + (btc_balance * actual_price)
-                            await log_statistics_to_excel(
+                            await log_statistics_to_csv(
                                 client=client,
                                 operation="Pyramiding",
                                 btc_amount=token_amount,

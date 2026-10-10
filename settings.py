@@ -5,7 +5,7 @@ version = "1.3.7"
 
 SPOT_TOKEN = "BTC"  # Spot Trading token 
 POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
-STEP = 200  # Шаг сетки (TP) в долларах для усреднения
+STEP = 500  # Шаг сетки (TP) в долларах для усреднения
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
 
 # Hyperliquid API Configuration

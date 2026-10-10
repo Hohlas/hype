@@ -17,7 +17,7 @@
 - Web3 кошелек (MetaMask, Trust Wallet)
 - Приватный ключ кошелька
 - Telegram Bot Token
-- Локальное состояние в JSON (`databases/`) и Excel (`hype_stat.xlsx`)
+- Локальное состояние в JSON (`databases/`) и CSV (`hype_stat.csv`)
 
 ## 🛠 Установка
 

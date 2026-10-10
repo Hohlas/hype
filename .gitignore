@@ -82,6 +82,7 @@ databases/
 
 # Local statistics / reports (пересоздаются ботом при запуске)
 *.xlsx
+hype_stat.csv
 
 # workspace
 *.code-workspace
