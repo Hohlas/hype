@@ -7,5 +7,20 @@
     "run_id": "38560465803/1",
     "last_work_utc": "2026-10-14T12:09:40Z"
   },
-  "error_counters": {}
+  "error_counters": {},
+  "hold_anchor": {
+    "acc": {
+      "depo_start": 504.8847977438,
+      "price_start": 86218.0,
+      "timestamp": "2026-10-06 14:28:44"
+    }
+  },
+  "last_buy_ts": {
+    "0xBdC516abF12e5909687a98983E75eEd098Fc4e71_BTC": [
+      1791302399235,
+      1791298349071,
+      1791286123256,
+      1790778197806
+    ]
+  }
 }
