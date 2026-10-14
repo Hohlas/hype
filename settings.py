@@ -8,6 +8,13 @@ POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции 
 STEP = 500  # Шаг сетки (TP) в долларах для усреднения
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)
 
+# Режим дежурства (§10 лестницы GithubActions.md).
+# "parse"     — только чтение (балансы, ордера, цена), ордера НЕ ставятся;
+# "averaging" — торговый цикл (усреднение), ставятся реальные ордера.
+# Переключение на "averaging" — осознанное решение владельца (ступени 3–4),
+# опечатка/неизвестное значение безопасно откатывается в "parse".
+DUTY_MODE = "parse"
+
 # Hyperliquid API Configuration
 HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"        # Основной API
 HYPERLIQUID_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"  # Тестовая сеть

@@ -1004,13 +1004,21 @@ async def _stop_watchdog(watchdog_task):
         pass
 
 
-async def trade_delayed_orders_strategy(client, token_name: str):
+async def trade_delayed_orders_strategy(client, token_name: str,
+                                        max_iterations: int = 0,
+                                        poll_interval_override: float = None):
     """
     Новая стратегия:
     - При отсутствии TP ордеров: маркет покупка по текущей цене + TP ордер
     - Усреднение: маркет покупка при current_price < min_TP_price - STEP*2
     - Пирамидинг: маркет покупка при current_price > max_TP_price - STEP*AGGR (AGGR по умолчанию 0.5)
     - Для каждого BUY сразу ставим лимитный ордер на продажу (TP)
+
+    max_iterations=0 — прежний бесконечный цикл (VPS). Число >0 — отработать
+    ровно столько итераций и вернуться: дежурство (§5) вызывает одну итерацию
+    на тик, повторяя тот же боевой код, а не его копию.
+    poll_interval_override — пауза между итерациями вместо BOT_POLL_INTERVAL
+    (нужна дежурству: его цикл уже спит сам, двойной сон не нужен).
     """
     try:
         watchdog_task = None  # задача-сторож, создаётся перед циклом; остановка None-safe
@@ -1132,7 +1140,9 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         # Лимит вотча (§9.п5): дедлайн проверяется вверху каждой итерации,
         # стартовавшая итерация всегда дорабатывает целиком (хвост §2.2).
         watch_seconds = get_watch_seconds()
-        poll_interval = get_poll_interval()
+        poll_interval = (float(poll_interval_override)
+                         if poll_interval_override is not None
+                         else get_poll_interval())
         watch_start = time.monotonic()
         if watch_seconds > 0:
             client.browser.log_message(
@@ -1158,6 +1168,14 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                     break
                 cycle_count += 1
                 client._watchdog_last_mark = time.monotonic()
+                # Single-pass mode (дежурство §5): отработать ровно max_iterations
+                # проходов и вернуться вызывающему. Проверка вверху — пути с
+                # `continue` тоже завершаются после одного полного прохода.
+                if max_iterations and cycle_count > max_iterations:
+                    client.browser.log_message(
+                        f"🛑 Single-pass mode: {max_iterations} iteration(s) done — exiting",
+                        level="INFO")
+                    break
                 if cycle_count % cycle_log_every == 0:
                     client.browser.log_message(f"🔄 CYCLE #{cycle_count}", level="INFO")
                 # Задержка между итерациями основного цикла

@@ -48,6 +48,29 @@ def get_mode_from_env() -> Mode:
     return Mode(soft_id=soft_id, type="module", text=text)
 
 
+# Режимы дежурства (§10 лестницы GithubActions.md). parse — только чтение,
+# averaging — торговля. Значение задаётся в settings.py (переключатель владельца).
+DUTY_MODES = ("parse", "averaging")
+DUTY_MODE_DEFAULT = "parse"
+
+
+def get_duty_mode() -> str:
+    """Режим дежурства из settings.DUTY_MODE.
+
+    Fail-safe: отсутствие/опечатка/неизвестное значение → "parse" (без торговли)
+    с громким предупреждением. Дефолт для торгового бота обязан быть безопасным —
+    ошибка конфигурации не должна включать постановку ордеров.
+    """
+    import settings  # ленивый импорт: modes.py не тянет конфиг при загрузке
+
+    raw = str(getattr(settings, "DUTY_MODE", DUTY_MODE_DEFAULT) or "").strip().lower()
+    if raw not in DUTY_MODES:
+        if raw:
+            print(f"⚠️ Unknown DUTY_MODE {raw!r} — falling back to 'parse' (no trading).")
+        return DUTY_MODE_DEFAULT
+    return raw
+
+
 def choose_mode() -> Mode:
     """
     Интерактивный выбор торгового режима с использованием курсора (как в pacifica).

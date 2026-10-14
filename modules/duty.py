@@ -422,11 +422,20 @@ def _verify_push(path: str, local: dict) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Trading seam — parse wiring for the §10 ladder (read-only steps 1–2).
-# Full trading reconcile lands later; placements stay forbidden here.
+# Trading seam — mode dispatch for the §10 ladder.
+# ``settings.DUTY_MODE`` picks the pass: "parse" (read-only, default) or
+# "averaging" (real orders). Trading must stay OFF until the owner flips it
+# after ladder steps 2–3; an unknown value fails safe to parse (modes.get_duty_mode).
 # --------------------------------------------------------------------------
 async def run_trading_iteration(state: dict) -> None:
-    """One read-only parse pass over all wallets (doc §5 minus placements)."""
+    """One duty iteration — parse-only or averaging, per ``settings.DUTY_MODE``."""
+    from modules.utils.modes import get_duty_mode  # lazy: keeps import-safe
+
+    if get_duty_mode() == "averaging":
+        from modules.duty_trade import run_trade_iteration  # lazy: browser side effects
+
+        await run_trade_iteration(state)
+        return
     from modules.duty_parse import run_parse_iteration  # lazy: keeps import-safe
 
     await run_parse_iteration(state)
@@ -444,6 +453,22 @@ def note_work_progress(path: str, run_id: str, state: dict) -> None:
         save_state(path, state)
     except Exception as e:
         print(f"⚠️ Work marker: {e}")
+
+
+async def _close_trade_clients_best_effort() -> None:
+    """Закрыть торговые сессии дежурства на выходе вахты (если модуль был загружен).
+
+    Импортируем duty_trade только если он уже в памяти (режим averaging):
+    в режиме разбора не тянем браузерные модули лишний раз.
+    """
+    try:
+        import sys
+
+        mod = sys.modules.get("modules.duty_trade")
+        if mod is not None:
+            await mod.close_trade_clients()
+    except Exception:
+        pass
 
 
 async def _heartbeat_loop(me: dict, path: str, deadline_utc) -> None:
@@ -517,6 +542,7 @@ async def _run_leader_loop(state: dict, path: str, me: dict, poll: int,
                 await hb_task
             except asyncio.CancelledError:
                 pass
+        await _close_trade_clients_best_effort()
 
 
 async def _run_standby_loop(state: dict, path: str, me: dict, poll: int,
@@ -588,6 +614,7 @@ async def _run_standby_loop(state: dict, path: str, me: dict, poll: int,
             save_state(path, state)
         except Exception as e:
             print(f"⚠️ Standby cleanup save: {e}")
+        await _close_trade_clients_best_effort()
     return 0
 
 
