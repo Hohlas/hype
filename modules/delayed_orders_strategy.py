@@ -58,6 +58,30 @@ def get_bot_stop_flag() -> bool:
     return _bot_stop_flag
 
 
+def get_watch_seconds() -> float:
+    """Лимит вотча в секундах из WATCH_SECONDS (§9.п5, §2.2: 19800 в дежурстве).
+
+    0 или мусор — без лимита (текущее локальное поведение без изменений).
+    """
+    try:
+        return max(0.0, float(os.getenv("WATCH_SECONDS", "0")))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def get_poll_interval(default: float = 10.0) -> float:
+    """Пауза между итерациями из BOT_POLL_INTERVAL.
+
+    Дефолт — текущая локальная пауза (без изменений); workflow дежурства
+    передаёт 60 явно (§5: шаг опроса против 429/бана).
+    """
+    try:
+        interval = float(os.getenv("BOT_POLL_INTERVAL", str(default)))
+        return interval if interval > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 # Кулдаун повторной заливки одного BuyLimit-уровня, сек.
 # Фолбэк: если TP fill-а так и не подтвердился висящим ордером
 # (не выставился / исполнился мгновенно / снят), уровень разблокируется сам.
@@ -1105,6 +1129,17 @@ async def trade_delayed_orders_strategy(client, token_name: str):
         client._watchdog_last_mark = time.monotonic()
         watchdog_task = asyncio.create_task(_cycle_watchdog(client))
 
+        # Лимит вотча (§9.п5): дедлайн проверяется вверху каждой итерации,
+        # стартовавшая итерация всегда дорабатывает целиком (хвост §2.2).
+        watch_seconds = get_watch_seconds()
+        poll_interval = get_poll_interval()
+        watch_start = time.monotonic()
+        if watch_seconds > 0:
+            client.browser.log_message(
+                f"⏱️ Watch limit: {watch_seconds:.0f}s, poll: {poll_interval:.0f}s",
+                level="INFO",
+            )
+
         while True:
             try:
                 # Чистое завершение по stop-флагу (порт из lighter)
@@ -1114,6 +1149,13 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                         level="WARNING"
                     )
                     break
+                # Выход по вотчу — до любых запросов/постановок
+                if watch_seconds > 0 and (time.monotonic() - watch_start) > watch_seconds:
+                    client.browser.log_message(
+                        "retiring: watch over, yielding to next run",
+                        level="INFO",
+                    )
+                    break
                 cycle_count += 1
                 client._watchdog_last_mark = time.monotonic()
                 if cycle_count % cycle_log_every == 0:
@@ -1121,7 +1163,7 @@ async def trade_delayed_orders_strategy(client, token_name: str):
                 # Задержка между итерациями основного цикла
                 # Перемещена в начало для того, чтобы после создания ордеров была пауза
                 # и они успели появиться в API перед следующей итерацией
-                await async_sleep(10)
+                await async_sleep(poll_interval)
                 # Повторная проверка после сна — выходим до любых запросов/ордеров
                 if get_bot_stop_flag():
                     client.browser.log_message(

@@ -212,10 +212,63 @@ async def runner(mode: int):
     return 'Ended'
 
 
-if __name__ == '__main__':
-    if os_name == "nt":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+def run_ci() -> int:
+    """Неинтерактивный запуск для GitHub Actions (§9.п1).
 
+    Режим — из BOT_MODE, ни одного input(). Возвращает код выхода:
+    0 — отработал, 1 — быстрый отказ (секреты/база), 130 — прерывание.
+    """
+    from modules.ci_loader import RUNTIME_GITHUB_ACTIONS  # noqa: F401 (сигнал читателю)
+    from modules.utils.modes import get_mode_from_env
+
+    try:
+        mode = get_mode_from_env()
+    except ValueError as e:
+        logger.error(f'[-] CI | {e}')
+        return 2
+
+    # Сбрасываем stop-флаг стратегии при запуске (прошлый запуск мог
+    # завершиться по Ctrl+C с выставленным флагом)
+    try:
+        from modules.delayed_orders_strategy import set_bot_stop_flag
+        set_bot_stop_flag(False)
+        logger.info('[•] Bot stop flag reset on startup')
+    except Exception as e:
+        logger.warning(f'Failed to reset stop flag: {e}')
+
+    mode_names = {
+        0: "Averaging Market",
+        4: "Cancel Orders",
+        5: "Parse"
+    }
+    mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
+    logger.success(f'[•] Bot started in CI mode: {mode_name}')
+
+    global db
+    try:
+        db = DataBase()
+        result = asyncio.run(runner(mode=mode.soft_id))
+    except (DataBaseError, RuntimeError) as e:
+        logger.error(f'[-] CI | {e}')
+        return 1
+    except KeyboardInterrupt:
+        logger.info('[•] CI | Interrupted, setting stop flag')
+        try:
+            from modules.delayed_orders_strategy import set_bot_stop_flag
+            set_bot_stop_flag(True)
+        except Exception as e:
+            logger.error(f'Failed to set stop flag: {e}')
+        return 130
+    except Exception as e:
+        logger.error(f'[-] CI Global | {e}')
+        return 1
+
+    logger.info('[•] Soft | Closed')
+    return 0 if result == 'Ended' else 1
+
+
+def run_vps_interactive() -> None:
+    """Прежний интерактивный цикл (VPS/локально): меню + паузы input()."""
     manual_stop = False
 
     # Сбрасываем stop-флаг стратегии при запуске (прошлый запуск мог
@@ -228,6 +281,7 @@ if __name__ == '__main__':
         logger.warning(f'Failed to reset stop flag: {e}')
 
     try:
+        global db
         db = DataBase()
 
         while True:
@@ -245,17 +299,17 @@ if __name__ == '__main__':
                         5: "Parse"
                     }
                     mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
-                    
+
                     logger.success(f'[•] Bot started in mode: {mode_name}')
-                    
+
                     if asyncio.run(runner(mode=mode.soft_id)) == 'Ended': break
                     print('')
-                
+
                 case "exit":
                     # Выход из программы
                     logger.info(f'[•] Bot | Exiting...')
                     break
-                
+
                 case _:
                     # Неизвестный режим
                     logger.warning(f'[•] Unknown mode type: {mode.type}')
@@ -288,3 +342,15 @@ if __name__ == '__main__':
     finally:
         if not manual_stop:
             logger.info(f'[•] Soft | Closed')
+
+
+if __name__ == '__main__':
+    if os_name == "nt":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    from modules.ci_loader import get_runtime_mode, RUNTIME_GITHUB_ACTIONS
+
+    if get_runtime_mode() == RUNTIME_GITHUB_ACTIONS:
+        raise SystemExit(run_ci())
+    else:
+        run_vps_interactive()

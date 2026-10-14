@@ -23,9 +23,10 @@ async def async_sleep(seconds: float):
 
 
 def _get_tg_tokens():
-    """Кэшированная загрузка токенов из файла"""
+    """Кэшированная загрузка токенов: файл как база, непустой env — поверх."""
     if not hasattr(_get_tg_tokens, '_cached'):
-        _get_tg_tokens._cached = load_tg_tokens_from_file()
+        from modules.ci_loader import merge_tg_tokens
+        _get_tg_tokens._cached = merge_tg_tokens(load_tg_tokens_from_file())
     return _get_tg_tokens._cached
 
 

@@ -2,13 +2,15 @@
 Mode selection module for Hyperliquid Bot
 """
 
+import os
 import sys
 sys.__stdout__ = sys.stdout  # error with `import inquirer` without this string in some system
 
 from dataclasses import dataclass
 from typing import List, Dict, Any
-from inquirer import prompt, List as InquirerList
-from inquirer.themes import load_theme_from_dict
+
+# inquirer импортируется лениво внутри choose_mode: CI-путь не должен тянуть
+# интерактивное меню даже на уровне импорта (см. §9.п7).
 
 
 @dataclass
@@ -26,16 +28,39 @@ class Mode:
         return ("⭐️ NEW | " if self.is_new else "") + self.text
 
 
-THEME = load_theme_from_dict({"List": {
-    "selection_cursor": "👉🏻",
-    # "selection_color": "violetred1",
-}})
+# Карта BOT_MODE → режим (§9.п1). Неизвестное значение — ValueError,
+# а не молчаливое падение в торговлю (для торгового бота risky default).
+CI_MODE_MAP = {
+    "0": (0, "Averaging Market"),
+    "4": (4, "Cancel Orders"),
+    "5": (5, "Parse"),
+}
+
+
+def get_mode_from_env() -> Mode:
+    """Режим для CI: из BOT_MODE, без терминала."""
+    mode_id = os.getenv("BOT_MODE", "0").strip()
+    if mode_id not in CI_MODE_MAP:
+        raise ValueError(
+            f"Invalid BOT_MODE: {mode_id!r}. Valid: {', '.join(sorted(CI_MODE_MAP))}"
+        )
+    soft_id, text = CI_MODE_MAP[mode_id]
+    return Mode(soft_id=soft_id, type="module", text=text)
 
 
 def choose_mode() -> Mode:
     """
     Интерактивный выбор торгового режима с использованием курсора (как в pacifica).
+    Только для VPS/локального запуска — в CI используется get_mode_from_env().
     """
+    from inquirer import prompt, List as InquirerList
+    from inquirer.themes import load_theme_from_dict
+
+    theme = load_theme_from_dict({"List": {
+        "selection_cursor": "👉🏻",
+        # "selection_color": "violetred1",
+    }})
+
     def ask_question(question: str, modes: list):
         total_numerics = 0
         choices = []
@@ -59,7 +84,7 @@ def choose_mode() -> Mode:
         raw_answer = prompt(
             questions=questions,
             raise_keyboard_interrupt=True,
-            theme=THEME,
+            theme=theme,
         )
         return next((mode for mode in modes if mode.soft_id == raw_answer['custom_question']))
 

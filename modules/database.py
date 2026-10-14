@@ -11,6 +11,7 @@ from time import sleep
 from hashlib import md5
 from base64 import urlsafe_b64encode
 from cryptography.fernet import Fernet, InvalidToken
+from modules.retry import DataBaseError
 
 
 class DataBase:
@@ -84,9 +85,18 @@ class DataBase:
     def set_password(self):
         """
         Установка пароля для шифрования приватных ключей.
+        В CI-режиме запрещена (интерактив невозможен): база там не создаётся,
+        кошельки берутся из WALLETS_DATA без шифрованной базы.
         """
         if self.personal_key is not None:
             return
+
+        from modules.ci_loader import is_ci_runtime
+        if is_ci_runtime():
+            raise RuntimeError(
+                "Database creation is interactive and unavailable "
+                "in github_actions mode (wallets come from WALLETS_DATA)"
+            )
         
         logger.debug('Enter password to encrypt privatekeys (empty for default):')
         raw_password = input("")
@@ -104,9 +114,33 @@ class DataBase:
     def get_password(self):
         """
         Получение пароля для расшифровки приватных ключей.
+
+        Приоритет (§9.п2): DB_ENCRYPTION_PASSWORD из окружения → проба
+        штатного пароля → интерактив только в VPS-режиме. Неверный пароль
+        из окружения — быстрый отказ исключением, не молчаливый обход.
         """
         if self.personal_key is not None:
             logger.debug('Password already set, skipping password request')
+            return
+
+        from modules.ci_loader import is_ci_runtime
+
+        env_password = os.getenv('DB_ENCRYPTION_PASSWORD', '')
+        if env_password:
+            temp_key = Fernet(urlsafe_b64encode(md5(env_password.encode()).hexdigest().encode()))
+            with open(self.modules_db_name, encoding="utf-8") as f:
+                modules_db = json.load(f)
+            if not modules_db:
+                logger.debug('Database is empty')
+                return
+            try:
+                self.decode_pk(pk=list(modules_db.keys())[0], key=temp_key)
+            except InvalidToken:
+                raise DataBaseError(
+                    'DB_ENCRYPTION_PASSWORD is set but does not open the database'
+                )
+            self.personal_key = temp_key
+            logger.info('[+] Soft | Env password worked\n')
             return
         
         if not path.isfile(self.modules_db_name):
@@ -134,6 +168,13 @@ class DataBase:
         except InvalidToken:
             # Дефолтный пароль не подошел, запрашиваем у пользователя
             pass
+
+        if is_ci_runtime():
+            # В CI терминала нет: запросить пароль не у кого — быстрый отказ.
+            raise DataBaseError(
+                'Database is encrypted and DB_ENCRYPTION_PASSWORD is not set '
+                'or does not match (github_actions mode)'
+            )
         
         # Запрашиваем пароль у пользователя
         print('\n' + '='*60)

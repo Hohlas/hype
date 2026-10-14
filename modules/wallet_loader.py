@@ -59,13 +59,38 @@ def load_wallets_from_file(file_path: str = "input_data/wallets.txt") -> List[Di
 def get_wallet_modules(db=None) -> List[Dict]:
     """
     Получает модули кошельков для торговли из зашифрованной базы данных.
-    
+
+    Обход (§9.п4): сначала окружение (CI: WALLETS_DATA), потом файлы/VPS.
+    В CI-режиме отсутствие или битость WALLETS_DATA — быстрый отказ
+    исключением, а не молчаливый обход.
+
     Args:
         db: Экземпляр DataBase для расшифровки ключей
-    
+
     Returns:
         List[Dict]: Список модулей для обработки
     """
+    from modules.ci_loader import (
+        build_wallet_modules,
+        is_ci_runtime,
+        load_wallets_from_env,
+    )
+
+    try:
+        env_wallets = load_wallets_from_env()
+    except ValueError as e:
+        logger.error(f"WALLETS_DATA error: {e}")
+        raise RuntimeError(f"WALLETS_DATA error: {e}")
+
+    if env_wallets is not None:
+        return build_wallet_modules(env_wallets)
+
+    if is_ci_runtime():
+        raise RuntimeError(
+            "WALLETS_DATA is required in github_actions mode "
+            "(input_data/ is not checked out in CI)"
+        )
+
     modules_db_name = 'databases/modules.json'
     
     # Если база данных не существует, пытаемся загрузить из файла (для обратной совместимости)

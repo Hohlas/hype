@@ -1,0 +1,85 @@
+name: Hyperliquid Bot Duty
+on:
+  # Явный список минут (§2.1): мимо пика :00–:05 и круглых минут.
+  # Зазоры 12–14 мин + шов 9 мин; дыры ловит подхват + предупреждения.
+  schedule: [{cron: '7,19,33,46,58 * * * *'}]  # UTC
+  workflow_dispatch:  # ручной запуск участвует в дежурстве как обычный
+    inputs:
+      poll_interval:
+        description: 'Пауза между итерациями в --watch, сек (по умолч. 60)'
+        required: false
+        default: '60'
+      watch_seconds:
+        description: 'Длительность цикла --watch, сек (по умолч. 19800 = 5.5 ч)'
+        required: false
+        default: '19800'
+permissions: {contents: write}  # нужно: ветка state пишется через API (осознанное исключение)
+# concurrency НЕТ — перекрытие запусков является дизайном (§0.п5)
+jobs:
+  duty:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355  # потолок 360; бюджет §2.2 в комментариях: 330 + 15 + 1 = 346
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11', cache: 'pip', cache-dependency-path: 'requirements.txt'}
+      - run: pip install -r requirements.txt
+      # state.json — ВО ВНЕ рабочего дерева ($RUNNER_TEMP), чтобы несохранённый
+      # файл не спорил с переключением веток при Persist. Выгрузка по умолчанию
+      # не создаёт ссылку origin/state — нужен явный адрес ветки.
+      - name: Fetch state
+        run: |
+          git fetch --depth=1 origin +refs/heads/state:refs/remotes/origin/state 2>/dev/null || true
+          git show origin/state:state.json > "$RUNNER_TEMP/state.json" 2>/dev/null \
+            || echo '{}' > "$RUNNER_TEMP/state.json"
+      - name: Run duty
+        env:
+          BOT_RUNTIME: github_actions
+          BOT_POLL_INTERVAL: ${{ github.event.inputs.poll_interval }}
+          WATCH_SECONDS: ${{ github.event.inputs.watch_seconds }}
+          STATE_PATH: ${{ runner.temp }}/state.json
+          PYTHONUNBUFFERED: '1'  # иначе журнал отстаёт от реальности на минуты
+          DB_ENCRYPTION_PASSWORD: ${{ secrets.DB_ENCRYPTION_PASSWORD }}
+          WALLETS_DATA: ${{ secrets.WALLETS_DATA }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          PROFIT_BOT_TOKEN: ${{ secrets.PROFIT_BOT_TOKEN }}
+          TG_USER_ID: ${{ secrets.TG_USER_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "::add-mask::${{ secrets.WALLETS_DATA }}"
+          echo "::add-mask::${{ secrets.DB_ENCRYPTION_PASSWORD }}"
+          echo "::add-mask::${{ secrets.TG_BOT_TOKEN }}"
+          echo "::add-mask::${{ secrets.PROFIT_BOT_TOKEN }}"
+          # только цифры, иначе дефолты duty.py (защита от injections);
+          # пустая строка от расписания иначе проскочила бы в argparse как ''.
+          BOT_POLL_INTERVAL="${BOT_POLL_INTERVAL:-60}"
+          case "$BOT_POLL_INTERVAL" in ''|*[!0-9]*) BOT_POLL_INTERVAL=60 ;; esac
+          WATCH_SECONDS="${WATCH_SECONDS:-19800}"
+          case "$WATCH_SECONDS" in ''|*[!0-9]*) WATCH_SECONDS=19800 ;; esac
+          python -m modules.duty --watch --poll-interval "$BOT_POLL_INTERVAL" --watch-seconds "$WATCH_SECONDS" < /dev/null
+      - name: Persist state  # финальный сейв: убийство заканчивается сейвом
+        if: always()  # ALWAYS, не !cancelled() — иначе убийство = потеря меток
+        run: |
+          # При первом запуске checkout --orphan НЕ очищает дерево —
+          # нужен read-tree --empty, иначе весь код попадёт в ветку state.
+          git config user.name "hype-bot"
+          git config user.email "hype-bot@users.noreply.github.com"
+          if git fetch --quiet --depth=1 origin +refs/heads/state:refs/remotes/origin/state 2>/dev/null; then
+            git checkout -B state origin/state
+          else
+            git checkout --orphan state
+            git read-tree --empty
+          fi
+          # ветка state содержит только state.json
+          cp "$RUNNER_TEMP/state.json" state.json
+          git add -f state.json
+          git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
+          git push origin state || {
+            echo "non-fast-forward (гонка) — rebase и повторный push"
+            git pull --rebase origin state || true
+            git push origin state || true
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()  # убитые запуски тоже оставляют журналы (криминалистика §6)
+        with: {name: bot-logs, path: hyperliquid_bot.log}

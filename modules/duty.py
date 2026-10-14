@@ -2,11 +2,12 @@
 
 SKELETON (see ``docs/GithubActions.md``): pure duty logic ported from
 ChatSum ``run_once.py`` (symbol names mirror the original so the doc maps
-1:1). Trading calls are NOT here — the leader loop calls
-:func:`run_trading_iteration`, which stays unimplemented until the strategy
-(``delayed_orders_strategy``) is wired in per §9. Import-safe: stdlib only,
-no package-root imports at module load (``python -m modules.duty`` must not
-pull ``inquirer``/browser side effects).
+   1:1). Trading calls are NOT here — the leader loop calls
+   :func:`run_trading_iteration`, wired to the read-only parse pass
+   (``modules.duty_parse``) for the §10 ladder; full trading reconcile
+   lands later. Import-safe: stdlib only,
+   no package-root imports at module load (``python -m modules.duty`` must not
+   pull ``inquirer``/browser side effects).
 
 Protocol summary (frozen, see doc §1):
 - One leader trades, the rest are standby (no trading, flag reads only).
@@ -35,7 +36,7 @@ import time
 import urllib.request
 import urllib.error
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # --------------------------------------------------------------------------
 # Load-bearing numbers (doc §1.2/§2.2 — change only with the owner)
@@ -55,10 +56,6 @@ STATE_RETENTION_DAYS = 3     # counter pruning window
 
 WATCH_DEFAULT_SEC = 19800    # 5.5h leader watch (budget: 330 + 15 + 1 <= 355)
 POLL_DEFAULT_SEC = 60        # trading iteration step
-
-
-class DutyNotWired(RuntimeError):
-    """Raised when the trading iteration is called before §9 wiring."""
 
 
 # --------------------------------------------------------------------------
@@ -423,38 +420,36 @@ def _verify_push(path: str, local: dict) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Trading seam — implemented in §9 wiring (NOT here)
+# Trading seam — parse wiring for the §10 ladder (read-only steps 1–2).
+# Full trading reconcile lands later; placements stay forbidden here.
 # --------------------------------------------------------------------------
 async def run_trading_iteration(state: dict) -> None:
-    """One parse → soft-cancel → averaging-reconcile pass (doc §5).
+    """One read-only parse pass over all wallets (doc §5 minus placements)."""
+    from modules.duty_parse import run_parse_iteration  # lazy: keeps import-safe
 
-    Skeleton: raises until wired to the strategy. Wiring must run BEFORE
-    each placement a claim-check ("such an order already rests") and log
-    the order id afterwards.
+    await run_parse_iteration(state)
+
+
+def note_work_progress(path: str, run_id: str, state: dict) -> None:
+    """Маркер «работа движется» в общий state (единый источник истины в цикле).
+
+    Пишет в переданный словарь, а не перечитывает диск: иначе сохранённые
+    метки разбора затирались бы на каждой итерации (§1.3 — только надмножество).
     """
-    raise DutyNotWired(
-        "modules.duty is a skeleton: wire run_trading_iteration() to "
-        "delayed_orders_strategy per docs/GithubActions.md §9 before creating "
-        ".github/workflows/bot.yml (§10 ladder).")
-
-
-def note_work_progress(path: str, run_id: str) -> None:
     try:
-        work, _ = work_read()
-        doc = {"run_id": run_id, "last_work_utc": _utc_str(_utc_now())}
-        _ = work  # progress marker rides the heartbeat rhythm (§1.2)
-        local = load_state(path)
-        (local.setdefault("_work", {})).update(doc)
-        save_state(path, local)
+        state.setdefault("_work", {}).update(
+            {"run_id": run_id, "last_work_utc": _utc_str(_utc_now())})
+        save_state(path, state)
     except Exception as e:
         print(f"⚠️ Work marker: {e}")
 
 
-async def _heartbeat_loop(me: dict, path: str) -> None:
+async def _heartbeat_loop(me: dict, path: str, deadline_utc) -> None:
     """Background heartbeat every LEADER_HEARTBEAT_SEC (best-effort).
 
     Separate task ON PURPOSE: an iteration-bound heartbeat froze during long
     tasks and standby declared a live leader dead (ChatSum 2026-10-04).
+    Also drives the duty beacon (§1.5): edit every 5th tick.
     """
     try:
         while True:
@@ -462,37 +457,51 @@ async def _heartbeat_loop(me: dict, path: str) -> None:
             me["heartbeat_utc"] = _utc_str(_utc_now())
             leader_claim(me)
             push_state_best_effort(path)
+            try:
+                from modules import beacon  # lazy: keeps duty import-safe
+
+                await beacon.leader_beacon_tick(deadline_utc)
+            except Exception as e:
+                print(f"⚠️ Beacon: {e}")
     except asyncio.CancelledError:
         pass
 
 
 async def _run_leader_loop(state: dict, path: str, me: dict, poll: int,
-                           watch_remaining=None) -> int:
+                           watch_remaining=None, watch_seconds=None) -> int:
     iteration = 0
+    if watch_seconds is None:
+        watch_seconds = float(os.getenv("WATCH_SECONDS", WATCH_DEFAULT_SEC))
+    watch_seconds = leader_watch_seconds(watch_remaining, watch_seconds)
+    deadline = time.monotonic() + watch_seconds
+    deadline_utc = _utc_now() + timedelta(seconds=watch_seconds)
     hb_task = None
     if handoff_enabled():
-        hb_task = asyncio.create_task(_heartbeat_loop(me, path))
+        hb_task = asyncio.create_task(_heartbeat_loop(me, path, deadline_utc))
     try:
-        deadline = time.monotonic() + leader_watch_seconds(
-            watch_remaining, float(os.getenv("WATCH_SECONDS", WATCH_DEFAULT_SEC)))
         print(f"shift start: run {me['run_id']}")
         while True:
             iteration += 1
-            note_work_progress(path, me["run_id"])
+            note_work_progress(path, me["run_id"], state)
             if handoff_enabled():
+                # Work marker to the branch: fresh heartbeat + stale marker
+                # of the SAME run_id is the wedge signal (§1.2).
+                _flag_claim(WORK_FILE,
+                            {"run_id": me["run_id"],
+                             "last_work_utc": _utc_str(_utc_now())},
+                            "work")
                 remote, _ = leader_read()
                 if leader_should_yield(me, remote):
                     print(f"👑 Newer leader {remote.get('run_id')} — yielding.")
                     break
             if time.monotonic() >= deadline:
                 me["retiring"] = True
-                leader_claim(me)
+                if handoff_enabled():
+                    leader_claim(me)
                 print("👑 retiring: watch over, yielding to next run.")
                 break
             try:
                 await run_trading_iteration(state)
-            except DutyNotWired:
-                raise
             except Exception as e:
                 print(f"⚠️ Iteration {iteration} skipped: {e}")
             push_state_best_effort(path)
@@ -523,6 +532,10 @@ async def _run_standby_loop(state: dict, path: str, me: dict, poll: int,
                 print("🛡️ Standby: deadline — exiting, leader lives without me.")
                 break
             await asyncio.sleep(min(poll, max(1.0, deadline - time.monotonic())))
+            # Own heartbeat to the shared standby file: the freshest standby
+            # is the one that takes over (§1.2); gap diagnosis reads it (§1.4).
+            me["heartbeat_utc"] = _utc_str(_utc_now())
+            standby_claim(me)
             sremote, _ = standby_read()
             if leader_should_yield(me, sremote):
                 print(f"🛡️ Newer standby {sremote.get('run_id')} — exiting.")
@@ -553,8 +566,20 @@ async def _run_standby_loop(state: dict, path: str, me: dict, poll: int,
                         and remote.get("retiring") else "dead"
             if takeover_why:
                 print(f"🛡️ Leader {takeover_why} — taking over.")
+                try:
+                    # Probe BEFORE leading: a run that cannot reach the
+                    # exchange must never look like a leader (§1.2).
+                    await run_trading_iteration(state)
+                except Exception as e:
+                    print(f"🛡️ Probe failed ({e}) — staying standby.")
+                    stale_reads = 0
+                    wedge_reads = 0
+                    continue
+                me["ready"] = True
+                leader_claim(me)
                 remaining = max(0.0, deadline - time.monotonic())
-                return await _run_leader_loop(state, path, me, poll, remaining)
+                return await _run_leader_loop(state, path, me, poll, remaining,
+                                              watch_seconds=watch_seconds)
     finally:
         pull_state_best_effort(path)
         try:
@@ -574,6 +599,40 @@ def _parse_args(argv=None):
     return p.parse_args(argv)
 
 
+async def _report_duty_gap(my_run_id_: str) -> None:
+    """Самодиагностика зазоров (§1.4): тишина дольше GAP_WARN_SEC — владельцу."""
+    try:
+        last_hb = None
+        for reader in (leader_read, standby_read):
+            try:
+                doc, _ = reader()
+            except Exception:
+                continue
+            if isinstance(doc, dict) and doc.get("run_id") != my_run_id_:
+                hb = _parse_utc(doc.get("heartbeat_utc"))
+                if hb is not None and (last_hb is None or hb > last_hb):
+                    last_hb = hb
+        if last_hb is None:
+            return
+        gap = (_utc_now() - last_hb).total_seconds()
+        if gap <= 0:
+            return
+        if gap > GAP_WARN_SEC:
+            msg = (f"⚠️ Duty gap: no heartbeat for {gap:.0f}s "
+                   f"(last {last_hb.strftime('%d.%m %H:%M')} UTC)")
+            print(msg)
+            try:
+                from modules import beacon  # lazy: keeps duty import-safe
+
+                await beacon.warn_owner(msg)
+            except Exception as e:
+                print(f"⚠️ Gap warning not sent: {e}")
+        else:
+            print(f"Duty silence {gap:.0f}s (below warn threshold).")
+    except Exception as e:
+        print(f"⚠️ Gap diagnosis: {e}")
+
+
 async def _amain(args) -> int:
     path = state_path()
     state = load_state(path)
@@ -585,23 +644,31 @@ async def _amain(args) -> int:
     if not handoff_enabled():
         print("👑 Handoff off (no GITHUB_TOKEN/GITHUB_REPOSITORY) — solo mode.")
         me["ready"] = True
-        return await _run_leader_loop(state, path, me, poll, None)
+        return await _run_leader_loop(state, path, me, poll, None,
+                                      watch_seconds=args.watch_seconds)
+    await _report_duty_gap(me["run_id"])
     remote, _ = leader_read()
     if (isinstance(remote, dict) and remote.get("run_id") != me["run_id"]
             and not remote.get("retiring") and leader_is_live(remote)):
         print(f"👑 Leader {remote.get('run_id')} is live — becoming standby.")
         return await _run_standby_loop(state, path, me, poll, args.watch_seconds)
+    # Claim unready first; ready flips only after exchange + first parse (§1.2).
+    leader_claim(me)
+    try:
+        await run_trading_iteration(state)
+    except Exception as e:
+        print(f"❌ First parse failed ({e}) — not becoming leader.")
+        return 1
     me["ready"] = True
-    return await _run_leader_loop(state, path, me, poll, None)
+    leader_claim(me)
+    push_state_best_effort(path)
+    return await _run_leader_loop(state, path, me, poll, None,
+                                  watch_seconds=args.watch_seconds)
 
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
-    try:
-        return asyncio.run(_amain(args))
-    except DutyNotWired as e:
-        print(f"❌ {e}")
-        return 2
+    return asyncio.run(_amain(args))
 
 
 if __name__ == "__main__":
