@@ -292,7 +292,9 @@ def gh_state_file_put(path: str, text: str, sha=None, message=None) -> bool:
     if sha:
         body["sha"] = sha
     data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(_gh_contents_url(path), data=data,
+    # method="PUT" обязателен: urllib с телом по умолчанию шлёт POST,
+    # а Contents API принимает только PUT (иначе 404/405).
+    req = urllib.request.Request(_gh_contents_url(path), data=data, method="PUT",
                                  headers={**_gh_headers(),
                                           "Content-Type": "application/json"})
     try:
