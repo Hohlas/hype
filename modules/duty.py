@@ -1,6 +1,6 @@
 """Hype duty layer — leader/standby relay over the ``state`` branch.
 
-SKELETON (see ``docs/GithubActions.md``): pure duty logic ported from
+SKELETON (see ``docs/project_description.md`` §6): pure duty logic ported from
 ChatSum ``run_once.py`` (symbol names mirror the original so the doc maps
    1:1). Trading calls are NOT here — the leader loop calls
    :func:`run_trading_iteration`, wired to the read-only parse pass

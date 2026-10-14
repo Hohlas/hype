@@ -1,6 +1,6 @@
 name: Hyperliquid Bot Duty
 on:
-  # Явный список минут (§2.1): мимо пика :00–:05 и круглых минут.
+  # Явный список минут: мимо пика :00–:05 и круглых минут.
   # Зазоры 12–14 мин + шов 9 мин; дыры ловит подхват + предупреждения.
   schedule: [{cron: '7,19,33,46,58 * * * *'}]  # UTC
   workflow_dispatch:  # ручной запуск участвует в дежурстве как обычный
@@ -14,11 +14,11 @@ on:
         required: false
         default: '19800'
 permissions: {contents: write}  # нужно: ветка state пишется через API (осознанное исключение)
-# concurrency НЕТ — перекрытие запусков является дизайном (§0.п5)
+# concurrency НЕТ — перекрытие запусков является дизайном
 jobs:
   duty:
     runs-on: ubuntu-latest
-    timeout-minutes: 355  # потолок 360; бюджет §2.2 в комментариях: 330 + 15 + 1 = 346
+    timeout-minutes: 355  # потолок 360; бюджет: вотч 330 + хвост 15 + установка 1 = 346
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -81,5 +81,5 @@ jobs:
             git push origin state || true
           }
       - uses: actions/upload-artifact@v4
-        if: always()  # убитые запуски тоже оставляют журналы (криминалистика §6)
+        if: always()  # убитые запуски тоже оставляют журналы (криминалистика)
         with: {name: bot-logs, path: hyperliquid_bot.log}

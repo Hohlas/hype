@@ -48,7 +48,7 @@ def get_mode_from_env() -> Mode:
     return Mode(soft_id=soft_id, type="module", text=text)
 
 
-# Режимы дежурства (§10 лестницы GithubActions.md). parse — только чтение,
+# Режимы дежурства (docs/project_description.md §6.5). parse — только чтение,
 # averaging — торговля. Значение задаётся в settings.py (переключатель владельца).
 DUTY_MODES = ("parse", "averaging")
 DUTY_MODE_DEFAULT = "parse"

@@ -143,7 +143,7 @@ if [ "$DRY_RUN" = 1 ]; then
   echo "DRY secret   WALLETS_DATA ($WALLET_COUNT wallets, $(printf '%s' "$WALLETS_DATA" | wc -c) bytes, values hidden)"
 else
   if [ "$(printf '%s' "$WALLETS_DATA" | wc -c)" -gt 49152 ]; then
-    echo "❌ WALLETS_DATA exceeds the 48 KB secret limit — split into WALLETS_DATA_1..N (see docs/GithubActions.md §8)."
+    echo "❌ WALLETS_DATA exceeds the 48 KB secret limit — split into WALLETS_DATA_1..N."
     exit 1
   fi
   tmp="$(mktemp)"; printf '%s' "$WALLETS_DATA" > "$tmp"
@@ -159,5 +159,5 @@ echo ""
 if [ "$DRY_RUN" = 1 ]; then
   echo "DRY-RUN: nothing written. Drop --dry-run to write for real."
 else
-  echo "Done. Next: docs/GithubActions.md §10 ladder (manual Parse run first)."
+  echo "Done. Next: run a manual duty pass (workflow_dispatch)."
 fi
