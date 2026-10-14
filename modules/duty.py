@@ -206,6 +206,41 @@ def merge_counters(local_counters, remote_counters):
     return merged
 
 
+def merge_anchors(local_anchors, remote_anchors):
+    """Write-once per-label anchors: union of labels, the existing value wins.
+
+    ``hold_benchmark_anchor`` is fixed once at the first position and never
+    overwritten (``delayed_orders_strategy.save_hold_anchor``); on merge the
+    already-known entry must survive (§4 — the anchor is not recoverable from
+    the exchange, so the branch is its only cross-watch memory).
+    """
+    merged = dict(remote_anchors or {})
+    for k, v in (local_anchors or {}).items():
+        if k not in merged:
+            merged[k] = v
+    return merged
+
+
+def merge_buy_ts(local_ts, remote_ts):
+    """Union of per-wallet buy-timestamp lists, newest 10 kept (§4).
+
+    ``last_buy_timestamps`` survives restarts in VPS via ``databases/``; in CI
+    that directory is ephemeral, so the branch carries it. The exchange exposes
+    only the recent ~500 fills, so the persisted set widens the orphan-TP window.
+    """
+    merged = {}
+    for src in (remote_ts or {}, local_ts or {}):
+        for k, v in (src or {}).items():
+            if isinstance(v, int):
+                v = [v]
+            elif not isinstance(v, list):
+                continue
+            cur = set(merged.get(k, []))
+            cur.update(int(x) for x in v if isinstance(x, (int, float)))
+            merged[k] = sorted(cur, reverse=True)[:10]
+    return merged
+
+
 def merge_states(local, remote):
     merged = dict(local or {})
     remote = remote or {}
@@ -214,6 +249,17 @@ def merge_states(local, remote):
     merged["error_counters"] = merge_counters(
         _as_dict((local or {}).get("error_counters")),
         _as_dict(remote.get("error_counters")))
+    merged["hold_anchor"] = merge_anchors(
+        _as_dict((local or {}).get("hold_anchor")),
+        _as_dict(remote.get("hold_anchor")))
+    merged["last_buy_ts"] = merge_buy_ts(
+        _as_dict((local or {}).get("last_buy_ts")),
+        _as_dict(remote.get("last_buy_ts")))
+    # id маячного сообщения — скаляр, локальное значение свежее (§1.5): оно
+    # проставлено текущим ведущим, который только что создал/правит маяк.
+    beacon_id = (local or {}).get("beacon_message_id") or remote.get("beacon_message_id")
+    if beacon_id:
+        merged["beacon_message_id"] = beacon_id
     if str(remote.get("last_run_utc") or "") > str(merged.get("last_run_utc") or ""):
         merged["last_run_utc"] = remote["last_run_utc"]
     return merged
@@ -471,25 +517,30 @@ async def _close_trade_clients_best_effort() -> None:
         pass
 
 
-async def _heartbeat_loop(me: dict, path: str, deadline_utc) -> None:
+async def _heartbeat_loop(me: dict, path: str, deadline_utc, state: dict) -> None:
     """Background heartbeat every LEADER_HEARTBEAT_SEC (best-effort).
 
     Separate task ON PURPOSE: an iteration-bound heartbeat froze during long
     tasks and standby declared a live leader dead (ChatSum 2026-10-04).
-    Also drives the duty beacon (§1.5): edit every 5th tick.
+    Also drives the duty beacon (§1.5): edit every 5th tick; the beacon
+    message id is persisted in ``state`` so the next watch edits the same one.
     """
     try:
         while True:
             await asyncio.sleep(LEADER_HEARTBEAT_SEC)
             me["heartbeat_utc"] = _utc_str(_utc_now())
             leader_claim(me)
-            push_state_best_effort(path)
             try:
                 from modules import beacon  # lazy: keeps duty import-safe
 
-                await beacon.leader_beacon_tick(deadline_utc)
+                mid = await beacon.leader_beacon_tick(
+                    deadline_utc, state.get("beacon_message_id"))
+                if isinstance(mid, int) and state.get("beacon_message_id") != mid:
+                    state["beacon_message_id"] = mid
+                    save_state(path, state)
             except Exception as e:
                 print(f"⚠️ Beacon: {e}")
+            push_state_best_effort(path)
     except asyncio.CancelledError:
         pass
 
@@ -504,7 +555,7 @@ async def _run_leader_loop(state: dict, path: str, me: dict, poll: int,
     deadline_utc = _utc_now() + timedelta(seconds=watch_seconds)
     hb_task = None
     if handoff_enabled():
-        hb_task = asyncio.create_task(_heartbeat_loop(me, path, deadline_utc))
+        hb_task = asyncio.create_task(_heartbeat_loop(me, path, deadline_utc, state))
     try:
         print(f"shift start: run {me['run_id']}")
         while True:

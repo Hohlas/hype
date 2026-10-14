@@ -358,3 +358,61 @@ class DataBase:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Failed to add last_buy_timestamp: {e}")
+
+    def get_all_last_buy_timestamps(self) -> dict:
+        """
+        Вся карта timestamp покупок (key = f"{wallet}_{token}").
+        Для переноса через ветку state между вахтами (§4): сама биржа отдаёт
+        лишь последние ~500 сделок, персистентная карта расширяет окно.
+        """
+        try:
+            if not path.isfile(self.last_buy_timestamps_db_name):
+                return {}
+            with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.error(f"Failed to get last_buy_timestamps map: {e}")
+            return {}
+
+    def merge_last_buy_timestamps(self, mapping: dict) -> int:
+        """
+        Объединяет карту timestamp покупок с переданной (union, top-10, по
+        убыванию). Возвращает число ключей, у которых набор изменился.
+        Ошибки БД никогда не должны ронять торговлю — только лог.
+        """
+        if not isinstance(mapping, dict) or not mapping:
+            return 0
+        try:
+            data = {}
+            if path.isfile(self.last_buy_timestamps_db_name):
+                with open(self.last_buy_timestamps_db_name, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data = loaded
+
+            changed = 0
+            for key, ts_list in mapping.items():
+                if isinstance(ts_list, int):
+                    ts_list = [ts_list]
+                elif not isinstance(ts_list, list):
+                    ts_list = []
+                cur = data.get(key, [])
+                if isinstance(cur, int):
+                    cur = [cur]
+                elif not isinstance(cur, list):
+                    cur = []
+                before = set(cur)
+                merged = sorted(
+                    before | {int(t) for t in ts_list if isinstance(t, (int, float))},
+                    reverse=True)[:10]
+                data[key] = merged
+                if set(merged) != before:
+                    changed += 1
+
+            with open(self.last_buy_timestamps_db_name, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return changed
+        except Exception as e:
+            logger.error(f"Failed to merge last_buy_timestamps: {e}")
+            return 0

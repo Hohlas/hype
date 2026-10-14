@@ -129,3 +129,60 @@ def test_strategy_single_pass_returns_without_orders(tmp_path, monkeypatch):
     assert result is True
     assert any("Single-pass mode" in msg for _, msg in client.browser.logs)
     assert not any("place_order" in msg for _, msg in client.browser.logs)
+
+
+# --- Перенос якоря hold_benchmark через state (§4, не берётся с биржи) ---
+
+def test_restore_and_capture_anchor_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from modules import duty_trade
+    from modules.delayed_orders_strategy import load_hold_anchor, save_hold_anchor
+
+    label = "Acc Test"
+    state = {"hold_anchor": {label: {
+        "depo_start": 500.0, "price_start": 80000.0,
+        "timestamp": "2026-01-01 00:00:00"}}}
+
+    # Восстановление: state -> эфемерный databases/stats.json (с исходным временем).
+    assert duty_trade._restore_anchors(state) == 1
+    got = load_hold_anchor(label)
+    assert got["depo_start"] == 500.0
+    assert got["price_start"] == 80000.0
+    assert got["timestamp"] == "2026-01-01 00:00:00"
+
+    # write-once: повторное восстановление и прямая запись не перетирают якорь.
+    assert duty_trade._restore_anchors(state) == 0
+    save_hold_anchor(label, 999.0, 1.0)
+    assert load_hold_anchor(label)["depo_start"] == 500.0
+
+    # Захват: файл -> свежий state (как после смерти процесса).
+    fresh = {}
+    assert duty_trade._capture_anchors(fresh, [label]) == 1
+    assert fresh["hold_anchor"][label]["depo_start"] == 500.0
+
+
+def test_capture_anchor_ignores_empty_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from modules import duty_trade
+
+    state = {}
+    assert duty_trade._capture_anchors(state, ["No Anchor"]) == 0
+    assert "hold_anchor" not in state or state["hold_anchor"] == {}
+
+
+# --- Перенос last_buy_timestamps через state (§4, частично берётся с биржи) ---
+
+def test_restore_and_capture_buy_ts_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from modules import duty_trade
+    from modules.database import DataBase
+
+    db = DataBase()
+    state = {"last_buy_ts": {"0xA_BTC": [100, 200]}}
+
+    assert duty_trade._restore_buy_ts(state, db) == 1
+    assert db.get_last_buy_timestamps("0xA", "BTC") == [200, 100]
+
+    fresh = {}
+    assert duty_trade._capture_buy_ts(fresh, db) == 1
+    assert fresh["last_buy_ts"]["0xA_BTC"] == [200, 100]

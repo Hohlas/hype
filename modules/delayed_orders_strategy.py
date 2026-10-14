@@ -407,17 +407,21 @@ def load_hold_anchor(label: str):
         return None
 
 
-def save_hold_anchor(label: str, depo_start: float, price_start: float):
+def save_hold_anchor(label: str, depo_start: float, price_start: float,
+                     timestamp: str = None):
     """
     Записывает якорь hold_benchmark для label в databases/stats.json.
     Пишет ТОЛЬКО если якоря для этого label еще нет (повторная запись запрещена).
     Остальное содержимое файла сохраняется как есть.
 
+    ``timestamp`` — опционально исходный момент фиксации якоря (для
+    восстановления из ветки ``state``); без него берётся текущее время.
+
     Returns:
         True если якорь записан (или уже был и совпадает по смыслу — т.е. якорь есть),
         актуальный якорь dict.
     """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     data = {}
     try:
         if os.path.exists(STATS_DB_FILE):

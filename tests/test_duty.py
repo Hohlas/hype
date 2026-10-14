@@ -18,6 +18,8 @@ from modules.duty import (
     leader_is_live,
     leader_should_yield,
     leader_watch_seconds,
+    merge_anchors,
+    merge_buy_ts,
     merge_counters,
     merge_marks,
     merge_states,
@@ -60,6 +62,45 @@ def test_merge_states_last_run_max():
     remote = {"last_run_utc": "2026-10-13T12:00:00Z"}
     assert merge_states(local, remote)["last_run_utc"] == remote["last_run_utc"]
     assert merge_states(remote, local)["last_run_utc"] == remote["last_run_utc"]
+
+
+def test_merge_anchors_union_labels():
+    local = {"A": {"depo_start": 1.0, "price_start": 2.0}}
+    remote = {"B": {"depo_start": 3.0, "price_start": 4.0}}
+    merged = merge_anchors(local, remote)
+    assert set(merged) == {"A", "B"}
+
+
+def test_merge_states_never_drops_remote_anchor():
+    # Ключевая регрессия §4: якорь, уже лежащий в ветке, не должен теряться,
+    # когда у текущего процесса своего якоря ещё нет.
+    remote = {"hold_anchor": {"Acc": {"depo_start": 500.0,
+                                      "price_start": 80000.0}}}
+    assert merge_states({}, remote)["hold_anchor"] == remote["hold_anchor"]
+    # Уже известный якорь не перетирается локальным (write-once).
+    local = {"hold_anchor": {"Acc": {"depo_start": 999.0, "price_start": 1.0}}}
+    assert merge_states(local, remote)["hold_anchor"]["Acc"]["depo_start"] == 500.0
+
+
+def test_merge_buy_ts_union_top10_newest():
+    local = {"0xA_BTC": [100, 200]}
+    remote = {"0xA_BTC": [200, 300], "0xB_BTC": [50]}
+    merged = merge_buy_ts(local, remote)
+    assert merged["0xA_BTC"] == [300, 200, 100]
+    assert merged["0xB_BTC"] == [50]
+    big = {"k": list(range(20))}
+    assert merge_buy_ts(big, {})["k"] == list(range(19, 9, -1))
+
+
+def test_merge_states_carries_beacon_id():
+    # id маяка переживает смену ведущего через ветку state (§1.5).
+    remote = {"beacon_message_id": 555}
+    assert merge_states({}, remote)["beacon_message_id"] == 555
+    # Локальное (только что созданное) значение свежее — не откатывается.
+    local = {"beacon_message_id": 777}
+    assert merge_states(local, remote)["beacon_message_id"] == 777
+    # Нет ни там, ни там — ключ не заводим.
+    assert "beacon_message_id" not in merge_states({}, {})
 
 
 # --- Уступка: только живому + готовому + строго более новому ---

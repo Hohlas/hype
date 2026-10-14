@@ -2,11 +2,12 @@
 Маяк дежурства в канале связи (docs/GithubActions.md §1.5).
 
 Одно сообщение, две строки: `heartbeat ДД.ММ ЧЧ:ММ` + `next leader: ДД.ММ ЧЧ:ММ`
-(время московское). Новый ведущий подхватывает последний маяк поиском и правит
-его каждый 5-й тик стука сердца; нечего подхватить или правка упала — один
-перепост. Номер сообщения — только в памяти модуля, никуда не сохраняется.
-Ожидающий ничего не пишет. Любая ошибка сети глушится: маяк никогда не роняет
-дежурство.
+(время московское). id этого сообщения хранится в ветке ``state``
+(``beacon_message_id``) и переживает смерть процесса: иначе новый ведущий не
+может найти прошлый маяк — ``getUpdates`` НЕ отдаёт боту его собственные
+отправленные сообщения, и каждый процесс плодил бы новое сообщение.
+Правка — каждый 5-й тик стука (стук раз в 120 сек, §1.2). Ожидающий ничего не
+пишет. Любая ошибка сети глушится: маяк никогда не роняет дежурство.
 """
 
 import aiohttp
@@ -85,27 +86,36 @@ async def _find_last_beacon(token: str, chat_id: str):
     return best
 
 
-async def leader_beacon_tick(deadline_utc: datetime) -> None:
-    """Один тик маяка от ведущего: правка каждый N-й тик, иначе молчание."""
+async def leader_beacon_tick(deadline_utc, known_id=None):
+    """Один тик маяка от ведущего: правка каждый N-й тик, иначе молчание.
+
+    ``known_id`` — id маячного сообщения из ветки ``state`` (§1.5): без него
+    новый ведущий не найдёт прошлый маяк (``getUpdates`` не отдаёт боту его
+    собственные сообщения) и создаст дубль. Возвращает id маяка, который надо
+    запомнить в ``state`` (существующий или только что созданный), либо None.
+    """
     global _message_id, _tick
     token, chat_id = _creds()
     if not token or not chat_id:
-        return
+        return known_id
     _tick += 1
     try:
         if _message_id is None:
-            _message_id = await _find_last_beacon(token, chat_id)
+            if isinstance(known_id, int):
+                _message_id = known_id
+            else:
+                _message_id = await _find_last_beacon(token, chat_id)
         text = _beacon_text(deadline_utc)
-        if _message_id is not None and _tick % BEACON_EDIT_EVERY_TICKS != 0:
-            return
         if _message_id is not None:
+            if _tick % BEACON_EDIT_EVERY_TICKS != 0:
+                return _message_id
             try:
                 await _api(token, "editMessageText", {
                     "chat_id": chat_id,
                     "message_id": _message_id,
                     "text": text,
                 })
-                return
+                return _message_id
             except Exception as e:
                 logger.warning(f"Beacon edit failed, reposting: {e}")
         sent = await _api(token, "sendMessage", {"chat_id": chat_id, "text": text})
@@ -113,8 +123,10 @@ async def leader_beacon_tick(deadline_utc: datetime) -> None:
             _message_id = sent["message_id"]
         else:
             _message_id = None
+        return _message_id
     except Exception as e:
         logger.warning(f"Beacon tick failed: {e}")
+        return _message_id if isinstance(_message_id, int) else known_id
 
 
 async def warn_owner(text: str) -> None:
