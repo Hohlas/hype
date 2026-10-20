@@ -1,12 +1,12 @@
 {
   "marks": {
     "parse:acc": "2026-10-14T14:16:11Z",
-    "trade:acc": "2026-10-20T18:16:34Z"
+    "trade:acc": "2026-10-20T18:17:40Z"
   },
-  "last_run_utc": "2026-10-20T18:16:34Z",
+  "last_run_utc": "2026-10-20T18:17:40Z",
   "_work": {
     "run_id": "39451086908/1",
-    "last_work_utc": "2026-10-20T18:17:35Z"
+    "last_work_utc": "2026-10-20T18:18:42Z"
   },
   "error_counters": {},
   "hold_anchor": {
