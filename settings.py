@@ -17,6 +17,13 @@ GRIDRB_POLL_INTERVAL = 60   # пауза между итерациями, сек
 GRIDRB_MARKET_SLIP = 0.01   # буфер цены для маркет-бутстрапа (1%)
 GRIDRB_DRY_RUN = False      # True — только логировать действия, не торговать
 
+# CSV и Telegram
+GRIDRB_EVENTS_CSV = "gridrb_events.csv"   # журнал событий (ордера, исполнения)
+GRIDRB_STATE_CSV = "gridrb_state.csv"     # периодический снимок состояния
+GRIDRB_STATE_CSV_EVERY = 10               # писать state раз в N итераций
+GRIDRB_TG_NOTIFY = True                   # отправлять события в Telegram
+GRIDRB_TG_CANCELS = False                 # слать ли отмены (обычно шумно)
+
 # --- Старые параметры (оставлены для совместимости модулей/тестов) ---
 POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
 STEP = 500  # Шаг сетки (TP) в долларах для усреднения

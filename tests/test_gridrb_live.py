@@ -84,6 +84,8 @@ def test_micro_fill_creates_take_profit():
     from modules.gridrb_strategy import TrackedOrder
     e.micro_buys.append(TrackedOrder(7, "buy", 99_600.0, 0.001, "micro"))
     acts = e.plan(price=100_000, usdc=1_000, btc=0.04, open_oids=set())
+    fills = [a for a in acts if a.kind == "fill" and a.tag == "micro"]
+    assert len(fills) == 1  # исполнение микро-покупки зафиксировано
     takes = [a for a in acts if a.tag == "micro_take"]
     assert len(takes) == 1
     assert takes[0].side == "SELL"
@@ -94,6 +96,12 @@ def test_micro_fill_creates_take_profit():
     e.register(takes[0], 77)
     acts2 = e.plan(price=100_000, usdc=1_000, btc=0.04, open_oids={77})
     assert not any(a.kind == "cancel" and a.oid == 77 for a in acts2)
+
+    # тейк исполнился -> фиксируется fill с прибылью
+    acts3 = e.plan(price=101_000, usdc=1_000, btc=0.04, open_oids=set())
+    tp_fills = [a for a in acts3 if a.kind == "fill" and a.tag == "micro_take"]
+    assert len(tp_fills) == 1
+    assert tp_fills[0].profit > 0
 
 
 def test_orphan_order_is_cancelled():
@@ -131,3 +139,44 @@ def test_main_has_no_old_runtime():
     assert "delayed_orders_strategy" not in text
     assert "choose_mode" not in text
     assert "modules.duty" not in text
+
+
+def test_event_labels_split_rebalance_and_grid():
+    from modules.gridrb_strategy import event_label
+    reb_buy = event_label({"event": "place", "tag": "defc", "side": "BUY",
+                           "price": 100.0, "qty": 0.1})
+    reb_sell = event_label({"event": "fill", "tag": "trim", "side": "SELL",
+                            "price": 100.0, "qty": 0.1})
+    grid_buy = event_label({"event": "place", "tag": "micro", "side": "BUY",
+                            "price": 100.0, "qty": 0.1})
+    grid_tp = event_label({"event": "fill", "tag": "micro_take", "side": "SELL",
+                           "price": 100.0, "qty": 0.1})
+    assert "Ребаланс" in reb_buy and "Ребаланс" in reb_sell
+    assert "Сетка" in grid_buy and "Сетка" in grid_tp
+
+
+def test_new_csv_logs_only_own_files(tmp_path):
+    from modules.gridrb_strategy import log_events, log_state, event_label
+
+    class C:
+        label = "acc"
+
+    events_csv = tmp_path / "gridrb_events.csv"
+    state_csv = tmp_path / "gridrb_state.csv"
+    ev = {"event": "place", "tag": "defc", "side": "BUY", "price": 100.0,
+          "qty": 0.1, "notional": 10.0, "oid": 1, "note": ""}
+    log_events(C(), str(events_csv), [ev], 100.0, 1000.0, 0.01)
+    log_events(C(), str(events_csv), [{"event": "fill", "tag": "micro",
+                                       "side": "BUY", "price": 99.0, "qty": 0.1,
+                                       "notional": 9.9, "oid": None, "note": ""}],
+               100.0, 1000.0, 0.01)
+    lines = events_csv.read_text().strip().splitlines()
+    assert lines[0].startswith("Timestamp,")
+    assert len(lines) == 3  # заголовок + два события
+    assert "defc" in lines[1] and "micro" in lines[2]
+
+    e = make_engine()
+    e.first = False
+    log_state(C(), str(state_csv), 100.0, 1000.0, 0.01, e)
+    assert state_csv.read_text().splitlines()[0].startswith("Timestamp,")
+    assert event_label(ev).startswith("📥 Ребаланс")
