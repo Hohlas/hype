@@ -27,12 +27,25 @@ git clone <repository-url>
 cd hype
 ```
 
-2. **Установите зависимости:**
+2. **Создайте виртуальное окружение:**
 ```bash
-pip install -r requirements.txt
+python3 -m venv venv
 ```
+Окружение обязательно: на Debian/Ubuntu системный `pip` заблокирован (PEP 668,
+ошибка `externally-managed-environment`), а установка пакетов в системный Python
+ломает зависимости самой ОС. Каталог `venv/` уже в `.gitignore`.
 
-3. **Настройте конфигурацию:**
+Если `python3 -m venv` падает с `ensurepip is not available`, поставьте пакет
+`python3-venv` (например, `sudo apt install python3.14-venv`).
+
+3. **Установите зависимости:**
+```bash
+./venv/bin/python -m pip install -r requirements.txt
+```
+Дальше всегда используйте интерпретатор окружения (`./venv/bin/python ...`).
+Вызов `pip install ...` без префикса снова попадёт в системный Python.
+
+4. **Настройте конфигурацию:**
 ```bash
 cp settings.py.example settings.py
 cp input_data/wallets.txt.example input_data/wallets.txt
@@ -79,7 +92,7 @@ LOG_FILE = "hyperliquid_bot.log"
 ## 🚀 Запуск
 
 ```bash
-source venv/bin/activate
+source venv/bin/activate    # либо сразу ./venv/bin/python main.py
 python main.py
 ```
 
