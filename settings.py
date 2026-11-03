@@ -1,9 +1,23 @@
 # Hyperliquid Bot Settings
-version = "1.3.7"
+version = "1.4.0"
 
 # Risk Management
 
-SPOT_TOKEN = "BTC"  # Spot Trading token 
+SPOT_TOKEN = "BTC"  # Spot Trading token
+
+# --- GridRB 80/20 (активный алгоритм, modules/gridrb_strategy.py) ---
+GRIDRB_F0 = 0.80            # целевая доля BTC в портфеле
+GRIDRB_BAND = 0.04          # полуширина полосы бездействия (±4 п.п.)
+GRIDRB_DELTA = 0.004        # шаг лестниц и микро-сетки (0.4% цены)
+GRIDRB_LEVELS = 5           # число уровней в лестнице
+GRIDRB_MICRO_LOT = 0.02     # лот микро-сетки (2% от капитала)
+GRIDRB_MICRO_MAX = 3        # максимум одновременных микро-ордеров
+GRIDRB_MIN_NOTIONAL = 10.0  # минимальный нотионал ордера, USDC
+GRIDRB_POLL_INTERVAL = 60   # пауза между итерациями, сек
+GRIDRB_MARKET_SLIP = 0.01   # буфер цены для маркет-бутстрапа (1%)
+GRIDRB_DRY_RUN = False      # True — только логировать действия, не торговать
+
+# --- Старые параметры (оставлены для совместимости модулей/тестов) ---
 POSITION_SIZE_PERCENT = 5  # Размер открываемой позиции в % от баланса
 STEP = 500  # Шаг сетки (TP) в долларах для усреднения
 AGGR=0.5  # Коэффициент агрессивности торговли (0.1 - 1.0)

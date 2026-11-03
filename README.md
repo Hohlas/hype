@@ -1,27 +1,31 @@
-# Hyperliquid Bot
+# Hyperliquid Bot — GridRB 80/20
 
-Автоматизированный торговый бот для spot торговли на децентрализованной платформе Hyperliquid.
+Спотовый бот для Hyperliquid: держит целевой вес BTC 80 % и торгует сеткой
+(`GridRB`) вокруг него. Только спот, long-only, без плеча, шортов и стоп-лоссов.
+Точные правила — `docs/GridRB_spec.md`, устройство — `docs/project_description.md`.
 
-##  🚀 Особенности
+## 🚀 Особенности
 
-- **Spot торговля** с усреднением позиций
-- **Web3 интеграция** - работа с кошельками MetaMask/Trust Wallet
-- **Автоматические TP ордера** для каждой позиции
-- **Telegram уведомления** о сделках и ошибках
-- **Пирамидинг** при движении цены в прибыльном направлении
-- **Ограничение частоты логов** для уменьшения спама
+- **GridRB 80/20**: лестница продаж при перевесе BTC, лестница покупок при
+  недовесе, микро-сетка внутри полосы.
+- **Один маркет за жизнь стратегии** — бутстрап до целевого веса при пустой
+  позиции; дальше только maker-лимитки.
+- **Состояние — с биржи**: после рестарта снимаются старые ордера и лестницы
+  строятся от текущей цены; отдельной персистентности нет.
+- **Два режима запуска**: бесконечный цикл на VPS/локально и ограниченный вотч
+  в GitHub Actions.
+- **Telegram-уведомления** о старте и ошибках.
 
 ## 📋 Требования
 
 - Python 3.8+
-- Web3 кошелек (MetaMask, Trust Wallet)
-- Приватный ключ кошелька
-- Telegram Bot Token
-- Локальное состояние в JSON (`databases/`) и CSV (`hype_stat.csv`)
+- Кошелёк Hyperliquid (адрес + приватный ключ или API Wallet)
+- Telegram Bot Token (опционально)
+- `input_data/wallets.txt` или `WALLETS_DATA` в CI
 
 ## 🛠 Установка
 
-1. **Клонируйте репозиторий :**
+1. **Клонируйте репозиторий:**
 ```bash
 git clone <repository-url>
 cd hype
@@ -32,122 +36,136 @@ cd hype
 python3 -m venv venv
 ```
 Окружение обязательно: на Debian/Ubuntu системный `pip` заблокирован (PEP 668,
-ошибка `externally-managed-environment`), а установка пакетов в системный Python
-ломает зависимости самой ОС. Каталог `venv/` уже в `.gitignore`.
+`externally-managed-environment`). Каталог `venv/` в `.gitignore`.
 
-Если `python3 -m venv` падает с `ensurepip is not available`, поставьте пакет
+Если `python3 -m venv` падает с `ensurepip is not available`, поставьте
 `python3-venv` (например, `sudo apt install python3.14-venv`).
 
 3. **Установите зависимости:**
 ```bash
 ./venv/bin/python -m pip install -r requirements.txt
 ```
-Дальше всегда используйте интерпретатор окружения (`./venv/bin/python ...`).
-Вызов `pip install ...` без префикса снова попадёт в системный Python.
+Дальше используйте интерпретатор окружения (`./venv/bin/python ...`).
 
 4. **Настройте конфигурацию:**
 ```bash
 cp settings.py.example settings.py
 cp input_data/wallets.txt.example input_data/wallets.txt
 cp input_data/tg_bot_tokens.txt.example input_data/tg_bot_tokens.txt
-# Отредактируйте созданные файлы своими данными
+# Отредактируйте созданные файлы
 ```
 
 ## ⚙️ Настройка
 
-### 1. Настройка кошелька
+### 1. Кошелёк
 
-Кошельки задаются НЕ в `settings.py`, а в файле `input_data/wallets.txt`
-(формат строки: `label|wallet_address|private_key|proxy`, прокси опционально).
-При первом запуске режим `(Re)Create Database` собирает из него
-зашифрованную `databases/modules.json`. Адрес может быть основным кошельком,
-а ключ — ключом API Wallet (agent-режим): бот сам определяет это по несовпадению.
+Кошельки задаются в `input_data/wallets.txt`
+(`label|wallet_address|private_key|proxy`, прокси опционально). Затем создайте
+зашифрованную базу:
+
+```bash
+./venv/bin/python main.py --init-db
+```
+
+Команда интерактивно спросит пароль и соберёт `databases/modules.json`.
+В GitHub Actions база не нужна: кошельки приходят из `WALLETS_DATA`.
 
 Подпись ордеров — локальная (`eth-account`, EIP-712), внешний RPC не нужен.
 
-### 2. Настройка Telegram
+### 2. Telegram
 
-Токены читаются НЕ из `settings.py`, а из `input_data/tg_bot_tokens.txt`
-(формат `KEY = 'value'`, ключи: `TG_BOT_TOKEN`, `PROFIT_BOT_TOKEN`, `TG_USER_ID = [...]`).
+Токены читаются из `input_data/tg_bot_tokens.txt`
+(`KEY = 'value'`: `TG_BOT_TOKEN`, `PROFIT_BOT_TOKEN`, `TG_USER_ID = [...]`).
+В CI — из одноимённых Secrets.
 
-### 3. Настройка торговли
+### 3. Торговля
 
 ```python
-# settings.py (фактические ключи)
-SPOT_TOKEN = "BTC"          # спот-токен
-POSITION_SIZE_PERCENT = 5   # размер входа в % от баланса
-STEP = 200                  # шаг сетки / дистанция TP в долларах
-AGGR = 0.5                  # агрессивность (0.1 - 1.0)
+# settings.py (активные ключи GridRB)
+SPOT_TOKEN = "BTC"
+GRIDRB_F0 = 0.80            # целевая доля BTC
+GRIDRB_BAND = 0.04          # полоса бездействия ±4 п.п.
+GRIDRB_DELTA = 0.004        # шаг лестниц и микро-сетки, 0.4%
+GRIDRB_LEVELS = 5           # уровней в лестнице
+GRIDRB_MICRO_LOT = 0.02     # лот микро-сетки, 2% капитала
+GRIDRB_MICRO_MAX = 3        # максимум микро-ордеров
+GRIDRB_MIN_NOTIONAL = 10.0  # минимальный ордер, USDC
+GRIDRB_POLL_INTERVAL = 60   # пауза между итерациями, сек
+GRIDRB_MARKET_SLIP = 0.01   # буфер маркет-бутстрапа, 1%
+GRIDRB_DRY_RUN = False      # True — только логировать, не торговать
 THREADS = 3                 # параллельных аккаунтов
-LOG_LEVEL = "DEBUG"         # уровень логов
-LOG_FILE = "hyperliquid_bot.log"
 ```
-
-## 🎯 Поддерживаемые режимы
-
-1. **Averaging Market** - Spot торговля с усреднением
-2. **Cancel Orders** - Отмена всех активных ордеров
-3. **Parse** - Парсинг данных аккаунта
 
 ## 🚀 Запуск
 
+**VPS / локально — бесконечный цикл:**
 ```bash
-source venv/bin/activate    # либо сразу ./venv/bin/python main.py
-python main.py
+./venv/bin/python main.py
+# остановка Ctrl+C
 ```
 
-Выберите режим торговли из меню и следуйте инструкциям.
+**Один проход (диагностика):**
+```bash
+./venv/bin/python main.py --once
+```
+
+**GitHub Actions — ограниченный вотч:**
+```bash
+python main.py --watch-seconds 19800 --poll-interval 60
+```
+Workflow `.github/workflows/bot.yml` запускается вручную (`workflow_dispatch`),
+автозапуск по расписанию отключён.
+
+Перед боевым запуском рекомендуется `GRIDRB_DRY_RUN = True`: бот будет только
+писать в лог, какие ордера поставил бы.
 
 ## 📊 Мониторинг
 
-Бот отправляет уведомления в Telegram о:
-- Открытии новых позиций
-- Срабатывании Take Profit ордеров
-- Критических ошибках
-- Изменении баланса
+Telegram-уведомления: старт GridRB, ошибки аккаунта. Подробные действия (отмены,
+постановки, бутстрап) — в `hyperliquid_bot.log`.
 
 ## ⚠️ Безопасность
 
-- **Никогда не делитесь приватным ключом**
-- **Используйте отдельный кошелек для торговли**
-- **Начните с небольших сумм для тестирования**
-- **Регулярно проверяйте логи на ошибки**
+- **Никогда не делитесь приватным ключом.**
+- Используйте отдельный кошелёк и начните с малой суммы.
+- `GRIDRB_DRY_RUN = True` для первой проверки.
+- Не запускайте два процесса на одном кошельке: локально защищает
+  `databases/gridrb.lock`, в CI — `concurrency`.
+- `input_data/*`, `databases/` и `settings.py` не коммитить.
 
 ## 🔧 Структура проекта
 
 ```
 hype/
-├── main.py                 # Основной файл запуска
-├── settings.py             # Конфигурация
-├── requirements.txt        # Зависимости
+├── main.py                       # Точка входа: GridRB, VPS + GitHub Actions
+├── settings.py                   # Конфигурация
+├── requirements.txt
 ├── modules/
-│   ├── hyperliquid_browser.py  # Клиент для Hyperliquid API
-│   ├── hyperliquid_client.py   # Основной клиент
-│   ├── delayed_orders_strategy.py  # Основная стратегия торговли
-│   ├── cancel_orders.py         # Отмена ордеров
-│   ├── parse_mode.py            # Диагностика аккаунта
-│   ├── database.py              # Работа с БД
-│   ├── retry.py                 # Повторные попытки
-│   └── utils/                   # Утилиты
-└── input_data/             # Данные для ввода
+│   ├── gridrb_strategy.py        # Активная стратегия GridRB 80/20
+│   ├── hyperliquid_browser.py    # HTTP-клиент Hyperliquid API
+│   ├── hyperliquid_client.py     # Оркестратор аккаунта
+│   ├── database.py               # Кошельки (JSON/шифр)
+│   ├── retry.py                  # Повторы и типы ошибок
+│   └── utils/                    # Telegram, задержки, утилиты
+├── tests/backtest/               # Бэктест и исследование стратегий
+├── input_data/                   # Секреты (*.txt не коммитить)
+├── databases/                    # Состояние (не коммитить)
+└── docs/                         # Описание алгоритма и спецификации
 ```
+
+Старые модули (`delayed_orders_strategy.py`, `duty*.py`, `beacon.py`,
+`cancel_orders.py`, `parse_mode.py`) оставлены как архив и рантаймом не
+вызываются.
 
 ## 📝 Логирование
 
-Бот использует loguru для логирования. Логи сохраняются в файл `hyperliquid_bot.log` с ротацией каждый день.
-
-## 🤝 Поддержка
-
-При возникновении проблем:
-1. Проверьте логи на ошибки
-2. Убедитесь в правильности настроек
-3. Проверьте баланс кошелька
-4. Убедитесь в доступности Hyperliquid API
+`loguru`, файл `hyperliquid_bot.log` с ротацией раз в день.
 
 ## 📄 Лицензия
 
-Этот проект предназначен для образовательных целей. Используйте на свой страх и риск.
+Проект предназначен для образовательных целей. Используйте на свой страх и риск.
 
 ## ⚠️ Отказ от ответственности
 
-Торговля криптовалютами связана с высокими рисками. Автор не несет ответственности за возможные убытки. Всегда тестируйте бота на небольших суммах перед полноценным использованием.
+Торговля криптовалютами связана с высокими рисками. Автор не несёт
+ответственности за возможные убытки. Тестируйте на небольших суммах.

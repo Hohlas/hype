@@ -1,21 +1,38 @@
-from os import name as os_name
-from loguru import logger
-from time import sleep
+"""Точка входа hype: GridRB 80/20 на споте Hyperliquid.
+
+Один и тот же файл работает в двух средах:
+- VPS / локально — бесконечный цикл (остановка Ctrl+C);
+- GitHub Actions — ограниченный вотч (`--watch-seconds`, `--poll-interval`).
+
+Старый алгоритм (сетка с отложенными ордерами), меню режимов и протокол
+дежурства из рантайма убраны. Логика стратегии — modules/gridrb_strategy.py.
+"""
+from __future__ import annotations
+
+import argparse
 import asyncio
+import os
 import sys
+from os import name as os_name
 
-from modules.retry import DataBaseError
-from modules.utils import async_sleep, send_warning_notification
-from modules.utils.modes import choose_mode
-from modules import *
+from loguru import logger
+
 import settings
+from modules.ci_loader import RUNTIME_GITHUB_ACTIONS, get_runtime_mode
+from modules.database import DataBase
+from modules.gridrb_strategy import run_gridrb
+from modules.hyperliquid_browser import HyperliquidBrowser
+from modules.hyperliquid_client import HyperliquidClient
+from modules.utils import TgReport, send_warning_notification
 
-# Настройка упрощенного формата логов
-logger.remove()  # Удаляем стандартный обработчик
+# ---------------------------------------------------------------------------
+# Логирование
+# ---------------------------------------------------------------------------
+logger.remove()
 logger.add(
     sys.stdout,
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
-    level=settings.LOG_LEVEL
+    level=settings.LOG_LEVEL,
 )
 logger.add(
     settings.LOG_FILE,
@@ -26,331 +43,200 @@ logger.add(
     encoding="utf-8",
 )
 
+address_locks: dict[str, asyncio.Lock] = {}
 
-def initialize_account(module_data: dict, group_data: dict = None):
+
+def initialize_account(module_data: dict, db: DataBase) -> HyperliquidClient:
     browser = HyperliquidBrowser(
-        proxy=module_data["proxy"],
+        proxy=module_data.get("proxy"),
         wallet_address=module_data["wallet_address"],
         private_key=module_data["private_key"],
         label=module_data["label"],
         db=db,
     )
-    hyperliquid_client = HyperliquidClient(
+    return HyperliquidClient(
         browser=browser,
         wallet_address=module_data["wallet_address"],
         private_key=module_data["private_key"],
         label=module_data["label"],
-        proxy=module_data["proxy"],
+        proxy=module_data.get("proxy"),
         db=db,
-        group_data=group_data,
     )
 
-    return hyperliquid_client
 
-
-async def run_modules(mode: int, module_data: dict, sem: asyncio.Semaphore):
-    # Инициализируем блокировку для адреса кошелька
+async def run_account(module_data: dict, db: DataBase,
+                      watch_seconds: float | None, poll_interval: float,
+                      max_iterations: int = 0,
+                      sem: asyncio.Semaphore | None = None) -> None:
     wallet_address = module_data["wallet_address"]
-    if wallet_address not in address_locks:
-        address_locks[wallet_address] = asyncio.Lock()
-    
-    async with address_locks[wallet_address]:
-        async with sem:
-            hyperliquid_client = None
+    lock = address_locks.setdefault(wallet_address, asyncio.Lock())
+
+    async with lock:
+        client = None
+        acquired = False
+        try:
+            if sem is not None:
+                await sem.acquire()
+                acquired = True
+            client = initialize_account(module_data, db)
+            logger.opt(colors=True).info(
+                f'[•] <white>{client.label}</white> | starting GridRB')
+            token = getattr(settings, "SPOT_TOKEN", "BTC") or "BTC"
+            await run_gridrb(
+                client, token,
+                max_iterations=max_iterations,
+                poll_interval=poll_interval,
+                watch_seconds=watch_seconds,
+            )
+        except Exception as err:
+            logger.error(f'[-] {module_data.get("label", "?")} | error: {err}')
             try:
-                logger.info(f'[•] Starting run_modules for {module_data["label"]}')
-                hyperliquid_client = initialize_account(module_data)
-                logger.opt(colors=True).info(f'[•] <white>{hyperliquid_client.label}</white> | Starting trading...')
-                module_data["module_info"]["status"] = await hyperliquid_client.run_mode(mode=mode)
-
-            except Exception as err:
-                if hyperliquid_client:
-                    logger.error(f'[-] {hyperliquid_client.label} | Account Error: {err}')
-
-                    # Отправляем уведомление об ошибке аккаунта
-                    await send_warning_notification(
-                        error_type="Account Error",
-                        error_message=str(err),
-                        account_label=hyperliquid_client.label
-                    )
-                else:
-                    logger.error(f'[-] {module_data["label"]} | Global error: {err}')
-                    
-                    # Отправляем уведомление о глобальной ошибке
-                    await send_warning_notification(
-                        error_type="Global Error",
-                        error_message=str(err),
-                        account_label=module_data.get("label", "Unknown")
-                    )
-
-            finally:
-                # hyperliquid_client is None, если initialize_account упал
-                # (битый ключ/прокси): атрибутов клиента нет — только очередь.
-                if hyperliquid_client:
-                    await hyperliquid_client.browser.close_sessions()
-
-                if mode in [0, 1, 2]:
-                    await db.remove_module(module_data=module_data)
-                else:
-                    await db.remove_account(module_data=module_data)
-
-                await async_sleep(5)
-
-
-async def get_account_startup_info(module_data: dict):
-    """
-    Получает информацию об аккаунте для стартового сообщения
-    """
-    client = None
-    try:
-        client = initialize_account(module_data)
-        await client.browser.start_session()
-        
-        # Получаем данные параллельно
-        all_balances, orders, btc_price = await asyncio.gather(
-            client.browser.get_all_balances(),
-            client.browser.get_account_orders(),
-            client.browser.get_token_price("BTC")
-        )
-        
-        # Извлекаем балансы
-        usdc_balance = all_balances.get("USDC", 0.0)
-        btc_balance = all_balances.get("UBTC", 0.0) or all_balances.get("BTC", 0.0)
-        
-        # Рассчитываем Total Value
-        total_value = usdc_balance + (btc_balance * float(btc_price))
-        
-        # Рассчитываем Limit Profit (сумма Order Value всех лимитных ордеров на продажу)
-        limit_profit = 0.0
-        for order in orders:
-            side = order.get("side", "")
-            is_buy = order.get("isBuy", True)
-            limit_price = float(order.get("limitPx", 0))
-            
-            # Ордер на продажу: side in ["SELL", "S", "A"] или isBuy == False
-            is_sell = side in ["SELL", "S", "A"] or (not is_buy)
-            
-            # Проверяем, что это лимитный ордер (есть limitPx > 0)
-            is_limit = limit_price > 0
-            
-            if is_sell and is_limit:
-                size = float(order.get("sz", 0))
-                if size > 0:
-                    limit_profit += size * limit_price
-        
-        return {
-            "label": module_data["label"],
-            "usdc_balance": usdc_balance,
-            "btc_balance": btc_balance,
-            "total_value": total_value,
-            "limit_profit": limit_profit
-        }
-    except Exception as e:
-        logger.error(f"Failed to get startup info for {module_data.get('label', 'Unknown')}: {e}")
-        return None
-    finally:
-        # Сессию закрываем и при исключении (иначе утечка aiohttp-сессии)
-        if client is not None:
-            try:
-                await client.browser.close_sessions()
+                await send_warning_notification(
+                    error_type="GridRB Error",
+                    error_message=str(err),
+                    account_label=module_data.get("label", "Unknown"),
+                )
             except Exception:
                 pass
+        finally:
+            if client is not None:
+                try:
+                    await client.browser.close_sessions()
+                except Exception:
+                    pass
+            if acquired and sem is not None:
+                sem.release()
 
 
-async def runner(mode: int):
-    sem = asyncio.Semaphore(settings.THREADS)
+async def runner(watch_seconds: float | None, poll_interval: float,
+                 max_iterations: int = 0) -> str:
+    db = DataBase()
+    all_modules = db.get_all_modules(unique_wallets=True)
 
-    all_modules = db.get_all_modules(unique_wallets=mode in [4, 5])
+    if all_modules == "No more accounts left":
+        logger.warning("Нет аккаунтов: проверьте WALLETS_DATA (CI) или "
+                       "input_data/wallets.txt / databases/modules.json")
+        return "Ended"
+    if not all_modules:
+        logger.warning("Список аккаунтов пуст")
+        return "Ended"
 
-    if all_modules == 'No more accounts left':
-        logger.warning("No accounts found in wallets.txt or wallet_loader returned empty list")
-        logger.info("Please check input_data/wallets.txt file - it should contain wallet data in format: label|wallet_address|private_key|proxy")
-    elif not all_modules:
-        logger.warning("get_all_modules returned empty list or None")
-    else:
-        # Подсчитываем уникальные аккаунты
-        unique_accounts = list(set([m['label'] for m in all_modules]))
-        logger.opt(colors=True).info(
-            f'[•] Loaded <white>{len(unique_accounts)}</white> account(s): '
-            f'<white>{", ".join(unique_accounts)}</white> | '
-            f'Total modules: <white>{len(all_modules)}</white>'
-        )
-
-        # Получаем информацию о стартовом состоянии аккаунтов
-        account_infos = []
-        for module_data in all_modules:
-            info = await get_account_startup_info(module_data)
-            if info:
-                account_infos.append(info)
-
-        # Формируем стартовое сообщение
-        message_lines = [f"🚀 <b>Hyperliquid Bot Started</b>, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
-        log_lines = [f"🚀 Hyperliquid Bot Started, v.{settings.version}", f"Risk: {settings.POSITION_SIZE_PERCENT}%, STEP: ${settings.STEP}"]
-
-        for info in account_infos:
-            account_line = f"{info['label']}: {info['usdc_balance']:.0f}USDC + {info['btc_balance']:.2f}BTC = ${info['total_value']:.0f}, SellValue = ${info['limit_profit']:.0f}"
-            message_lines.append(account_line)
-            log_lines.append(account_line)
-
-        # Отправляем сообщение в Telegram
-        await TgReport().send_log(logs="\n".join(message_lines))
-
-        # Выводим в логах
-        for line in log_lines:
-            logger.info(line)
-
-        # return_exceptions: один упавший аккаунт не роняет остальные
-        results = await asyncio.gather(*[
-            run_modules(module_data=module_data, mode=mode, sem=sem)
-            for module_data in all_modules
-        ], return_exceptions=True)
-        for module_data, result in zip(all_modules, results):
-            if isinstance(result, Exception):
-                logger.error(f'[-] {module_data.get("label", "?")} | Unhandled error: {result!r}')
-
-    logger.success(f'All accounts done.')
-    return 'Ended'
-
-
-def run_ci() -> int:
-    """Неинтерактивный запуск для GitHub Actions (§9.п1).
-
-    Режим — из BOT_MODE, ни одного input(). Возвращает код выхода:
-    0 — отработал, 1 — быстрый отказ (секреты/база), 130 — прерывание.
-    """
-    from modules.ci_loader import RUNTIME_GITHUB_ACTIONS  # noqa: F401 (сигнал читателю)
-    from modules.utils.modes import get_mode_from_env
+    labels = list(dict.fromkeys(m["label"] for m in all_modules))
+    logger.opt(colors=True).info(
+        f'[•] аккаунтов: <white>{len(labels)}</white> '
+        f'({", ".join(labels)}) | GridRB '
+        f'{getattr(settings, "GRIDRB_F0", 0.80):.2f}/'
+        f'{1 - getattr(settings, "GRIDRB_F0", 0.80):.2f}')
 
     try:
-        mode = get_mode_from_env()
-    except ValueError as e:
-        logger.error(f'[-] CI | {e}')
-        return 2
-
-    # Сбрасываем stop-флаг стратегии при запуске (прошлый запуск мог
-    # завершиться по Ctrl+C с выставленным флагом)
-    try:
-        from modules.delayed_orders_strategy import set_bot_stop_flag
-        set_bot_stop_flag(False)
-        logger.info('[•] Bot stop flag reset on startup')
+        mode = "watch" if watch_seconds else ("once" if max_iterations else "infinite")
+        await TgReport().send_log(
+            f"🚀 <b>hype GridRB</b> v.{settings.version}\n"
+            f"accounts: {len(labels)} | mode: {mode} | "
+            f"poll: {poll_interval:.0f}s")
     except Exception as e:
-        logger.warning(f'Failed to reset stop flag: {e}')
+        logger.debug(f"startup TG skipped: {e}")
 
-    mode_names = {
-        0: "Averaging Market",
-        4: "Cancel Orders",
-        5: "Parse"
-    }
-    mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
-    logger.success(f'[•] Bot started in CI mode: {mode_name}')
+    sem = asyncio.Semaphore(max(1, int(getattr(settings, "THREADS", 1))))
+    await asyncio.gather(*[
+        run_account(m, db, watch_seconds, poll_interval, max_iterations, sem)
+        for m in all_modules
+    ])
+    logger.success("All accounts done.")
+    return "Ended"
 
-    global db
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "")
     try:
-        db = DataBase()
-        result = asyncio.run(runner(mode=mode.soft_id))
-    except (DataBaseError, RuntimeError) as e:
-        logger.error(f'[-] CI | {e}')
-        return 1
-    except KeyboardInterrupt:
-        logger.info('[•] CI | Interrupted, setting stop flag')
+        return int(raw) if raw and raw.strip().isdigit() else default
+    except Exception:
+        return default
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="hype — GridRB 80/20")
+    parser.add_argument("--watch-seconds", type=float, default=None,
+                        help="сколько секунд работать (CI); без флага — бесконечно")
+    parser.add_argument("--poll-interval", type=float, default=None,
+                        help="пауза между итерациями, сек")
+    parser.add_argument("--once", action="store_true",
+                        help="один проход и выход")
+    parser.add_argument("--init-db", action="store_true",
+                        help="создать/пересоздать databases/modules.json "
+                             "из input_data/wallets.txt (интерактивный пароль)")
+    return parser.parse_args(argv)
+
+
+def _acquire_instance_lock():
+    """Не даёт двум GridRB на одном хосте одновременно управлять счётом."""
+    try:
+        import fcntl
+    except ImportError:  # Windows: локальный запуск без блокировки
+        return None
+    os.makedirs("databases", exist_ok=True)
+    path = os.path.join("databases", "gridrb.lock")
+    fh = open(path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise RuntimeError(
+            "другой экземпляр GridRB уже работает (databases/gridrb.lock)")
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    runtime = get_runtime_mode()
+
+    if args.init_db:
         try:
-            from modules.delayed_orders_strategy import set_bot_stop_flag
-            set_bot_stop_flag(True)
+            DataBase().create_modules(mode=0)
+            return 0
         except Exception as e:
-            logger.error(f'Failed to set stop flag: {e}')
+            logger.error(f"[-] init-db | {e}")
+            return 1
+
+    try:
+        _lock = _acquire_instance_lock()  # noqa: F841 — держим до выхода
+    except RuntimeError as e:
+        logger.error(f"[-] {e}")
+        return 1
+
+    poll = args.poll_interval
+    if poll is None:
+        poll = float(_env_int("BOT_POLL_INTERVAL",
+                              int(getattr(settings, "GRIDRB_POLL_INTERVAL", 60))))
+    poll = max(1.0, poll)
+
+    watch = args.watch_seconds
+    if watch is None and runtime == RUNTIME_GITHUB_ACTIONS:
+        watch = float(_env_int("WATCH_SECONDS", 19800))
+
+    max_iterations = 1 if args.once else 0
+    if max_iterations:
+        watch = None
+
+    logger.success(
+        f'[•] hype GridRB | runtime={runtime} | '
+        f'watch={watch if watch else "∞"}s | poll={poll:.0f}s')
+
+    try:
+        result = asyncio.run(runner(watch, poll, max_iterations))
+    except KeyboardInterrupt:
+        logger.info("[•] Interrupted")
         return 130
     except Exception as e:
-        logger.error(f'[-] CI Global | {e}')
+        logger.error(f"[-] Global | {e}")
         return 1
 
-    logger.info('[•] Soft | Closed')
-    return 0 if result == 'Ended' else 1
+    return 0 if result == "Ended" else 1
 
 
-def run_vps_interactive() -> None:
-    """Прежний интерактивный цикл (VPS/локально): меню + паузы input()."""
-    manual_stop = False
-
-    # Сбрасываем stop-флаг стратегии при запуске (прошлый запуск мог
-    # завершиться по Ctrl+C с выставленным флагом)
-    try:
-        from modules.delayed_orders_strategy import set_bot_stop_flag
-        set_bot_stop_flag(False)
-        logger.info('[•] Bot stop flag reset on startup')
-    except Exception as e:
-        logger.warning(f'Failed to reset stop flag: {e}')
-
-    try:
-        global db
-        db = DataBase()
-
-        while True:
-            mode = choose_mode()
-
-            match mode.type:
-                case "database":
-                    db.create_modules(mode=mode.soft_id)
-
-                case "module":
-                    # Отправляем уведомление о старте
-                    mode_names = {
-                        0: "Averaging Market",
-                        4: "Cancel Orders",
-                        5: "Parse"
-                    }
-                    mode_name = mode_names.get(mode.soft_id, f"Mode {mode.soft_id}")
-
-                    logger.success(f'[•] Bot started in mode: {mode_name}')
-
-                    if asyncio.run(runner(mode=mode.soft_id)) == 'Ended': break
-                    print('')
-
-                case "exit":
-                    # Выход из программы
-                    logger.info(f'[•] Bot | Exiting...')
-                    break
-
-                case _:
-                    # Неизвестный режим
-                    logger.warning(f'[•] Unknown mode type: {mode.type}')
-                    continue
-
-        sleep(0.1)
-        input('\n > Exit\n')
-
-    except DataBaseError as e:
-        logger.error(f'[-] Database | {e}')
-        input('\n > Exit\n')
-
-    except KeyboardInterrupt:
-        logger.info(f'[•] Soft | Closed')
-        manual_stop = True
-
-        # Флаг остановки: циклы стратегии завершатся сами, фантомных
-        # уведомлений/ордеров от умирающего процесса не будет
-        try:
-            from modules.delayed_orders_strategy import set_bot_stop_flag
-            set_bot_stop_flag(True)
-            logger.info('[•] Stop flag set to prevent phantom processes')
-        except Exception as e:
-            logger.error(f'Failed to set stop flag: {e}')
-
-    except Exception as e:
-        logger.error(f'[-] Global | {e}')
-        input('\n > Exit\n')
-
-    finally:
-        if not manual_stop:
-            logger.info(f'[•] Soft | Closed')
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     if os_name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-    from modules.ci_loader import get_runtime_mode, RUNTIME_GITHUB_ACTIONS
-
-    if get_runtime_mode() == RUNTIME_GITHUB_ACTIONS:
-        raise SystemExit(run_ci())
-    else:
-        run_vps_interactive()
+    raise SystemExit(main())

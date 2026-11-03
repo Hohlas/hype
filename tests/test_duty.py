@@ -217,16 +217,19 @@ def test_timeout_budget():
     assert timeout - (watch_min + tail_min + setup_min) >= 5
 
 
-def test_no_concurrency_cancel():
+def test_concurrency_does_not_cancel():
     text = _workflow_text()
-    # Ключа concurrency быть не должно (комментарий-напоминание — можно).
-    assert re.search(r"(?m)^\s*concurrency\s*:", text) is None  # §0.п5
-    assert "cancel-in-progress" not in text
+    # Два GridRB на один счёт одновременно опасны: concurrency есть,
+    # но новый запуск ждёт, а не убивает текущий.
+    assert re.search(r"(?m)^\s*concurrency\s*:", text)
+    assert "cancel-in-progress: false" in text
 
 
 def test_workflow_observability_minimum():
     text = _workflow_text()
-    assert "7,19,33,46,58" in text  # явный список минут (§2.1)
-    assert "PYTHONUNBUFFERED" in text  # иначе журнал отстаёт (§3)
-    assert "add-mask" in text  # секреты не светят в журнал (§0.п6)
-    assert text.count("if: always()") >= 2  # Persist + вложение журналов (§3, §6)
+    # Рантайм — GridRB через main.py, без старого дежурства.
+    assert "python main.py" in text
+    assert "modules.duty" not in text
+    assert "PYTHONUNBUFFERED" in text  # иначе журнал отстаёт
+    assert "add-mask" in text  # секреты не светят в журнал
+    assert text.count("if: always()") >= 1  # вложение журналов
