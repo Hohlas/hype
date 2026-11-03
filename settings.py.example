@@ -16,6 +16,8 @@ GRIDRB_MIN_NOTIONAL = 10.0  # минимальный нотионал ордер
 GRIDRB_POLL_INTERVAL = 60   # пауза между итерациями, сек
 GRIDRB_MARKET_SLIP = 0.01   # буфер цены для маркет-бутстрапа (1%)
 GRIDRB_DRY_RUN = False      # True — только логировать действия, не торговать
+GRIDRB_REARM_EPS = 0.002    # переставлять лестницу только при уходе цены на 0.2%
+GRIDRB_REARM_COOLDOWN = 300 # и не чаще раза в 5 минут
 
 # CSV и Telegram
 GRIDRB_EVENTS_CSV = "gridrb_events.csv"   # журнал событий (ордера, исполнения)

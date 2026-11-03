@@ -45,6 +45,10 @@ class GridRBConfig:
     micro_lot: float = 0.02
     micro_max: int = 3
     min_notional: float = 10.0
+    # live-гистерезис перестановки лестниц: без него минутный шум цены
+    # переставляет лестницу каждый тик (в бэктесте шаг был часовой).
+    rearm_eps: float = 0.002      # цена выше якоря минимум на 0.2%
+    rearm_cooldown: float = 300.0  # и не чаще раза в 5 минут
 
     @classmethod
     def from_settings(cls) -> "GridRBConfig":
@@ -56,6 +60,9 @@ class GridRBConfig:
             micro_lot=float(getattr(settings, "GRIDRB_MICRO_LOT", 0.02)),
             micro_max=int(getattr(settings, "GRIDRB_MICRO_MAX", 3)),
             min_notional=float(getattr(settings, "GRIDRB_MIN_NOTIONAL", 10.0)),
+            rearm_eps=float(getattr(settings, "GRIDRB_REARM_EPS", 0.002)),
+            rearm_cooldown=float(
+                getattr(settings, "GRIDRB_REARM_COOLDOWN", 300.0)),
         )
 
 
@@ -100,6 +107,16 @@ class GridRBEngine:
         self.defc_orders: list[TrackedOrder] = []
         self.micro_buys: list[TrackedOrder] = []
         self.micro_sells: list[TrackedOrder] = []
+        self.last_trim_rearm = 0.0
+        self.last_defc_rearm = 0.0
+
+    def _need_rearm(self, anchor: float | None, alive: bool,
+                    price: float, last_ts: float, now: float) -> bool:
+        if anchor is None or not alive:
+            return True
+        moved = price > anchor * (1 + self.cfg.rearm_eps)
+        cooled = (now - last_ts) >= self.cfg.rearm_cooldown
+        return moved and cooled
 
     # ---- округления ----
     def _qty(self, qty: float) -> float:
@@ -205,13 +222,15 @@ class GridRBEngine:
         w = btc * price / V
         free_usdc = max(0.0, usdc - self._reserved_buy())
         spent_usd = 0.0
+        now = time.monotonic()
 
         # ---------- TRIM ----------
         alive = bool(self.trim_orders)
         if w > self.cfg.f0 + self.cfg.band:
             q_tot = min((w - self.cfg.f0) * V / price,
                         max(0.0, btc - self._reserved_sell()))
-            if self.trim_anchor is None or price > self.trim_anchor or not alive:
+            if self._need_rearm(self.trim_anchor, alive, price,
+                                self.last_trim_rearm, now):
                 for o in self.trim_orders:
                     actions.append(Action("cancel", oid=o.oid, order=o))
                 self.trim_orders = []
@@ -226,6 +245,7 @@ class GridRBEngine:
                             actions.append(Action("place", side="SELL", price=px,
                                                   qty=qty, tag="trim", order=o))
                     self.trim_anchor = price
+                    self.last_trim_rearm = now
                 else:
                     self.trim_anchor = None
         else:
@@ -238,7 +258,8 @@ class GridRBEngine:
         alive = bool(self.defc_orders)
         if w < self.cfg.f0 - self.cfg.band:
             budget = min((self.cfg.f0 - w) * V, 0.999 * usdc)
-            if self.defc_anchor is None or price > self.defc_anchor or not alive:
+            if self._need_rearm(self.defc_anchor, alive, price,
+                                self.last_defc_rearm, now):
                 for o in self.defc_orders:
                     actions.append(Action("cancel", oid=o.oid, order=o))
                 self.defc_orders = []
@@ -255,6 +276,7 @@ class GridRBEngine:
                                                   qty=qty, tag="defc", order=o))
                             spent_usd += qty * px
                     self.defc_anchor = price
+                    self.last_defc_rearm = now
                 else:
                     self.defc_anchor = None
         else:

@@ -93,6 +93,8 @@ GRIDRB_MIN_NOTIONAL = 10.0  # минимальный ордер, USDC
 GRIDRB_POLL_INTERVAL = 60   # пауза между итерациями, сек
 GRIDRB_MARKET_SLIP = 0.01   # буфер маркет-бутстрапа, 1%
 GRIDRB_DRY_RUN = False      # True — только логировать, не торговать
+GRIDRB_REARM_EPS = 0.002    # переставлять лестницу при уходе цены на 0.2%
+GRIDRB_REARM_COOLDOWN = 300 # и не чаще раза в 5 минут
 THREADS = 3                 # параллельных аккаунтов
 ```
 

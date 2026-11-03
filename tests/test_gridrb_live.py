@@ -124,6 +124,32 @@ def test_frozen_trim_ladder_is_not_replaced():
     assert not any(a.kind == "cancel" for a in acts2)
 
 
+def test_no_rearm_on_tiny_move_and_cooldown():
+    e = make_engine()
+    e.first = False
+    acts = e.plan(price=100_000, usdc=1_000, btc=0.001, open_oids=set())
+    defc = [a for a in acts if a.kind == "place" and a.tag == "defc"]
+    assert len(defc) == 5
+    for i, a in enumerate(defc):
+        e.register(a, 200 + i)
+    oids = {200 + i for i in range(len(defc))}
+
+    # +0.1% выше якоря — порог 0.2% не пройден, перестановки нет
+    acts2 = e.plan(price=100_100, usdc=1_000, btc=0.001, open_oids=oids)
+    assert not any(a.kind == "cancel" for a in acts2)
+    assert not any(a.kind == "place" and a.tag == "defc" for a in acts2)
+
+    # +0.3% выше, но cooldown ещё не прошёл
+    acts3 = e.plan(price=100_300, usdc=1_000, btc=0.001, open_oids=oids)
+    assert not any(a.kind == "cancel" for a in acts3)
+
+    # cooldown истёк — лестница переставляется
+    e.last_defc_rearm -= 1_000
+    acts4 = e.plan(price=100_300, usdc=1_000, btc=0.001, open_oids=oids)
+    assert any(a.kind == "cancel" for a in acts4)
+    assert any(a.kind == "place" and a.tag == "defc" for a in acts4)
+
+
 def test_tiny_budget_produces_no_orders():
     e = make_engine(min_notional=10.0)
     e.first = False
