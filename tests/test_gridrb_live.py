@@ -104,6 +104,40 @@ def test_micro_fill_creates_take_profit():
     assert tp_fills[0].profit > 0
 
 
+def test_early_buy_inside_band():
+    e = make_engine(early_lot=0.15)
+    e.first = False
+    # w = 0.78 — внутри раннего окна [0.76, 0.80)
+    acts = e.plan(price=100_000, usdc=1_000, btc=0.03545, open_oids=set())
+    early = [a for a in acts if a.tag == "early"]
+    assert len(early) == 1
+    assert early[0].side == "BUY"
+    assert early[0].price == 99_600.0
+    assert len(e.early_orders) == 1
+
+
+def test_early_not_placed_in_defc_zone():
+    e = make_engine(early_lot=0.15)
+    e.first = False
+    # w = 0.70 — уже зона defc, ранняя докупка не нужна
+    acts = e.plan(price=100_000, usdc=1_000, btc=0.02333, open_oids=set())
+    assert not any(a.tag == "early" for a in acts)
+    assert any(a.tag == "defc" for a in acts)
+
+
+def test_early_fill_creates_no_micro_take():
+    e = make_engine(early_lot=0.15)
+    e.first = False
+    acts = e.plan(price=100_000, usdc=1_000, btc=0.03545, open_oids=set())
+    early = [a for a in acts if a.tag == "early"][0]
+    e.register(early, 55)
+    # ордер исчез из стакана -> исполнен, отдельный тейк на него не ставится
+    acts2 = e.plan(price=100_000, usdc=1_000, btc=0.03545, open_oids=set())
+    fills = [a for a in acts2 if a.kind == "fill" and a.tag == "early"]
+    assert len(fills) == 1
+    assert not any(a.tag == "micro_take" for a in acts2)
+
+
 def test_orphan_order_is_cancelled():
     e = make_engine()
     e.first = False
@@ -177,7 +211,10 @@ def test_event_labels_split_rebalance_and_grid():
                             "price": 100.0, "qty": 0.1})
     grid_tp = event_label({"event": "fill", "tag": "micro_take", "side": "SELL",
                            "price": 100.0, "qty": 0.1})
+    early = event_label({"event": "place", "tag": "early", "side": "BUY",
+                         "price": 100.0, "qty": 0.1})
     assert "Ребаланс" in reb_buy and "Ребаланс" in reb_sell
+    assert "ранняя докупка" in early
     assert "Сетка" in grid_buy and "Сетка" in grid_tp
 
 

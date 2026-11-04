@@ -18,6 +18,7 @@ GRIDRB_MARKET_SLIP = 0.01   # буфер цены для маркет-бутст
 GRIDRB_DRY_RUN = False      # True — только логировать действия, не торговать
 GRIDRB_REARM_EPS = 0.002    # переставлять лестницу только при уходе цены на 0.2%
 GRIDRB_REARM_COOLDOWN = 300 # и не чаще раза в 5 минут
+GRIDRB_EARLY_LOT = 0.15     # ранняя докупка внутри полосы, доля капитала (0=выкл)
 
 # CSV и Telegram
 GRIDRB_EVENTS_CSV = "gridrb_events.csv"   # журнал событий (ордера, исполнения)

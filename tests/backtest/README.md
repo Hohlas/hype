@@ -1,5 +1,18 @@
 # Бэктест спотовых стратегий на истории BTC H1 (2 года)
 
+## 3 года и скользящие окна (2026-11)
+
+Для отчёта по гипотезам и оптимальным значениям:
+
+```bash
+./venv/bin/python tests/backtest/fetch_data_3y.py    # 2023-11 -> 2026-11
+./venv/bin/python tests/backtest/experiments_3y.py  # полное 3-летнее окно
+./venv/bin/python tests/backtest/rolling_3y.py      # 66 окон по 180 дней
+```
+
+Итог: `tests/backtest/REPORT_gridrb_3y.md`, CSV — `results/experiments_3y.csv`,
+`results/rolling_*.csv`.
+
 Каталог содержит код и результаты сравнения трёх стратегий:
 
 | Стратегия | Источник описания | Реализация |

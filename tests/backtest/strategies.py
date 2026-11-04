@@ -23,30 +23,45 @@ from engine import Broker, MIN_NOTIONAL, SLIP
 # ===========================================================================
 
 class GridRB:
-    """GridRB 1-в-1 по docs/GridRB_spec.md §5, §7.
+    """GridRB по docs/GridRB_spec.md §5, §7 с расширениями для экспериментов.
 
-    Параметры по умолчанию — протестированный набор:
-    f0=0.70, band=0.05, delta=0.5%, n=5, micro_lot=2% V, micro_max=3.
+    Базовые параметры: f0, band, delta, n, micro_lot, micro_max.
+    Расширения (по умолчанию выключены = исходный GridRB):
+      - trim_band / defc_band — асимметричные полосы продаж и покупок;
+      - early_lot — маленькая «ранняя» покупка ВНУТРИ полосы (f0-band <= w < f0),
+        размером early_lot*V, до того как вес дойдёт до зоны defc;
+      - dyn_band — динамика покупательной полосы от просадки:
+        defc_band_eff = defc_band + dyn_band * (ATH-P)/ATH.
     """
-
-    name = "GridRB 70/30"
 
     def __init__(self, cash: float, f0: float = 0.70, band: float = 0.05,
                  delta: float = 0.005, n: int = 5, micro_lot: float = 0.02,
-                 micro_max: int = 3, stress: float = 1.0):
+                 micro_max: int = 3, stress: float = 1.0,
+                 trim_band: float | None = None,
+                 defc_band: float | None = None,
+                 early_lot: float = 0.0,
+                 dyn_band: float = 0.0):
         self.b = Broker(cash, stress=stress)
         self.f0 = f0
         self.band = band
+        self.trim_band = band if trim_band is None else trim_band
+        self.defc_band = band if defc_band is None else defc_band
         self.delta = delta
         self.n = n
         self.micro_lot = micro_lot
         self.micro_max = micro_max
+        self.early_lot = early_lot
+        self.dyn_band = dyn_band
 
+        self.name = (f"GridRB {int(round(f0 * 100))}/"
+                     f"{int(round((1 - f0) * 100))}")
         self.first = True
+        self.ath: float | None = None
         self.trim_anchor: float | None = None
         self.defc_anchor: float | None = None
         self.trim_ods: list = []
         self.defc_ods: list = []
+        self.early_ods: list = []
 
     # ---- реакция на исполнения ----
     def on_fill(self, i: int, od, px: float, qty: float) -> None:
@@ -56,6 +71,8 @@ class GridRB:
     # ---- основной шаг ----
     def on_close(self, i: int, bar) -> None:
         c = bar.c
+        self.ath = c if self.ath is None else max(self.ath, c)
+
         if self.first:
             self.b.market_buy(self.f0 * self.b.equity(c), c, i)
             self.first = False
@@ -63,9 +80,15 @@ class GridRB:
         V = self.b.equity(c)
         w = self.b.weight(c)
 
+        # динамика покупательной полосы от просадки
+        dd = (self.ath - c) / self.ath if self.ath > 0 else 0.0
+        defc_band_eff = self.defc_band
+        if self.dyn_band:
+            defc_band_eff = max(0.005, self.defc_band + self.dyn_band * dd)
+
         # ---- TRIM ----
         alive = any(o.alive for o in self.trim_ods)
-        if w > self.f0 + self.band:
+        if w > self.f0 + self.trim_band:
             q_tot = min((w - self.f0) * V / c, self.b.B - self.b.reserved_sell())
             if self.trim_anchor is None or c > self.trim_anchor or not alive:
                 self.b.cancel_all(self.trim_ods)
@@ -91,7 +114,7 @@ class GridRB:
 
         # ---- DEFC ----
         alive = any(o.alive for o in self.defc_ods)
-        if w < self.f0 - self.band:
+        if w < self.f0 - defc_band_eff:
             budget = min((self.f0 - w) * V, 0.999 * self.b.U)
             if self.defc_anchor is None or c > self.defc_anchor or not alive:
                 self.b.cancel_all(self.defc_ods)
@@ -116,12 +139,28 @@ class GridRB:
             self.defc_ods = []
             self.defc_anchor = None
 
+        # ---- EARLY (ранняя докупка внутри полосы) ----
+        alive_early = any(o.alive for o in self.early_ods)
+        in_window = (self.f0 - defc_band_eff) <= w < self.f0
+        if self.early_lot > 0 and in_window:
+            budget = min(self.early_lot * V, self.b.free_usdc())
+            if budget >= MIN_NOTIONAL and not alive_early:
+                self.b.cancel_all(self.early_ods)
+                self.early_ods = []
+                od = self.b.place_limit_buy(
+                    c * (1 - self.delta), budget, "early", i + 1)
+                if od:
+                    self.early_ods.append(od)
+        else:
+            self.b.cancel_all(self.early_ods)
+            self.early_ods = []
+
         # ---- MICRO ----
         n_micro = (sum(1 for o in self.b.orders
                        if o.alive and o.side == "buy" and o.tag == "micro")
                    + sum(1 for o in self.b.orders
                          if o.alive and o.side == "sell" and o.tag == "micro_take"))
-        if n_micro < self.micro_max and w < self.f0 + self.band:
+        if n_micro < self.micro_max and w < self.f0 + self.trim_band:
             usd = min(self.micro_lot * V, self.b.free_usdc())
             if usd >= MIN_NOTIONAL:
                 self.b.place_limit_buy(

@@ -49,6 +49,9 @@ class GridRBConfig:
     # переставляет лестницу каждый тик (в бэктесте шаг был часовой).
     rearm_eps: float = 0.002      # цена выше якоря минимум на 0.2%
     rearm_cooldown: float = 300.0  # и не чаще раза в 5 минут
+    # ранняя докупка внутри полосы (f0-band <= w < f0): покупка ниже рынка
+    # до того, как вес дойдёт до зоны defc. 0 = выключено.
+    early_lot: float = 0.15
 
     @classmethod
     def from_settings(cls) -> "GridRBConfig":
@@ -63,6 +66,7 @@ class GridRBConfig:
             rearm_eps=float(getattr(settings, "GRIDRB_REARM_EPS", 0.002)),
             rearm_cooldown=float(
                 getattr(settings, "GRIDRB_REARM_COOLDOWN", 300.0)),
+            early_lot=float(getattr(settings, "GRIDRB_EARLY_LOT", 0.15)),
         )
 
 
@@ -107,6 +111,7 @@ class GridRBEngine:
         self.defc_orders: list[TrackedOrder] = []
         self.micro_buys: list[TrackedOrder] = []
         self.micro_sells: list[TrackedOrder] = []
+        self.early_orders: list[TrackedOrder] = []
         self.last_trim_rearm = 0.0
         self.last_defc_rearm = 0.0
 
@@ -137,13 +142,14 @@ class GridRBEngine:
     # ---- учёт ----
     def _all_tracked(self) -> list[TrackedOrder]:
         return (self.trim_orders + self.defc_orders
-                + self.micro_buys + self.micro_sells)
+                + self.micro_buys + self.micro_sells + self.early_orders)
 
     def _reserved_sell(self) -> float:
         return sum(o.qty for o in self.trim_orders + self.micro_sells)
 
     def _reserved_buy(self) -> float:
-        return sum(o.price * o.qty for o in self.defc_orders + self.micro_buys)
+        return sum(o.price * o.qty
+                   for o in self.defc_orders + self.micro_buys + self.early_orders)
 
     def register(self, action: Action, oid: int | None) -> None:
         """Запоминает oid успешно выставленного ордера."""
@@ -155,7 +161,7 @@ class GridRBEngine:
         if action.order is None:
             return
         for lst in (self.trim_orders, self.defc_orders,
-                    self.micro_buys, self.micro_sells):
+                    self.micro_buys, self.micro_sells, self.early_orders):
             if action.order in lst:
                 lst.remove(action.order)
 
@@ -172,7 +178,8 @@ class GridRBEngine:
         for lst, tag in ((self.trim_orders, "trim"),
                          (self.defc_orders, "defc"),
                          (self.micro_buys, "micro"),
-                         (self.micro_sells, "micro_take")):
+                         (self.micro_sells, "micro_take"),
+                         (self.early_orders, "early")):
             for o in list(lst):
                 if o.oid is None or o.oid in open_oids:
                     continue
@@ -284,6 +291,25 @@ class GridRBEngine:
                 actions.append(Action("cancel", oid=o.oid, order=o))
             self.defc_orders = []
             self.defc_anchor = None
+
+        # ---------- EARLY (ранняя докупка внутри полосы) ----------
+        alive_early = bool(self.early_orders)
+        in_window = (self.cfg.f0 - self.cfg.band) <= w < self.cfg.f0
+        if self.cfg.early_lot > 0 and in_window:
+            if not alive_early:
+                budget = min(self.cfg.early_lot * V, free_usdc - spent_usd)
+                px = self._px(price * (1 - self.cfg.delta))
+                qty = self._qty(budget / px) if px > 0 else 0.0
+                if self._ok(qty, px):
+                    o = TrackedOrder(None, "buy", px, qty, "early")
+                    self.early_orders.append(o)
+                    actions.append(Action("place", side="BUY", price=px,
+                                          qty=qty, tag="early", order=o))
+                    spent_usd += qty * px
+        else:
+            for o in self.early_orders:
+                actions.append(Action("cancel", oid=o.oid, order=o))
+            self.early_orders = []
 
         # ---------- MICRO ----------
         n_micro = len(self.micro_buys) + len(self.micro_sells)
@@ -447,10 +473,25 @@ EVENT_HEADER = [
 STATE_HEADER = [
     "Timestamp", "Account", "Price", "USDC", "BTC", "TotalValue", "WeightPct",
     "TrimAnchor", "DefcAnchor", "TrimOrders", "DefcOrders", "MicroOrders",
+    "EarlyOrders",
 ]
 
 
 def _append_row(path: str, header: list[str], row: list) -> None:
+    # Если у существующего файла другой заголовок (старый формат),
+    # сохраняем его под .bak и начинаем новый — данные не теряются.
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline().strip()
+        except Exception:
+            first = ""
+        if first != ",".join(header):
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            try:
+                os.replace(path, f"{path}.{ts}.bak")
+            except Exception:
+                pass
     new_file = not os.path.exists(path)
     with open(path, "a", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
@@ -493,6 +534,7 @@ def log_state(client, path: str, price: float, usdc: float, btc: float,
             engine.defc_anchor if engine.defc_anchor is not None else "",
             len(engine.trim_orders), len(engine.defc_orders),
             len(engine.micro_buys) + len(engine.micro_sells),
+            len(engine.early_orders),
         ])
     except Exception as e:
         logger.error(f"[{client.label}] CSV state failed: {e}")
@@ -514,6 +556,8 @@ def event_label(e: dict) -> str:
             return f"🟢 Ребаланс: исполнена докупка {qty:.6f} @ ${px:.2f}"
         if tag == "trim":
             return f"🔵 Ребаланс: исполнена продажа избытка {qty:.6f} @ ${px:.2f}"
+        if tag == "early":
+            return f"🟢 Ребаланс: исполнена ранняя докупка {qty:.6f} @ ${px:.2f}"
         if tag == "micro":
             return f"🟡 Сетка: исполнен BuyLimit {qty:.6f} @ ${px:.2f}"
         if tag == "micro_take":
@@ -526,6 +570,9 @@ def event_label(e: dict) -> str:
                     f"{qty:.6f} @ ${px:.2f}")
         if tag == "trim":
             return (f"📤 Ребаланс: SellLimit (продажа избытка до 80 %) "
+                    f"{qty:.6f} @ ${px:.2f}")
+        if tag == "early":
+            return (f"📥 Ребаланс: ранняя докупка (внутри полосы) "
                     f"{qty:.6f} @ ${px:.2f}")
         if tag == "micro":
             return f"📥 Сетка: BuyLimit {qty:.6f} @ ${px:.2f}"
