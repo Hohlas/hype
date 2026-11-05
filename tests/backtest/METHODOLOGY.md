@@ -85,7 +85,7 @@ curl -sS -X POST https://api.hyperliquid.xyz/info \
   `f0 × band × delta × n × micro_lot × micro_max × early_lot × rearm_eps`
   + боевая конфигурация и варианты из спеки;
 - покоординатное уточнение лучших (`--rounds`, `--seeds`);
-- критерий отбора (как в `docs/spec.md` §4): максимум `excess` к hold при
+- критерий отбора: максимум `excess` к hold при
   `maxDD ≤ 1.2 · maxDD_hold`; дополнительно считается Calmar;
 - пишет `results/optimize_<coin>_train.csv` (все кандидаты, обучение) и
   `results/optimize_<coin>_best.csv` (финалисты: train / test / full).
