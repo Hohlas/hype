@@ -157,7 +157,7 @@ def parse_args(argv=None):
     parser.add_argument("--watch-seconds", type=float, default=None,
                         help="сколько секунд работать (CI); без флага — бесконечно")
     parser.add_argument("--poll-interval", type=float, default=None,
-                        help="пауза между итерациями, сек")
+                        help="пауза между итерациями, сек (минимум 60)")
     parser.add_argument("--once", action="store_true",
                         help="один проход и выход")
     parser.add_argument("--init-db", action="store_true",
@@ -208,7 +208,9 @@ def main(argv=None) -> int:
     if poll is None:
         poll = float(_env_int("BOT_POLL_INTERVAL",
                               int(getattr(settings, "GRIDRB_POLL_INTERVAL", 60))))
-    poll = max(1.0, poll)
+    # нижняя граница 60 с: бот не должен опрашивать рынок чаще минуты,
+    # иначе бой разойдётся с бэктестом на минутных барах.
+    poll = max(60.0, poll)
 
     watch = args.watch_seconds
     if watch is None and runtime == RUNTIME_GITHUB_ACTIONS:
