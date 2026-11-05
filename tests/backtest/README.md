@@ -1,5 +1,21 @@
 # Бэктест спотовых стратегий на истории BTC H1 (2 года)
 
+## Пары активов (2026-11)
+
+Исследование идеи «сетка на паре A/B вместо BTC/USDC»:
+
+```bash
+./venv/bin/python tests/backtest/fetch_data_multi.py   # 21 монета, H1, 3 года
+./venv/bin/python tests/backtest/pairs_analysis.py     # корреляция, ADF, полураспад
+./venv/bin/python tests/backtest/fetch_funding.py      # фандинг перпов Hyperliquid
+./venv/bin/python tests/backtest/pairs_backtest.py     # спот-сетка на паре
+./venv/bin/python tests/backtest/pairs_neutral.py      # хедж (перпы) + фандинг
+```
+
+Итог: `tests/backtest/REPORT_pairs.md`. Коротко: коррелированные мажоры не
+коинтегрированы (φ≈1), спот-сетка на паре не уменьшает просадку и не лучше
+простой ребалансировки; хедж через перпы даёт мелкую просадку, но ~0 доход.
+
 ## 3 года и скользящие окна (2026-11)
 
 Для отчёта по гипотезам и оптимальным значениям:

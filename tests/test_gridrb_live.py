@@ -78,6 +78,27 @@ def test_micro_one_per_step_and_max():
     assert not any(a.tag == "micro" for a in acts2)
 
 
+def test_micro_bumps_size_to_min_notional():
+    # малый капитал: 2% лота ≈ $10, а округление размера вниз уводит
+    # нотионал ниже минимума. Живой случай 2026-11-05:
+    # цена 80 406.5, USDC 100.673, BTC 0.00504172 (вес ≈ 80.1%).
+    e = make_engine()
+    e.first = False
+    acts = e.plan(price=80_406.5, usdc=100.673, btc=0.00504172,
+                  open_oids=set())
+    micro = [a for a in acts if a.tag == "micro"]
+    assert len(micro) == 1
+    assert micro[0].qty * micro[0].price >= 10.0
+
+
+def test_no_micro_when_budget_below_min_notional():
+    # капитал $400, 2% = $8 < $10 — микро-ордер ставить нельзя
+    e = make_engine()
+    e.first = False
+    acts = e.plan(price=80_000, usdc=80.0, btc=0.004, open_oids=set())
+    assert not any(a.tag == "micro" for a in acts)
+
+
 def test_micro_fill_creates_take_profit():
     e = make_engine()
     e.first = False

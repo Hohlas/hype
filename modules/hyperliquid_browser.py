@@ -1834,4 +1834,4 @@ class HyperliquidBrowser:
             self._log_cache[cache_key] = current_time
             
         # Упрощенный формат логов
-        logger.log(level, f'[{self.label}] {message}')
+        logger.log(level, message)

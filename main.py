@@ -79,8 +79,7 @@ async def run_account(module_data: dict, db: DataBase,
                 await sem.acquire()
                 acquired = True
             client = initialize_account(module_data, db)
-            logger.opt(colors=True).info(
-                f'[•] <white>{client.label}</white> | starting GridRB')
+            logger.opt(colors=True).info('[•] starting GridRB')
             token = getattr(settings, "SPOT_TOKEN", "BTC") or "BTC"
             await run_gridrb(
                 client, token,
@@ -89,7 +88,7 @@ async def run_account(module_data: dict, db: DataBase,
                 watch_seconds=watch_seconds,
             )
         except Exception as err:
-            logger.error(f'[-] {module_data.get("label", "?")} | error: {err}')
+            logger.error(f'[-] error: {err}')
             try:
                 await send_warning_notification(
                     error_type="GridRB Error",
@@ -123,8 +122,7 @@ async def runner(watch_seconds: float | None, poll_interval: float,
 
     labels = list(dict.fromkeys(m["label"] for m in all_modules))
     logger.opt(colors=True).info(
-        f'[•] аккаунтов: <white>{len(labels)}</white> '
-        f'({", ".join(labels)}) | GridRB '
+        f'[•] аккаунтов: <white>{len(labels)}</white> | GridRB '
         f'{getattr(settings, "GRIDRB_F0", 0.80):.2f}/'
         f'{1 - getattr(settings, "GRIDRB_F0", 0.80):.2f}')
 

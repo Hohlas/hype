@@ -24,7 +24,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 from loguru import logger
 
@@ -127,6 +127,10 @@ class GridRBEngine:
     def _qty(self, qty: float) -> float:
         step = Decimal(1).scaleb(-self.sz_decimals)
         return float(Decimal(str(qty)).quantize(step, rounding=ROUND_DOWN))
+
+    def _qty_up(self, qty: float) -> float:
+        step = Decimal(1).scaleb(-self.sz_decimals)
+        return float(Decimal(str(qty)).quantize(step, rounding=ROUND_UP))
 
     def _px(self, price: float) -> float:
         """5 значащих цифр — требование Hyperliquid к цене ордера."""
@@ -314,11 +318,17 @@ class GridRBEngine:
         # ---------- MICRO ----------
         n_micro = len(self.micro_buys) + len(self.micro_sells)
         if n_micro < self.cfg.micro_max and w < self.cfg.f0 + self.cfg.band:
-            usd = min(self.cfg.micro_lot * V, free_usdc - spent_usd)
-            if usd >= self.cfg.min_notional:
-                px = self._px(price * (1 - self.cfg.delta))
-                qty = self._qty(usd / px) if px > 0 else 0.0
-                if self._ok(qty, px):
+            available = free_usdc - spent_usd
+            usd = min(self.cfg.micro_lot * V, available)
+            px = self._px(price * (1 - self.cfg.delta))
+            if px > 0 and usd >= self.cfg.min_notional:
+                qty = self._qty(usd / px)
+                if qty * px < self.cfg.min_notional:
+                    # шаг размера крупный (BTC): округление вниз уводит
+                    # нотионал ниже минимума. Поднимаем размер до минимума —
+                    # перебор не больше одного шага размера.
+                    qty = self._qty_up(self.cfg.min_notional / px)
+                if self._ok(qty, px) and qty * px <= available:
                     o = TrackedOrder(None, "buy", px, qty, "micro")
                     self.micro_buys.append(o)
                     actions.append(Action("place", side="BUY", price=px,
@@ -385,7 +395,7 @@ async def _cancel_all(client, token: str) -> int:
             await client.browser.cancel_order(token, int(oid))
             n += 1
         except Exception as e:
-            logger.warning(f"[{client.label}] cancel {oid} failed: {e}")
+            logger.warning(f"cancel {oid} failed: {e}")
     return n
 
 
@@ -445,7 +455,7 @@ async def _execute(client, token: str, engine: GridRBEngine,
                     # oid не пришёл: не отслеживаем, следующий тик снимет как сироту
                     engine.drop(a)
                     logger.warning(
-                        f"[{client.label}] no oid for {a.side} {a.qty} @ {a.price}")
+                        f"no oid for {a.side} {a.qty} @ {a.price}")
                 events.append({"event": "place", "tag": a.tag, "side": a.side,
                                "price": a.price, "qty": a.qty,
                                "notional": a.price * a.qty, "oid": oid,
@@ -454,7 +464,7 @@ async def _execute(client, token: str, engine: GridRBEngine,
             if a.kind == "market_buy":
                 engine.first = True  # бутстрап не удался — повторим на следующем тике
             engine.drop(a)
-            logger.error(f"[{client.label}] action {a.kind} {a.tag} failed: {e}")
+            logger.error(f"action {a.kind} {a.tag} failed: {e}")
             events.append({"event": "error", "tag": a.tag, "side": a.side,
                            "price": a.price, "qty": a.qty,
                            "notional": 0.0, "oid": a.oid, "note": str(e)})
@@ -518,7 +528,7 @@ def log_events(client, path: str, events: list[dict], price: float,
                 e.get("oid") or "", e.get("note", ""),
             ])
     except Exception as e:
-        logger.error(f"[{client.label}] CSV events failed: {e}")
+        logger.error(f"CSV events failed: {e}")
 
 
 def log_state(client, path: str, price: float, usdc: float, btc: float,
@@ -537,7 +547,7 @@ def log_state(client, path: str, price: float, usdc: float, btc: float,
             len(engine.early_orders),
         ])
     except Exception as e:
-        logger.error(f"[{client.label}] CSV state failed: {e}")
+        logger.error(f"CSV state failed: {e}")
 
 
 def event_label(e: dict) -> str:
@@ -594,12 +604,11 @@ async def notify_events(client, events: list[dict], price: float,
         lines = lines[:15] + [f"… и ещё {len(lines) - 15}"]
     V = usdc + btc * price
     w = (btc * price / V * 100) if V > 0 else 0.0
-    header = (f"<b>{client.label}</b> | GridRB 80/20\n"
-              f"price=${price:,.2f} | weight={w:.1f}% | equity=${V:,.2f}")
+    header = (f"price=${price:,.2f} | weight={w:.1f}% | equity=${V:,.2f}")
     try:
         await TgReport().send_log(header + "\n" + "\n".join(lines))
     except Exception as e:
-        logger.debug(f"[{client.label}] TG notify skipped: {e}")
+        logger.debug(f"TG notify skipped: {e}")
 
 
 async def run_gridrb(client, token: str, max_iterations: int = 0,
@@ -615,14 +624,14 @@ async def run_gridrb(client, token: str, max_iterations: int = 0,
 
     removed = await _cancel_all(client, token)
     if removed:
-        logger.info(f"[{client.label}] старт: снято {removed} старых ордеров, "
+        logger.info(f"старт: снято {removed} старых ордеров, "
                     f"лестницы строятся заново")
         try:
             await TgReport().send_log(
-                f"♻️ <b>{client.label}</b> | старт GridRB: снято "
+                f"♻️ старт GridRB: снято "
                 f"{removed} старых ордеров, лестницы строятся заново")
         except Exception as e:
-            logger.debug(f"[{client.label}] startup TG skipped: {e}")
+            logger.debug(f"startup TG skipped: {e}")
         await asyncio.sleep(1.0)
 
     engine = GridRBEngine(cfg, sz_decimals=sz_decimals)
@@ -633,7 +642,7 @@ async def run_gridrb(client, token: str, max_iterations: int = 0,
     state_every = max(1, int(getattr(settings, "GRIDRB_STATE_CSV_EVERY", 10)))
 
     logger.info(
-        f"[{client.label}] GridRB {cfg.f0:.2f}/{1-cfg.f0:.2f} | "
+        f"GridRB {cfg.f0:.2f}/{1-cfg.f0:.2f} | "
         f"band={cfg.band:.2f} delta={cfg.delta*1000:.1f}‰ n={cfg.n} "
         f"micro={cfg.micro_lot*100:.0f}%×{cfg.micro_max} | dry_run={dry_run} | "
         f"csv: {events_csv}, {state_csv}")
@@ -646,21 +655,21 @@ async def run_gridrb(client, token: str, max_iterations: int = 0,
             if not sent_start:
                 V = usdc + btc * price
                 logger.info(
-                    f"[{client.label}] price=${price:,.2f} USDC={usdc:,.2f} "
+                    f"price=${price:,.2f} USDC={usdc:,.2f} "
                     f"BTC={btc:.6f} equity=${V:,.2f} weight={btc*price/V*100 if V else 0:.1f}%")
                 sent_start = True
 
             actions = engine.plan(price, usdc, btc, open_oids)
             events = await _execute(client, token, engine, actions, price, dry_run)
             if events:
-                logger.info(f"[{client.label}] iter {i}: "
+                logger.info(f"iter {i}: "
                             + "; ".join(event_label(e) for e in events))
                 log_events(client, events_csv, events, price, usdc, btc)
                 await notify_events(client, events, price, usdc, btc)
             if i == 1 or i % state_every == 0:
                 log_state(client, state_csv, price, usdc, btc, engine)
         except Exception as e:
-            logger.error(f"[{client.label}] iteration {i} failed: {e}")
+            logger.error(f"iteration {i} failed: {e}")
 
         if max_iterations and i >= max_iterations:
             break
@@ -668,5 +677,5 @@ async def run_gridrb(client, token: str, max_iterations: int = 0,
             break
         await asyncio.sleep(poll)
 
-    logger.info(f"[{client.label}] GridRB остановлен после {i} итераций")
+    logger.info(f"GridRB остановлен после {i} итераций")
     return "Ended"
