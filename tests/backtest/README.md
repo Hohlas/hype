@@ -1,5 +1,14 @@
 # Бэктест спотовых стратегий на истории BTC H1 (2 года)
 
+> **Как повторить на другой монете — `tests/backtest/METHODOLOGY.md`.**
+> Кратко: данные `fetch_data_multi.py` (Binance H1, 3 года) → `sz_decimals`
+> из Hyperliquid `spotMeta` → базовая конфигурация `minute_replay.py` →
+> перебор `optimize_live.py --coin <COIN>` (train/test + две модели
+> исполнения) → режимы `sol_rolling.py --coin <COIN>` → отчёт
+> `REPORT_<coin>_3y.md`. Важно: гоняется **боевой** движок
+> (`modules/gridrb_strategy.GridRBEngine` через `minute_replay.py`), а не порт
+> из `strategies.py`.
+
 ## Пары активов (2026-11)
 
 Исследование идеи «сетка на паре A/B вместо BTC/USDC»:
@@ -17,6 +26,12 @@
 простой ребалансировки; хедж через перпы даёт мелкую просадку, но ~0 доход.
 
 ## 3 года и скользящие окна (2026-11)
+
+> **Актуально (2026-11-05):** исследования на новой монете и пересчёт BTC/SOL
+> ведутся боевым движком — см. `METHODOLOGY.md`, `minute_replay.py`,
+> `optimize_live.py`, `sol_rolling.py` и `REPORT_sol_3y.md`. Скрипты ниже
+> (`experiments_3y.py`, `rolling_3y.py`) используют старый порт из
+> `strategies.py` и оставлены для истории отчёта `REPORT_gridrb_3y.md`.
 
 Для отчёта по гипотезам и оптимальным значениям:
 
@@ -76,6 +91,9 @@
 ./venv/bin/python tests/backtest/gridrb_full_eval.py # test/full для всех вариантов
 ./venv/bin/python tests/backtest/combo.py            # статическая смесь GridRB+TrendGrid
 ./venv/bin/python tests/backtest/combo_dynamic_eval.py # динамическое распределение
+./venv/bin/python tests/backtest/minute_replay.py tests/backtest/data/sol_h1_3y.csv --sz-decimals 3  # боевой движок по барам
+./venv/bin/python tests/backtest/optimize_live.py --coin SOL --n 600 --workers 3   # перебор параметров (боевой движок)
+./venv/bin/python tests/backtest/sol_rolling.py --coin SOL --workers 3             # режимы: 66 окон по 180 дней
 ./venv/bin/python -m pytest tests/ -q               # тесты
 ```
 

@@ -57,12 +57,18 @@ class Broker:
     """Счёт + исполнение ордеров по модели docs/GridRB_spec.md §2."""
 
     def __init__(self, cash: float, maker: float = MAKER, taker: float = TAKER,
-                 slip: float = SLIP, stress: float = 1.0):
+                 slip: float = SLIP, stress: float = 1.0,
+                 penetration: float = 0.0):
         self.U = float(cash)
         self.B = 0.0
         self.maker = maker * stress
         self.taker = taker * stress
         self.slip = slip * stress
+        # Консервативность модели исполнения: лимит считается исполненным,
+        # только если цена ушла ЗА его уровень минимум на penetration (доля).
+        # 0 — как раньше (касание = исполнение); 0.0005 — цена прошла на 0.05 %
+        # глубже уровня. Грубая поправка на очередь мейкера.
+        self.penetration = penetration
         self.orders: list[Order] = []
         self.fills: list[Fill] = []
         self.fees_paid = 0.0
@@ -154,7 +160,7 @@ class Broker:
                 if i < od.active_from:
                     continue
                 if side == "buy":
-                    if l > od.price:
+                    if l > od.price * (1 - self.penetration):
                         continue
                     px = min(o, od.price)
                     cost = od.qty * px
@@ -169,7 +175,7 @@ class Broker:
                     self.fills.append(Fill(i, "buy", px, od.qty, od.tag, fee))
                     on_fill(i, od, px, od.qty)
                 else:
-                    if h < od.price:
+                    if h < od.price * (1 + self.penetration):
                         continue
                     px = max(o, od.price)
                     qty = min(od.qty, self.B)
